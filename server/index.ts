@@ -22,8 +22,16 @@ import {
 } from "./db";
 import { getConversationAdapter } from "./conversation/adapters";
 import { ExecuteRunner } from "./conversation/executeRunner";
+import {
+  buildRepoDiffEntries,
+  deleteJobWorktree,
+  getJobMainOutputDir,
+  mergeApprovedJob,
+  parseJobGitState,
+} from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
 import { buildPrompt } from "./conversation/prompts";
+import { resolveSalmonCliCommand } from "./conversation/salmonCli";
 import {
   closeThread,
   createThread,
@@ -96,8 +104,10 @@ function publishJobStatus(workspaceName: string, event: JobStatusStreamEvent): v
 export async function startServer(options: StartServerOptions): Promise<void> {
   await setupSalmon();
   const apiUrl = process.env.SALMON_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
+  const salmonCliCommand = resolveSalmonCliCommand(__dirname);
   const executeRunner = new ExecuteRunner({
     apiUrl,
+    salmonCliCommand,
     onJobStatusChanged: (input) => {
       publishJobStatus(input.workspaceName, {
         job_id: input.jobId,
@@ -439,32 +449,35 @@ FROM jobs j
     const db = await openDatabase(workspaceName);
 
     try {
-      await assertJobExists(db, jobId);
-      const workspacePaths = getWorkspacePaths(workspaceName);
-      const roots = await resolveJobCodeRoots(workspacePaths, jobId);
-      const repoDirs = await discoverGitRepos(roots);
-
-      const repoDiffs = await Promise.all(
-        repoDirs.map(async (repoDir) => {
-          const repoLabel = relative(roots[0], repoDir) || ".";
-          try {
-            const diff = await runCommandCapture("git", ["-C", repoDir, "diff", "--", "."]);
-            return {
-              repo_path: repoLabel,
-              diff,
-              has_changes: diff.trim().length > 0,
-              error: "",
-            };
-          } catch (error: unknown) {
-            return {
-              repo_path: repoLabel,
-              diff: "",
-              has_changes: false,
-              error: errorMessage(error),
-            };
-          }
-        }),
+      const jobResult = await db.query<{ id: string; git_state_json: string | null }>(
+        `
+SELECT id, git_state_json
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
       );
+      const job = jobResult.rows[0];
+      if (!job) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+
+      const gitState = parseJobGitState(job.git_state_json);
+      if (!gitState) {
+        throw new SalmonError(
+          "JOB_GIT_STATE_MISSING",
+          409,
+          `Job has no git execution state: ${jobId}`,
+        );
+      }
+
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const repoDiffs = await buildRepoDiffEntries({
+        workspacePaths,
+        jobId,
+        gitState,
+      });
 
       const combinedDiff = repoDiffs
         .filter((entry) => entry.diff.trim().length > 0)
@@ -477,7 +490,7 @@ FROM jobs j
         .join("\n\n");
 
       return c.json({
-        roots,
+        roots: [join(workspacePaths.worktreesDir, jobId, "workspace")],
         repos: repoDiffs,
         diff: combinedDiff,
       });
@@ -492,9 +505,8 @@ FROM jobs j
     const db = await openDatabase(workspaceName);
 
     try {
-      await assertJobExists(db, jobId);
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await resolveJobOutputsRoot(workspacePaths, jobId);
+      const outputsRoot = await getJobOutputsRoot(db, workspacePaths, jobId);
       const files = await listOutputFiles(outputsRoot);
 
       return c.json({
@@ -513,9 +525,8 @@ FROM jobs j
     const db = await openDatabase(workspaceName);
 
     try {
-      await assertJobExists(db, jobId);
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await resolveJobOutputsRoot(workspacePaths, jobId);
+      const outputsRoot = await getJobOutputsRoot(db, workspacePaths, jobId);
       const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
       const fileInfo = await stat(absolutePath).catch(() => null);
       if (!fileInfo?.isFile()) {
@@ -541,9 +552,8 @@ FROM jobs j
     const db = await openDatabase(workspaceName);
 
     try {
-      await assertJobExists(db, jobId);
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await resolveJobOutputsRoot(workspacePaths, jobId);
+      const outputsRoot = await getJobOutputsRoot(db, workspacePaths, jobId);
       const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
       const fileInfo = await stat(absolutePath).catch(() => null);
       if (!fileInfo?.isFile()) {
@@ -579,9 +589,8 @@ FROM jobs j
 
     const db = await openDatabase(workspaceName);
     try {
-      await assertJobExists(db, jobId);
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await resolveJobOutputsRoot(workspacePaths, jobId);
+      const outputsRoot = await getJobOutputsRoot(db, workspacePaths, jobId);
 
       let targetPath = outputsRoot;
       if (body.path) {
@@ -619,24 +628,150 @@ FROM jobs j
       );
     }
 
-    const nextStatus: JobStatus = "completed";
     const db = await openDatabase(workspaceName);
     try {
-      const result = await db.query(
-        `
-UPDATE jobs
-SET status = $2
-WHERE id = $1
-`,
-        [jobId, nextStatus],
-      );
+      await ensureConversationSchema(db);
 
-      if ((result.affectedRows ?? 0) === 0) {
+      const jobResult = await db.query<{
+        id: string;
+        status: JobStatus;
+        assigned_to: string | null;
+        merge_retry_count: number | null;
+        git_state_json: string | null;
+      }>(
+        `
+SELECT id, status, assigned_to, merge_retry_count, git_state_json
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
+      );
+      const job = jobResult.rows[0];
+      if (!job) {
         throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
       }
+      if (job.status !== "pending_review") {
+        throw new SalmonError(
+          "JOB_NOT_PENDING_REVIEW",
+          409,
+          `Job is not pending review: ${jobId}`,
+        );
+      }
 
-      emitJobStatus(workspaceName, jobId, nextStatus, "review_action");
-      return c.json({ ok: true, status: nextStatus });
+      const gitState = parseJobGitState(job.git_state_json);
+      if (!gitState) {
+        throw new SalmonError(
+          "JOB_GIT_STATE_MISSING",
+          409,
+          `Job has no git execution state: ${jobId}`,
+        );
+      }
+
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const mergeResult = await mergeApprovedJob({
+        workspacePaths,
+        jobId,
+        gitState,
+      });
+
+      if (mergeResult.conflicts.length === 0) {
+        const nextStatus: JobStatus = "completed";
+        const mergedOutputDir = getJobMainOutputDir(workspacePaths, jobId);
+        await db.query(
+          `
+UPDATE jobs
+SET status = $2,
+    output_dir = $3
+WHERE id = $1
+`,
+          [jobId, nextStatus, mergedOutputDir],
+        );
+        emitJobStatus(workspaceName, jobId, nextStatus, "review_action");
+        let cleanupError = "";
+        try {
+          await deleteJobWorktree({ workspacePaths, jobId });
+        } catch (error: unknown) {
+          cleanupError = errorMessage(error);
+        }
+        return c.json({
+          ok: true,
+          status: nextStatus,
+          merge_state: "merged",
+          conflicts: [],
+          worktree_cleanup_error: cleanupError || undefined,
+        });
+      }
+
+      const retryCount = Number.isInteger(job.merge_retry_count) ? (job.merge_retry_count as number) : 0;
+      if (retryCount < 1) {
+        await db.query(
+          `
+UPDATE jobs
+SET status = 'queued',
+    merge_retry_count = COALESCE(merge_retry_count, 0) + 1
+WHERE id = $1
+`,
+          [jobId],
+        );
+        emitJobStatus(workspaceName, jobId, "queued", "review_conflict_retry");
+
+        const thread = await getThreadByJobId(db, jobId);
+        const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
+        if (thread && latestExecuteTurn && latestExecuteTurn.user_message.trim()) {
+          const retryPrompt = buildConflictRetryPrompt({
+            originalTask: latestExecuteTurn.user_message,
+            conflicts: mergeResult.conflicts,
+          });
+          executeRunner.enqueue({
+            workspaceName,
+            jobId,
+            threadId: thread.id,
+            prompt: retryPrompt,
+            requestedRecipientAgentId: job.assigned_to ?? undefined,
+            reasoningEffort: latestExecuteTurn.reasoning_effort ?? "medium",
+          });
+
+          return c.json({
+            ok: true,
+            status: "queued",
+            merge_state: "conflict_retry_enqueued",
+            conflicts: mergeResult.conflicts,
+          });
+        }
+
+        await db.query(
+          `
+UPDATE jobs
+SET status = 'needs_fix'
+WHERE id = $1
+`,
+          [jobId],
+        );
+        emitJobStatus(workspaceName, jobId, "needs_fix", "review_conflict_missing_retry_context");
+        return c.json({
+          ok: true,
+          status: "needs_fix",
+          merge_state: "manual_intervention_required",
+          conflicts: mergeResult.conflicts,
+        });
+      }
+
+      await db.query(
+        `
+UPDATE jobs
+SET status = 'needs_fix'
+WHERE id = $1
+`,
+        [jobId],
+      );
+      emitJobStatus(workspaceName, jobId, "needs_fix", "review_conflict_manual");
+      return c.json({
+        ok: true,
+        status: "needs_fix",
+        merge_state: "manual_intervention_required",
+        conflicts: mergeResult.conflicts,
+      });
     } finally {
       await db.close();
     }
@@ -1481,15 +1616,15 @@ WHERE id = $1
         });
 
         let assistantText = "";
-        let planToolExecutionDetected = false;
 
         const result = await adapter.sendTurn({
-          prompt: buildPrompt(body.mode, message, reasoningEffort),
+          prompt: buildPrompt(body.mode, message, reasoningEffort, salmonCliCommand),
           modelId,
           sessionId: thread.harness_session_id,
           cwd: paths.codeDir,
           env: buildConversationAgentEnv({
             apiUrl,
+            salmonCliCommand,
             workspaceName,
             threadId,
             turnId,
@@ -1515,10 +1650,6 @@ WHERE id = $1
               return;
             }
 
-            if (body.mode === "plan" && !isAllowedPlanModeToolEvent(event)) {
-              planToolExecutionDetected = true;
-            }
-
             await insertEvent(db, {
               id: `evt_${randomUUID().slice(0, 12)}`,
               threadId,
@@ -1537,19 +1668,16 @@ WHERE id = $1
           },
         });
 
-        if (body.mode === "plan" && planToolExecutionDetected) {
-          throw new SalmonError(
-            "PLAN_MODE_TOOL_USE",
-            409,
-            "Plan mode is planning-only. Tool execution is not allowed.",
-          );
-        }
-
         const finalAssistantText = (result.finalText || assistantText || "").trim();
         const assistantMessageId = `msg_${randomUUID().slice(0, 12)}`;
         const declaredPlanSummary =
           body.mode === "plan" ? await getStoredPlanSummaryForTurn(db, turnId) : null;
-        if (body.mode === "plan" && !declaredPlanSummary) {
+        const planSummarySubmissionCount =
+          body.mode === "plan" ? await countPlanSummarySubmissionsForTurn(db, turnId) : 0;
+        if (
+          body.mode === "plan" &&
+          (!declaredPlanSummary || planSummarySubmissionCount !== 1)
+        ) {
           throw new SalmonError(
             "PLAN_SUMMARY_REQUIRED",
             409,
@@ -1715,7 +1843,7 @@ WHERE id = $1
 INSERT INTO jobs (id, title, status, assigned_to, output_dir, session_id)
 VALUES ($1, $2, 'queued', NULL, NULL, NULL)
 `,
-        [jobId, `Execute: ${planTitle}`],
+        [jobId, planTitle],
       );
       emitJobStatus(workspaceName, jobId, "queued", "execute_from_plan_created");
 
@@ -2567,6 +2695,22 @@ LIMIT 1
   return normalizePlanSummary(parsed);
 }
 
+async function countPlanSummarySubmissionsForTurn(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  turnId: string,
+): Promise<number> {
+  const result = await db.query<{ count: number }>(
+    `
+SELECT COUNT(*)::int AS count
+FROM conversation_events
+WHERE turn_id = $1
+  AND event_name = 'plan_summary_submitted'
+`,
+    [turnId],
+  );
+  return result.rows[0]?.count ?? 0;
+}
+
 function isPlanSummaryRecord(value: unknown): value is PlanSummarySubmissionBody {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -2583,6 +2727,7 @@ function isPlanSummaryRecord(value: unknown): value is PlanSummarySubmissionBody
 
 function buildConversationAgentEnv(input: {
   apiUrl: string;
+  salmonCliCommand: string;
   workspaceName: string;
   threadId: string;
   turnId: string;
@@ -2591,6 +2736,7 @@ function buildConversationAgentEnv(input: {
 }): Record<string, string> {
   const env: Record<string, string> = {
     SALMON_API_URL: input.apiUrl,
+    SALMON_CLI_COMMAND: input.salmonCliCommand,
     SALMON_WORKSPACE_NAME: input.workspaceName,
     SALMON_THREAD_ID: input.threadId,
     SALMON_TURN_ID: input.turnId,
@@ -2604,49 +2750,42 @@ function buildConversationAgentEnv(input: {
   return env;
 }
 
-function isAllowedPlanModeToolEvent(event: {
-  name: string;
-  payload: Record<string, unknown> | string | null;
-}): boolean {
-  const command = extractPlanToolCommand(event.payload);
-  if (!command) {
-    return false;
-  }
+function buildConflictRetryPrompt(input: {
+  originalTask: string;
+  conflicts: Array<{ repo_path: string; files: string[] }>;
+}): string {
+  const conflictLines = input.conflicts
+    .map((conflict, index) => {
+      const files =
+        conflict.files.length > 0
+          ? conflict.files.map((file) => `  - ${file}`).join("\n")
+          : "  - (git reported conflict without explicit file list)";
+      return `${index + 1}. repo: ${conflict.repo_path}\n${files}`;
+    })
+    .join("\n");
 
-  const normalized = command.trim();
-  return /^salmon\s+job\s+plan-summary(\s|$)/.test(normalized);
+  return [
+    "The previous approval merge reported conflicts.",
+    "Resolve all merge conflicts in the current job worktrees, then finish with a clean summary for review.",
+    "Conflict details:",
+    conflictLines || "(none reported)",
+    "Requirements:",
+    "- Keep prior successful work intact.",
+    "- Resolve conflict markers and ensure files are consistent.",
+    "- Leave the workspace ready for a new approval review.",
+    "Original task:",
+    input.originalTask.trim(),
+  ].join("\n\n");
 }
 
-function extractPlanToolCommand(payload: Record<string, unknown> | string | null): string {
-  if (typeof payload === "string") {
-    return payload;
-  }
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  if (typeof payload.command === "string") {
-    return payload.command;
-  }
-
-  const input = payload.input;
-  if (input && typeof input === "object" && !Array.isArray(input)) {
-    const record = input as Record<string, unknown>;
-    if (typeof record.command === "string") {
-      return record.command;
-    }
-  }
-
-  return "";
-}
-
-async function assertJobExists(
+async function getJobOutputsRoot(
   db: Awaited<ReturnType<typeof openDatabase>>,
+  workspacePaths: ReturnType<typeof getWorkspacePaths>,
   jobId: string,
-): Promise<void> {
-  const result = await db.query<{ id: string }>(
+): Promise<string> {
+  const result = await db.query<{ id: string; output_dir: string | null }>(
     `
-SELECT id
+SELECT id, output_dir
 FROM jobs
 WHERE id = $1
 LIMIT 1
@@ -2654,113 +2793,40 @@ LIMIT 1
     [jobId],
   );
 
-  if (!result.rows[0]) {
+  const row = result.rows[0];
+  if (!row) {
     throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
   }
-}
 
-async function resolveJobCodeRoots(
-  workspacePaths: ReturnType<typeof getWorkspacePaths>,
-  jobId: string,
-): Promise<string[]> {
-  const preferred = join(workspacePaths.worktreesDir, jobId, "code");
-  return [preferred];
+  return resolveJobOutputsRoot(workspacePaths, jobId, row.output_dir);
 }
 
 async function resolveJobOutputsRoot(
   workspacePaths: ReturnType<typeof getWorkspacePaths>,
   jobId: string,
+  storedOutputDir?: string | null,
 ): Promise<string> {
-  const preferred = join(workspacePaths.worktreesDir, jobId, "outputs");
-  return preferred;
-}
-
-async function discoverGitRepos(roots: string[]): Promise<string[]> {
-  const repos = new Set<string>();
-
-  for (const root of roots) {
-    if (!(await isDirectory(root))) {
-      continue;
-    }
-    const state = { visited: 0 };
-    await walkForGitRepos(root, repos, state, 0);
-  }
-
-  return [...repos].sort((a, b) => a.localeCompare(b));
-}
-
-async function walkForGitRepos(
-  currentDir: string,
-  repos: Set<string>,
-  state: { visited: number },
-  depth: number,
-): Promise<void> {
-  if (depth > 8 || state.visited > 3000) {
-    return;
-  }
-  state.visited += 1;
-
-  const entries = await readdir(currentDir, { withFileTypes: true }).catch(() => []);
-  if (entries.length === 0) {
-    return;
-  }
-
-  const hasGitMarker = entries.some(
-    (entry) => entry.name === ".git" && (entry.isDirectory() || entry.isFile()),
+  const mainRoot = resolve(join(workspacePaths.outputsDir, jobId));
+  const worktreeRoot = resolve(
+    join(workspacePaths.worktreesDir, jobId, "workspace", "outputs", jobId),
   );
-  if (hasGitMarker) {
-    repos.add(currentDir);
-    return;
+
+  const preferred =
+    typeof storedOutputDir === "string" && storedOutputDir.trim().length > 0
+      ? storedOutputDir.trim()
+      : "";
+  if (preferred) {
+    const absolute = resolve(preferred);
+    if (isWithinRoot(mainRoot, absolute) || isWithinRoot(worktreeRoot, absolute)) {
+      return absolute;
+    }
   }
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-    if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "build") {
-      continue;
-    }
-    if (entry.name.startsWith(".")) {
-      continue;
-    }
-    await walkForGitRepos(join(currentDir, entry.name), repos, state, depth + 1);
+  if (await isDirectory(worktreeRoot)) {
+    return worktreeRoot;
   }
-}
 
-async function runCommandCapture(
-  command: string,
-  args: string[],
-): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.once("error", (error) => {
-      reject(error);
-    });
-
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolvePromise(stdout);
-        return;
-      }
-      reject(new Error(stderr.trim() || `${command} exited with code ${code ?? "unknown"}`));
-    });
-  });
+  return mainRoot;
 }
 
 async function listOutputFiles(
@@ -2853,6 +2919,15 @@ function resolveOutputPath(
   }
 
   return { absolutePath, normalizedPath };
+}
+
+function isWithinRoot(root: string, candidate: string): boolean {
+  const normalizedRoot = resolve(root);
+  const normalizedCandidate = resolve(candidate);
+  return (
+    normalizedCandidate === normalizedRoot ||
+    normalizedCandidate.startsWith(`${normalizedRoot}${sep}`)
+  );
 }
 
 function inferMimeType(path: string): string {

@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/p
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { initializeWorkspaceGit } from "./conversation/gitWorkflow";
 import { ensureConversationSchema } from "./conversation/store";
 
 export const SALMON_DIR = join(homedir(), ".salmon");
@@ -143,6 +144,7 @@ export function getWorkspacePaths(name: string): {
   workspaceDir: string;
   contextDir: string;
   codeDir: string;
+  outputsDir: string;
   worktreesDir: string;
   goalFile: string;
 } {
@@ -157,6 +159,7 @@ export function getWorkspacePaths(name: string): {
     workspaceDir,
     contextDir,
     codeDir: join(workspaceDir, "code"),
+    outputsDir: join(workspaceDir, "outputs"),
     worktreesDir: join(rootDir, "worktrees"),
     goalFile: join(contextDir, "goal.md"),
   };
@@ -255,12 +258,14 @@ export async function createWorkspace(input: {
   await mkdir(paths.dbDir, { recursive: true });
   await mkdir(paths.contextDir, { recursive: true });
   await mkdir(paths.codeDir, { recursive: true });
+  await mkdir(paths.outputsDir, { recursive: true });
   await mkdir(paths.worktreesDir, { recursive: true });
 
   await initializeDatabase(name);
 
   const goalContent = `# Workspace Goal\n\n## Goal\n${goal}\n`;
   await writeFile(paths.goalFile, goalContent, "utf8");
+  await initializeWorkspaceGit(paths);
 
   await setActiveWorkspaceName(name);
 }
@@ -452,6 +457,9 @@ CREATE TABLE IF NOT EXISTS jobs (
   assigned_to VARCHAR(64),
   output_dir TEXT,
   session_id VARCHAR(255),
+  git_branch_name VARCHAR(255),
+  git_state_json TEXT,
+  merge_retry_count INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (assigned_to) REFERENCES agents(id)
 );
@@ -484,6 +492,21 @@ ALTER COLUMN status SET DEFAULT 'queued'
   await db.exec(`
 ALTER TABLE jobs
 ALTER COLUMN status SET NOT NULL
+`);
+
+  await db.exec(`
+ALTER TABLE jobs
+ADD COLUMN IF NOT EXISTS git_branch_name VARCHAR(255)
+`);
+
+  await db.exec(`
+ALTER TABLE jobs
+ADD COLUMN IF NOT EXISTS git_state_json TEXT
+`);
+
+  await db.exec(`
+ALTER TABLE jobs
+ADD COLUMN IF NOT EXISTS merge_retry_count INTEGER NOT NULL DEFAULT 0
 `);
 }
 

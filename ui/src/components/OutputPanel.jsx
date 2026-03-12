@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { FileCode2, FileImage, FileSpreadsheet, FileText, FileType2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import {
   fetchJobOutputChanges,
   fetchJobOutputFiles,
   jobOutputContentUrl,
   jobOutputDownloadUrl,
-  openJobOutputFolder,
 } from '../api'
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
@@ -23,6 +23,20 @@ function previewKind(path) {
   if (extension === '.csv') return 'csv'
   if (IMAGE_EXTENSIONS.has(extension)) return 'image'
   return 'download'
+}
+
+function fileName(path) {
+  const segments = String(path || '').split('/').filter(Boolean)
+  return segments[segments.length - 1] || path
+}
+
+function outputIcon(path) {
+  const extension = ext(path)
+  if (extension === '.md' || extension === '.txt') return FileText
+  if (extension === '.html' || extension === '.htm' || extension === '.js' || extension === '.ts') return FileCode2
+  if (extension === '.csv') return FileSpreadsheet
+  if (IMAGE_EXTENSIONS.has(extension)) return FileImage
+  return FileType2
 }
 
 function formatBytes(value) {
@@ -100,7 +114,7 @@ function DiffViewer({ diff }) {
   )
 }
 
-export function OutputPanel({ jobId, jobStatus = '', onReviewAction }) {
+export function OutputPanel({ jobId, jobStatus = '' }) {
   const [tab, setTab] = useState('changes')
 
   const [changes, setChanges] = useState('')
@@ -115,10 +129,6 @@ export function OutputPanel({ jobId, jobStatus = '', onReviewAction }) {
   const [previewText, setPreviewText] = useState('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
-
-  const [reviewError, setReviewError] = useState('')
-  const [reviewLoadingAction, setReviewLoadingAction] = useState('')
-  const [openFolderLoading, setOpenFolderLoading] = useState(false)
 
   useEffect(() => {
     if (!jobId) return
@@ -224,37 +234,6 @@ export function OutputPanel({ jobId, jobStatus = '', onReviewAction }) {
     }
   }
 
-  async function handleReview(action) {
-    if (!jobId || !onReviewAction) {
-      return
-    }
-
-    setReviewError('')
-    setReviewLoadingAction(action)
-    try {
-      await onReviewAction(jobId, action)
-    } catch (error) {
-      setReviewError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setReviewLoadingAction('')
-    }
-  }
-
-  async function handleOpenFolder(path = '') {
-    if (!jobId) {
-      return
-    }
-
-    setOpenFolderLoading(true)
-    try {
-      await openJobOutputFolder(jobId, path)
-    } catch (error) {
-      setReviewError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setOpenFolderLoading(false)
-    }
-  }
-
   const outputDownloadUrl = selectedPath ? jobOutputDownloadUrl(jobId, selectedPath) : ''
   const outputContentUrl = selectedPath ? jobOutputContentUrl(jobId, selectedPath) : ''
 
@@ -279,20 +258,8 @@ export function OutputPanel({ jobId, jobStatus = '', onReviewAction }) {
         <div className="output-tab-body">
           <div className="output-toolbar">
             <div className="output-status">Status: {jobStatus || 'queued'}</div>
-            <div className="output-actions">
-              <button
-                className="output-review-btn approve"
-                onClick={() => {
-                  void handleReview('approve')
-                }}
-                disabled={Boolean(reviewLoadingAction) || changesLoading}
-              >
-                {reviewLoadingAction === 'approve' ? 'Approving...' : 'Approve'}
-              </button>
-            </div>
           </div>
 
-          {reviewError && <div className="error">Error: {reviewError}</div>}
           {changesLoading && <div className="muted">Loading diff...</div>}
           {changesError && <div className="error">Error: {changesError}</div>}
           {!changesLoading && !changesError && <DiffViewer diff={changes} />}
@@ -300,45 +267,36 @@ export function OutputPanel({ jobId, jobStatus = '', onReviewAction }) {
       )}
 
       {tab === 'outputs' && (
-        <div className="output-tab-body output-files-layout">
-          <div className="output-files-column">
-            <div className="output-toolbar compact">
-              <div className="output-status">Files</div>
-              <button
-                className="output-open-folder-btn"
-                onClick={() => {
-                  void handleOpenFolder()
-                }}
-                disabled={openFolderLoading}
-              >
-                {openFolderLoading ? 'Opening...' : 'Open Folder'}
-              </button>
-            </div>
+        <div className="output-tab-body output-outputs-layout">
+          {filesLoading && <div className="muted">Loading files...</div>}
+          {filesError && <div className="error">Error: {filesError}</div>}
+          {!filesLoading && !filesError && files.length === 0 && (
+            <div className="muted">No output files found.</div>
+          )}
 
-            {filesLoading && <div className="muted">Loading files...</div>}
-            {filesError && <div className="error">Error: {filesError}</div>}
-            {!filesLoading && !filesError && files.length === 0 && (
-              <div className="muted">No output files found.</div>
-            )}
-
-            {!filesLoading && !filesError && files.length > 0 && (
-              <div className="output-file-list">
-                {files.map((file) => (
+          {!filesLoading && !filesError && files.length > 0 && (
+            <div className="output-file-grid">
+              {files.map((file) => {
+                const Icon = outputIcon(file.path)
+                return (
                   <button
                     key={file.path}
-                    className={`output-file-row ${selectedPath === file.path ? 'active' : ''}`}
+                    className={`output-file-tile ${selectedPath === file.path ? 'active' : ''}`}
                     onClick={() => setSelectedPath(file.path)}
                     title={file.path}
                   >
-                    <span className="output-file-name">{file.path}</span>
-                    <span className="output-file-size">{formatBytes(file.size)}</span>
+                    <span className="output-file-tile-icon">
+                      <Icon size={24} strokeWidth={1.9} />
+                    </span>
+                    <span className="output-file-tile-name">{fileName(file.path)}</span>
+                    <span className="output-file-tile-size">{formatBytes(file.size)}</span>
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
+                )
+              })}
+            </div>
+          )}
 
-          <div className="output-preview-column">
+          <div className="output-preview-section">
             {!selectedFile && <div className="muted">Select a file to preview.</div>}
 
             {selectedFile && (
@@ -346,17 +304,8 @@ export function OutputPanel({ jobId, jobStatus = '', onReviewAction }) {
                 <div className="output-preview-header">
                   <div className="output-preview-path">{selectedFile.path}</div>
                   <div className="output-preview-actions">
-                    <button
-                      className="output-open-folder-btn"
-                      onClick={() => {
-                        void handleOpenFolder(selectedFile.path)
-                      }}
-                      disabled={openFolderLoading}
-                    >
-                      Open Folder
-                    </button>
                     <a className="output-download-btn" href={outputDownloadUrl}>
-                      Download
+                      Save to Downloads
                     </a>
                   </div>
                 </div>
@@ -400,7 +349,7 @@ export function OutputPanel({ jobId, jobStatus = '', onReviewAction }) {
                   <div className="output-fallback-preview">
                     <div className="muted">Preview is not supported for this file type.</div>
                     <a className="output-download-btn" href={outputDownloadUrl}>
-                      Download file
+                      Save to Downloads
                     </a>
                   </div>
                 )}

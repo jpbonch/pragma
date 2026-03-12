@@ -800,6 +800,19 @@ select { cursor: pointer; }
   gap: 10px;
 }
 
+.conversation-chat-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conversation-chat-pane .conversation-history-pane {
+  height: auto;
+  flex: 1;
+}
+
 .conversation-drawer-body.with-output {
   padding: 12px;
   display: grid;
@@ -996,8 +1009,6 @@ select { cursor: pointer; }
   gap: 8px;
 }
 
-.output-review-btn,
-.output-open-folder-btn,
 .output-download-btn {
   border: 1px solid #d9d7d3;
   background: #fff;
@@ -1011,84 +1022,70 @@ select { cursor: pointer; }
   cursor: pointer;
 }
 
-.output-review-btn.approve {
-  background: #2383e2;
-  border-color: #2383e2;
-  color: #fff;
-}
-
-.output-review-btn.request-fix {
-  background: #fff8f6;
-  border-color: #efc6bc;
-  color: #9a3d2b;
-}
-
-.output-review-btn:disabled,
-.output-open-folder-btn:disabled {
-  opacity: 0.65;
-  cursor: default;
-}
-
-.output-files-layout {
-  display: grid;
-  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
-  gap: 10px;
-}
-
-.output-files-column {
-  border-right: 1px solid #f1f0ec;
-  padding-right: 10px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.output-preview-column {
-  min-height: 0;
-  overflow: auto;
-}
-
-.output-file-list {
+.output-outputs-layout {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  min-height: 0;
+  border: none;
+  padding: 0;
 }
 
-.output-file-row {
-  width: 100%;
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: 8px;
-  padding: 7px 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.output-file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
   gap: 8px;
+  align-content: start;
+}
+
+.output-file-tile {
+  border: 1px solid #e7e5e1;
+  background: #fcfcfb;
+  border-radius: 10px;
+  padding: 10px 8px;
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
   cursor: pointer;
   font-family: inherit;
-  text-align: left;
+  text-align: center;
 }
 
-.output-file-row:hover {
-  background: #fafaf8;
+.output-file-tile:hover {
+  background: #f8f7f5;
 }
 
-.output-file-row.active {
-  border-color: #dbe7f3;
-  background: #f3f8fd;
+.output-file-tile.active {
+  border-color: #c9ddf1;
+  background: #f1f7fd;
 }
 
-.output-file-name {
-  font-size: 12px;
+.output-file-tile-icon {
+  color: #5f5d58;
+  line-height: 0;
+  margin-top: 2px;
+}
+
+.output-file-tile-name {
+  font-size: 11px;
+  font-weight: 600;
   color: #37352f;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.output-file-size {
-  font-size: 11px;
+.output-file-tile-size {
+  font-size: 10px;
   color: #9b9a97;
-  flex-shrink: 0;
+}
+
+.output-preview-section {
+  min-height: 0;
+  overflow: auto;
 }
 
 .output-preview-card {
@@ -1231,12 +1228,20 @@ select { cursor: pointer; }
   gap: 10px;
 }
 
+.conversation-drawer-footer-end {
+  justify-content: flex-end;
+}
+
 .conversation-drawer-footer-stack {
   border-top: 1px solid #f0efec;
   padding: 10px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.conversation-drawer-review-footer {
+  padding-top: 8px;
 }
 
 .conversation-recipient-picker {
@@ -1276,6 +1281,22 @@ select { cursor: pointer; }
 }
 
 .conversation-execute-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.conversation-approve-btn {
+  border: none;
+  background: #2383e2;
+  color: #fff;
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.conversation-approve-btn:disabled {
   opacity: 0.65;
   cursor: default;
 }
@@ -2128,16 +2149,8 @@ select { cursor: pointer; }
     padding-top: 10px;
   }
 
-  .output-files-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .output-files-column {
-    border-right: none;
-    border-bottom: 1px solid #f1f0ec;
-    padding-right: 0;
-    padding-bottom: 8px;
-    max-height: 190px;
+  .output-file-grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   }
 
   .output-html-preview {

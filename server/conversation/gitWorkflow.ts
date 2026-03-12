@@ -1,0 +1,754 @@
+import { spawn } from "node:child_process";
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
+
+export type WorkspacePathsLike = {
+  workspaceDir: string;
+  codeDir: string;
+  outputsDir: string;
+  worktreesDir: string;
+  contextDir: string;
+};
+
+export type JobGitRepoState = {
+  relative_path: string;
+  base_branch: string;
+  base_commit: string;
+};
+
+export type JobGitState = {
+  version: 1;
+  branch_name: string;
+  repos: JobGitRepoState[];
+};
+
+export type PrepareJobWorkspaceResult = {
+  jobRootDir: string;
+  jobWorkspaceDir: string;
+  outputDir: string;
+  gitState: JobGitState;
+};
+
+export type MergeConflict = {
+  repo_path: string;
+  files: string[];
+  message: string;
+};
+
+export type MergeJobResult = {
+  mergedRepos: string[];
+  conflicts: MergeConflict[];
+};
+
+export type RepoDiffEntry = {
+  repo_path: string;
+  base_commit: string;
+  head_commit: string;
+  commit_diff: string;
+  staged_diff: string;
+  working_diff: string;
+  diff: string;
+  has_changes: boolean;
+  error: string;
+};
+
+export async function initializeWorkspaceGit(paths: WorkspacePathsLike): Promise<void> {
+  await mkdir(paths.workspaceDir, { recursive: true });
+  await mkdir(paths.codeDir, { recursive: true });
+  await mkdir(paths.outputsDir, { recursive: true });
+
+  await ensureGitRepo(paths.workspaceDir);
+  await ensureRootGitIgnore(paths.workspaceDir);
+  await commitIfNeeded(paths.workspaceDir, "salmon: initialize workspace repo");
+}
+
+export function getJobWorktreeOutputDir(paths: WorkspacePathsLike, jobId: string): string {
+  return join(paths.worktreesDir, jobId, "workspace", "outputs", jobId);
+}
+
+export function getJobMainOutputDir(paths: WorkspacePathsLike, jobId: string): string {
+  return join(paths.outputsDir, jobId);
+}
+
+export function parseJobGitState(value: string | null | undefined): JobGitState | null {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<JobGitState>;
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    if (parsed.version !== 1) {
+      return null;
+    }
+    if (typeof parsed.branch_name !== "string" || parsed.branch_name.trim().length === 0) {
+      return null;
+    }
+    if (!Array.isArray(parsed.repos) || parsed.repos.length === 0) {
+      return null;
+    }
+
+    const repos: JobGitRepoState[] = [];
+    for (const repo of parsed.repos) {
+      if (!repo || typeof repo !== "object") {
+        return null;
+      }
+      const candidate = repo as Partial<JobGitRepoState>;
+      if (
+        typeof candidate.relative_path !== "string" ||
+        candidate.relative_path.trim().length === 0 ||
+        typeof candidate.base_branch !== "string" ||
+        candidate.base_branch.trim().length === 0 ||
+        typeof candidate.base_commit !== "string" ||
+        candidate.base_commit.trim().length === 0
+      ) {
+        return null;
+      }
+      repos.push({
+        relative_path: normalizeRelativeRepoPath(candidate.relative_path),
+        base_branch: candidate.base_branch.trim(),
+        base_commit: candidate.base_commit.trim(),
+      });
+    }
+
+    return {
+      version: 1,
+      branch_name: parsed.branch_name.trim(),
+      repos,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function serializeJobGitState(state: JobGitState): string {
+  return JSON.stringify(state);
+}
+
+export async function prepareJobWorkspace(input: {
+  workspacePaths: WorkspacePathsLike;
+  jobId: string;
+  existingState: JobGitState | null;
+}): Promise<PrepareJobWorkspaceResult> {
+  const jobRootDir = join(input.workspacePaths.worktreesDir, input.jobId);
+  const jobWorkspaceDir = join(jobRootDir, "workspace");
+  const outputDir = getJobWorktreeOutputDir(input.workspacePaths, input.jobId);
+  await mkdir(jobRootDir, { recursive: true });
+  await mkdir(input.workspacePaths.outputsDir, { recursive: true });
+
+  const gitState = input.existingState
+    ? await ensureExistingJobWorktrees({
+        workspacePaths: input.workspacePaths,
+        jobWorkspaceDir,
+        gitState: input.existingState,
+      })
+    : await createFreshJobWorktrees({
+        workspacePaths: input.workspacePaths,
+        jobId: input.jobId,
+        jobWorkspaceDir,
+      });
+
+  const jobCodeDir = join(jobWorkspaceDir, "code");
+  await mkdir(jobCodeDir, { recursive: true });
+  await mkdir(join(jobWorkspaceDir, "outputs"), { recursive: true });
+  await seedNonRepoCodeIntoJobWorkspace({
+    sourceCodeDir: input.workspacePaths.codeDir,
+    targetCodeDir: jobCodeDir,
+    managedCodeRepoPaths: gitState.repos.map((repo) => repo.relative_path),
+  });
+  await mkdir(outputDir, { recursive: true });
+
+  return {
+    jobRootDir,
+    jobWorkspaceDir,
+    outputDir,
+    gitState,
+  };
+}
+
+export async function checkpointJobRepos(input: {
+  workspacePaths: WorkspacePathsLike;
+  jobId: string;
+  gitState: JobGitState;
+  commitMessage: string;
+}): Promise<void> {
+  const jobWorkspaceDir = join(input.workspacePaths.worktreesDir, input.jobId, "workspace");
+
+  for (const repo of input.gitState.repos) {
+    const jobRepoPath = resolveRepoPath(jobWorkspaceDir, repo.relative_path);
+    if (!(await isDirectory(jobRepoPath))) {
+      continue;
+    }
+
+    await runGit(jobRepoPath, ["add", "-A"]);
+    if (await hasStagedChanges(jobRepoPath)) {
+      await runGit(jobRepoPath, [
+        "-c",
+        "user.name=Salmon",
+        "-c",
+        "user.email=salmon@local",
+        "commit",
+        "-m",
+        input.commitMessage,
+      ]);
+    }
+  }
+}
+
+export async function mergeApprovedJob(input: {
+  workspacePaths: WorkspacePathsLike;
+  jobId: string;
+  gitState: JobGitState;
+}): Promise<MergeJobResult> {
+  const jobWorkspaceDir = join(input.workspacePaths.worktreesDir, input.jobId, "workspace");
+  const mergedRepos: string[] = [];
+  const conflicts: MergeConflict[] = [];
+
+  for (const repo of input.gitState.repos) {
+    const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, repo.relative_path);
+    const jobRepoPath = resolveRepoPath(jobWorkspaceDir, repo.relative_path);
+    const commitMessage = `salmon: merge job ${input.jobId} (${repo.relative_path})`;
+
+    try {
+      await runGitSafe(sourceRepoPath, ["merge", "--abort"]);
+      await runGit(sourceRepoPath, ["reset", "--hard", "HEAD"]);
+      await runGit(sourceRepoPath, ["clean", "-fd"]);
+      await runGit(sourceRepoPath, ["checkout", repo.base_branch]);
+      await runGit(sourceRepoPath, ["reset", "--hard", "HEAD"]);
+      await runGit(sourceRepoPath, ["clean", "-fd"]);
+
+      await runGit(sourceRepoPath, [
+        "merge",
+        "--squash",
+        "--no-commit",
+        input.gitState.branch_name,
+      ]);
+
+      if (await hasStagedChanges(sourceRepoPath)) {
+        await runGit(sourceRepoPath, [
+          "-c",
+          "user.name=Salmon",
+          "-c",
+          "user.email=salmon@local",
+          "commit",
+          "-m",
+          commitMessage,
+        ]);
+      }
+
+      mergedRepos.push(repo.relative_path);
+    } catch (error: unknown) {
+      const message = errorMessage(error);
+      const files = await listUnmergedFiles(sourceRepoPath);
+      await runGitSafe(sourceRepoPath, ["merge", "--abort"]);
+      await runGitSafe(sourceRepoPath, ["reset", "--hard", "HEAD"]);
+      await runGitSafe(sourceRepoPath, ["clean", "-fd"]);
+      await primeConflictInJobRepo(jobRepoPath, repo.base_branch);
+      conflicts.push({
+        repo_path: repo.relative_path,
+        files,
+        message,
+      });
+    }
+  }
+
+  if (conflicts.length === 0) {
+    await syncNonRepoCodeBackToWorkspace({
+      sourceCodeDir: join(jobWorkspaceDir, "code"),
+      targetCodeDir: input.workspacePaths.codeDir,
+      managedCodeRepoPaths: input.gitState.repos.map((repo) => repo.relative_path),
+    });
+    await syncJobOutputsBackToWorkspace({
+      workspacePaths: input.workspacePaths,
+      jobId: input.jobId,
+    });
+  }
+
+  return { mergedRepos, conflicts };
+}
+
+export async function deleteJobWorktree(input: {
+  workspacePaths: WorkspacePathsLike;
+  jobId: string;
+}): Promise<void> {
+  const jobRootDir = join(input.workspacePaths.worktreesDir, input.jobId);
+  await rm(jobRootDir, { recursive: true, force: true });
+}
+
+export async function buildRepoDiffEntries(input: {
+  workspacePaths: WorkspacePathsLike;
+  jobId: string;
+  gitState: JobGitState;
+}): Promise<RepoDiffEntry[]> {
+  const jobWorkspaceDir = join(input.workspacePaths.worktreesDir, input.jobId, "workspace");
+  const entries: RepoDiffEntry[] = [];
+
+  for (const repo of input.gitState.repos) {
+    const jobRepoPath = resolveRepoPath(jobWorkspaceDir, repo.relative_path);
+    try {
+      const headCommit = (await runGitCapture(jobRepoPath, ["rev-parse", "HEAD"])).trim();
+      const commitDiff = await runGitCapture(jobRepoPath, [
+        "diff",
+        `${repo.base_commit}..HEAD`,
+        "--",
+        ".",
+      ]);
+      const stagedDiff = await runGitCapture(jobRepoPath, ["diff", "--cached", "--", "."]);
+      const workingDiff = await runGitCapture(jobRepoPath, ["diff", "--", "."]);
+      const sections = [
+        commitDiff.trim().length > 0 ? `# committed (${repo.base_commit}..${headCommit})\n${commitDiff}` : "",
+        stagedDiff.trim().length > 0 ? `# staged\n${stagedDiff}` : "",
+        workingDiff.trim().length > 0 ? `# unstaged\n${workingDiff}` : "",
+      ].filter(Boolean);
+      const combined = sections.join("\n\n");
+
+      entries.push({
+        repo_path: repo.relative_path,
+        base_commit: repo.base_commit,
+        head_commit: headCommit,
+        commit_diff: commitDiff,
+        staged_diff: stagedDiff,
+        working_diff: workingDiff,
+        diff: combined,
+        has_changes: combined.trim().length > 0,
+        error: "",
+      });
+    } catch (error: unknown) {
+      entries.push({
+        repo_path: repo.relative_path,
+        base_commit: repo.base_commit,
+        head_commit: "",
+        commit_diff: "",
+        staged_diff: "",
+        working_diff: "",
+        diff: "",
+        has_changes: false,
+        error: errorMessage(error),
+      });
+    }
+  }
+
+  return entries;
+}
+
+function resolveRepoPath(rootPath: string, relativeRepoPath: string): string {
+  if (relativeRepoPath === ".") {
+    return rootPath;
+  }
+  return join(rootPath, relativeRepoPath);
+}
+
+async function createFreshJobWorktrees(input: {
+  workspacePaths: WorkspacePathsLike;
+  jobId: string;
+  jobWorkspaceDir: string;
+}): Promise<JobGitState> {
+  const branchName = `salmon/job/${input.jobId}`;
+  const relativeRepoPaths = await discoverFlatRepoPaths(input.workspacePaths);
+  const repos: JobGitRepoState[] = [];
+
+  for (const relativePath of relativeRepoPaths) {
+    const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, relativePath);
+    const jobRepoPath = resolveRepoPath(input.jobWorkspaceDir, relativePath);
+    const baseBranch = await getCurrentBranch(sourceRepoPath);
+    if (!baseBranch || baseBranch === "HEAD") {
+      throw new Error(`Repository is in detached HEAD and cannot be used: ${relativePath}`);
+    }
+    const baseCommit = (await runGitCapture(sourceRepoPath, ["rev-parse", "HEAD"])).trim();
+
+    await ensureWorktree({
+      sourceRepoPath,
+      worktreePath: jobRepoPath,
+      branchName,
+      startPoint: baseCommit,
+    });
+
+    repos.push({
+      relative_path: relativePath,
+      base_branch: baseBranch,
+      base_commit: baseCommit,
+    });
+  }
+
+  return {
+    version: 1,
+    branch_name: branchName,
+    repos,
+  };
+}
+
+async function ensureExistingJobWorktrees(input: {
+  workspacePaths: WorkspacePathsLike;
+  jobWorkspaceDir: string;
+  gitState: JobGitState;
+}): Promise<JobGitState> {
+  const repos: JobGitRepoState[] = [];
+  for (const repo of input.gitState.repos) {
+    const relativePath = normalizeRelativeRepoPath(repo.relative_path);
+    const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, relativePath);
+    const jobRepoPath = resolveRepoPath(input.jobWorkspaceDir, relativePath);
+    await ensureWorktree({
+      sourceRepoPath,
+      worktreePath: jobRepoPath,
+      branchName: input.gitState.branch_name,
+      startPoint: repo.base_commit,
+    });
+    repos.push({
+      relative_path: relativePath,
+      base_branch: repo.base_branch,
+      base_commit: repo.base_commit,
+    });
+  }
+
+  return {
+    version: 1,
+    branch_name: input.gitState.branch_name,
+    repos,
+  };
+}
+
+async function ensureWorktree(input: {
+  sourceRepoPath: string;
+  worktreePath: string;
+  branchName: string;
+  startPoint: string;
+}): Promise<void> {
+  if (await hasGitMarker(input.worktreePath)) {
+    return;
+  }
+
+  await mkdir(dirname(input.worktreePath), { recursive: true });
+  await runGit(input.sourceRepoPath, ["worktree", "prune"]);
+  const branchExists = await gitBranchExists(input.sourceRepoPath, input.branchName);
+  const args = branchExists
+    ? ["worktree", "add", "--force", input.worktreePath, input.branchName]
+    : ["worktree", "add", "--force", "-b", input.branchName, input.worktreePath, input.startPoint];
+  await runGit(input.sourceRepoPath, args);
+}
+
+async function discoverFlatRepoPaths(paths: WorkspacePathsLike): Promise<string[]> {
+  const rootRepo = await isGitRepo(paths.workspaceDir);
+  if (!rootRepo) {
+    throw new Error(`Workspace root is not a git repo: ${paths.workspaceDir}`);
+  }
+
+  const discovered: string[] = ["."];
+  const entries = await readdir(paths.codeDir, { withFileTypes: true }).catch(() => []);
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+
+    const childPath = join(paths.codeDir, entry.name);
+    if (!(await hasGitMarker(childPath))) {
+      continue;
+    }
+
+    const trackedByCodeRepo = await isPathTrackedByRepo(paths.workspaceDir, `code/${entry.name}`);
+    if (trackedByCodeRepo) {
+      throw new Error(
+        `Nested repo path is tracked by workspace/code repo and is not supported: code/${entry.name}`,
+      );
+    }
+
+    discovered.push(`code/${entry.name}`);
+  }
+
+  const normalized = discovered.map((value) => normalizeRelativeRepoPath(value));
+  const unique = [...new Set(normalized)];
+  unique.sort((a, b) => {
+    if (a === ".") return -1;
+    if (b === ".") return 1;
+    return a.localeCompare(b);
+  });
+
+  return unique;
+}
+
+async function getCurrentBranch(repoPath: string): Promise<string> {
+  return (await runGitCapture(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+}
+
+async function ensureGitRepo(repoPath: string): Promise<void> {
+  if (await isGitRepo(repoPath)) {
+    return;
+  }
+  await runGit(repoPath, ["init"]);
+}
+
+async function ensureRootGitIgnore(workspaceDir: string): Promise<void> {
+  const gitIgnorePath = join(workspaceDir, ".gitignore");
+  const existing = await readFile(gitIgnorePath, "utf8").catch(() => "");
+  const required = ["code/", "outputs/"];
+  const lines = existing
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let changed = false;
+
+  for (const entry of required) {
+    if (!lines.includes(entry)) {
+      lines.push(entry);
+      changed = true;
+    }
+  }
+
+  if (!existing.trim()) {
+    changed = true;
+  }
+  if (!changed) {
+    return;
+  }
+
+  const content = `${lines.join("\n")}\n`;
+  await writeFile(gitIgnorePath, content, "utf8");
+}
+
+async function commitIfNeeded(repoPath: string, message: string): Promise<void> {
+  await runGit(repoPath, ["add", "-A"]);
+  if (!(await hasStagedChanges(repoPath))) {
+    return;
+  }
+  await runGit(repoPath, [
+    "-c",
+    "user.name=Salmon",
+    "-c",
+    "user.email=salmon@local",
+    "commit",
+    "-m",
+    message,
+  ]);
+}
+
+async function primeConflictInJobRepo(jobRepoPath: string, baseBranch: string): Promise<void> {
+  if (!(await isDirectory(jobRepoPath))) {
+    return;
+  }
+
+  await runGitSafe(jobRepoPath, ["merge", "--abort"]);
+  await runGitSafe(jobRepoPath, ["reset", "--hard", "HEAD"]);
+  await runGitSafe(jobRepoPath, ["clean", "-fd"]);
+
+  try {
+    await runGit(jobRepoPath, ["merge", "--no-commit", "--no-ff", baseBranch]);
+  } catch {
+    // Leave merge conflict state in the job worktree for retry resolution.
+  }
+}
+
+async function listUnmergedFiles(repoPath: string): Promise<string[]> {
+  const output = await runGitCapture(repoPath, ["diff", "--name-only", "--diff-filter=U"]);
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeRelativeRepoPath(value: string): string {
+  const normalized = value
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+/g, "/")
+    .trim();
+  if (!normalized || normalized === ".") {
+    return ".";
+  }
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.some((segment) => segment === "." || segment === "..")) {
+    throw new Error(`Invalid repo path: ${value}`);
+  }
+  return segments.join("/");
+}
+
+function collectManagedTopLevelCodeRepoNames(managedCodeRepoPaths: string[]): Set<string> {
+  const names = new Set<string>();
+  for (const path of managedCodeRepoPaths) {
+    if (!path.startsWith("code/")) {
+      continue;
+    }
+    const suffix = path.slice("code/".length);
+    if (!suffix || suffix.includes("/")) {
+      continue;
+    }
+    names.add(suffix);
+  }
+  return names;
+}
+
+async function seedNonRepoCodeIntoJobWorkspace(input: {
+  sourceCodeDir: string;
+  targetCodeDir: string;
+  managedCodeRepoPaths: string[];
+}): Promise<void> {
+  const managedRepoNames = collectManagedTopLevelCodeRepoNames(input.managedCodeRepoPaths);
+  const entries = await readdir(input.sourceCodeDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+    if (managedRepoNames.has(entry.name)) {
+      continue;
+    }
+    const sourcePath = join(input.sourceCodeDir, entry.name);
+    const targetPath = join(input.targetCodeDir, entry.name);
+    await cp(sourcePath, targetPath, { recursive: true, force: true });
+  }
+}
+
+async function syncNonRepoCodeBackToWorkspace(input: {
+  sourceCodeDir: string;
+  targetCodeDir: string;
+  managedCodeRepoPaths: string[];
+}): Promise<void> {
+  const managedRepoNames = collectManagedTopLevelCodeRepoNames(input.managedCodeRepoPaths);
+  await mkdir(input.targetCodeDir, { recursive: true });
+  const entries = await readdir(input.sourceCodeDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+    if (managedRepoNames.has(entry.name)) {
+      continue;
+    }
+    const sourcePath = join(input.sourceCodeDir, entry.name);
+    const targetPath = join(input.targetCodeDir, entry.name);
+    await cp(sourcePath, targetPath, { recursive: true, force: true });
+  }
+}
+
+async function syncJobOutputsBackToWorkspace(input: {
+  workspacePaths: WorkspacePathsLike;
+  jobId: string;
+}): Promise<void> {
+  const sourceOutputDir = getJobWorktreeOutputDir(input.workspacePaths, input.jobId);
+  if (!(await isDirectory(sourceOutputDir))) {
+    return;
+  }
+
+  const targetOutputDir = getJobMainOutputDir(input.workspacePaths, input.jobId);
+  await mkdir(input.workspacePaths.outputsDir, { recursive: true });
+  await rm(targetOutputDir, { recursive: true, force: true });
+  await mkdir(targetOutputDir, { recursive: true });
+
+  const entries = await readdir(sourceOutputDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    const sourcePath = join(sourceOutputDir, entry.name);
+    const targetPath = join(targetOutputDir, entry.name);
+    await cp(sourcePath, targetPath, { recursive: true, force: true });
+  }
+}
+
+async function isPathTrackedByRepo(repoPath: string, relativePath: string): Promise<boolean> {
+  try {
+    await runGit(repoPath, ["ls-files", "--error-unmatch", "--", relativePath]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function hasStagedChanges(repoPath: string): Promise<boolean> {
+  try {
+    await runGit(repoPath, ["diff", "--cached", "--quiet"]);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function gitBranchExists(repoPath: string, branchName: string): Promise<boolean> {
+  try {
+    await runGit(repoPath, ["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function hasGitMarker(path: string): Promise<boolean> {
+  const markerPath = join(path, ".git");
+  const marker = await stat(markerPath).catch(() => null);
+  return Boolean(marker?.isDirectory() || marker?.isFile());
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  const info = await stat(path).catch(() => null);
+  return Boolean(info?.isDirectory());
+}
+
+async function isGitRepo(path: string): Promise<boolean> {
+  try {
+    const topLevel = (await runGitCapture(path, ["rev-parse", "--show-toplevel"])).trim();
+    return resolve(topLevel) === resolve(path);
+  } catch {
+    return false;
+  }
+}
+
+async function runGitSafe(cwd: string, args: string[]): Promise<void> {
+  try {
+    await runGit(cwd, args);
+  } catch {
+    // Swallow cleanup failures.
+  }
+}
+
+async function runGit(cwd: string, args: string[]): Promise<string> {
+  return runCommandCapture("git", cwd, args);
+}
+
+async function runGitCapture(cwd: string, args: string[]): Promise<string> {
+  return runCommandCapture("git", cwd, args);
+}
+
+async function runCommandCapture(command: string, cwd: string, args: string[]): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", (error) => {
+      reject(error);
+    });
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolvePromise(stdout);
+        return;
+      }
+      reject(
+        new Error(
+          `${command} ${args.join(" ")} failed (${code ?? "unknown"}) in ${formatPath(cwd)}: ${
+            stderr.trim() || "unknown git error"
+          }`,
+        ),
+      );
+    });
+  });
+}
+
+function formatPath(path: string): string {
+  return path.split(sep).join("/");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

@@ -139,6 +139,14 @@ function truncate(value, maxLength) {
   return `${value.slice(0, maxLength - 3)}...`
 }
 
+function normalizeJobTitle(value) {
+  const title = typeof value === 'string' ? value.trim() : ''
+  if (!title) {
+    return ''
+  }
+  return title.replace(/^execute:\s*/i, '')
+}
+
 function buildEntriesFromThreadData(data) {
   const timeline = []
   const messages = Array.isArray(data?.messages) ? data.messages : []
@@ -997,7 +1005,7 @@ export default function App() {
     }
 
     const threadId = typeof job?.thread_id === 'string' ? job.thread_id : ''
-    const fallbackTitle = typeof job?.title === 'string' && job.title ? job.title : 'Task'
+    const fallbackTitle = normalizeJobTitle(job?.title) || 'Task'
     const fallbackStatus = typeof job?.status === 'string' && job.status ? job.status : 'queued'
 
     if (!threadId) {
@@ -1081,15 +1089,29 @@ export default function App() {
       return
     }
 
-    await reviewJob(jobId, action)
+    const reviewResult = await reviewJob(jobId, action)
+    const nextStatus =
+      reviewResult && typeof reviewResult.status === 'string'
+        ? reviewResult.status
+        : 'completed'
+    const mergeState =
+      reviewResult && typeof reviewResult.merge_state === 'string'
+        ? reviewResult.merge_state
+        : ''
+
     await loadJobs()
+    if (mergeState === 'merged' && nextStatus === 'completed') {
+      closeConversationDrawer()
+      return
+    }
+
     setConversation((prev) => {
       if (!prev.open || prev.jobId !== jobId) {
         return prev
       }
       return {
         ...prev,
-        jobStatus: 'completed',
+        jobStatus: nextStatus,
       }
     })
   }

@@ -9,6 +9,11 @@ const program = new Command();
 const DEFAULT_API_URL = process.env.SALMON_API_URL ?? "http://127.0.0.1:3000";
 const DEFAULT_UI_URL = process.env.SALMON_UI_URL ?? "http://127.0.0.1:5173";
 
+if (!process.env.SALMON_CLI_COMMAND) {
+  const entry = process.argv[1] ? quoteShellArg(process.argv[1]) : "salmon";
+  process.env.SALMON_CLI_COMMAND = `${quoteShellArg(process.execPath)} ${entry}`;
+}
+
 program
   .name("salmon")
   .description("Very minimal CLI")
@@ -471,6 +476,10 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function quoteShellArg(value: string): string {
+  return `"${value.replace(/["\\$`]/g, "\\$&")}"`;
 }
 
 function openBrowser(url: string): void {

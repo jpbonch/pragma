@@ -11,9 +11,11 @@ export function buildPrompt(
   mode: "chat" | "plan" | "execute",
   message: string,
   reasoningEffort: ReasoningEffort = "medium",
+  salmonCliCommand = "salmon",
 ): string {
   const cleanMessage = message.trim();
   const reasoningLine = formatReasoningInstruction(reasoningEffort);
+  const cli = salmonCliCommand.trim() || "salmon";
 
   if (mode === "chat") {
     return [
@@ -26,13 +28,16 @@ export function buildPrompt(
   }
 
   if (mode === "plan") {
+    const planSummaryCommand = `${cli} job plan-summary --title "<short title>" --summary "<1-2 sentence summary>" --step "<step 1>" --step "<step 2>"`;
     return [
       "You are planning work for an implementation agent.",
       "Plan mode is planning-only.",
-      "Do not execute the task, do not edit files, and do not run implementation commands/tools.",
+      "You may use tools for read-only inspection and context gathering.",
+      "Do not execute implementation work and do not modify files.",
       "Return a concrete, decision-complete plan in plain language.",
+      `Use this Salmon CLI command prefix: ${cli}`,
       "Then persist structured plan data by calling exactly one CLI command:",
-      "salmon job plan-summary --title \"<short title>\" --summary \"<1-2 sentence summary>\" --step \"<step 1>\" --step \"<step 2>\"",
+      planSummaryCommand,
       "Rules:",
       "- Use at least one --step flag and keep steps ordered.",
       "- Title and summary must be concise and specific.",
@@ -57,9 +62,12 @@ export function buildOrchestratorPrompt(input: {
   candidates: WorkerCandidate[];
   forcedRecipientAgentId?: string | null;
   reasoningEffort?: ReasoningEffort;
+  salmonCliCommand?: string;
 }): string {
   const forced = input.forcedRecipientAgentId?.trim() || "";
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
+  const cli = input.salmonCliCommand?.trim() || "salmon";
+  const selectRecipientCommand = `${cli} job select-recipient --agent-id <candidate_id> --reason "<one sentence reason>"`;
   const candidateLines = input.candidates.map((candidate, index) => {
     return `${index + 1}. id=${candidate.id}; name=${candidate.name}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
   });
@@ -68,8 +76,9 @@ export function buildOrchestratorPrompt(input: {
     "You are an Orchestrator.",
     "Your only job is to pick the best worker agent for the task.",
     "Do not execute the task.",
+    `Use this Salmon CLI command prefix: ${cli}`,
     "Call exactly one CLI command to persist the selected worker:",
-    "salmon job select-recipient --agent-id <candidate_id> --reason \"<one sentence reason>\"",
+    selectRecipientCommand,
     "Rules:",
     "- You MUST execute the command exactly once.",
     "- agent-id MUST be one of the listed candidate ids.",
@@ -92,18 +101,27 @@ export function buildWorkerPrompt(input: {
   workerName: string;
   workerAgentFile: string;
   reasoningEffort?: ReasoningEffort;
+  salmonCliCommand?: string;
 }): string {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
+  const cli = input.salmonCliCommand?.trim() || "salmon";
+  const askQuestionCommand = `${cli} job ask-question --question "<question>" [--details "<optional context>"]`;
+  const requestHelpCommand = `${cli} job request-help --summary "<short summary>" [--details "<optional context>"]`;
 
   return [
     `You are ${input.workerName}.`,
     "Follow your agent instructions exactly, then execute the task.",
+    `Use this Salmon CLI command prefix: ${cli}`,
+    "Path policy:",
+    "- Put code/source changes under `code/`.",
+    "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$SALMON_JOB_ID/`.",
+    "- Do not place source code files at workspace root.",
     "If you need clarification from the human, run:",
-    "salmon job ask-question --question \"<question>\" [--details \"<optional context>\"]",
+    askQuestionCommand,
     "If you are blocked and need human help, run:",
-    "salmon job request-help --summary \"<short summary>\" [--details \"<optional context>\"]",
+    requestHelpCommand,
     "After either CLI escalation command, stop doing further work.",
     "Do not ask for clarification/help only in plain text without calling the CLI.",
     reasoningLine,

@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react'
 
+function normalizeJobTitle(title) {
+  const value = String(title || '').trim()
+  if (!value) {
+    return ''
+  }
+  return value.replace(/^execute:\s*/i, '')
+}
+
 function getTimeAgo(dateStr) {
   if (!dateStr) return ''
   const date = new Date(dateStr)
@@ -52,7 +60,7 @@ export function FeedView({
                   onClick={() => onOpenJobConversation?.(job)}
                   title="Open task review"
                 >
-                  <div className="job-title">{job.title}</div>
+                  <div className="job-title">{normalizeJobTitle(job.title)}</div>
                   <div className="job-meta">
                     <span className="job-chip">{job.status || 'queued'}</span>
                     {job.assigned_to && <span>assigned to {job.assigned_to}</span>}

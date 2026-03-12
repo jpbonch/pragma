@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, cp, mkdir, readdir, stat } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
 import { getConversationAdapter } from "./adapters";
+import {
+  checkpointJobRepos,
+  parseJobGitState,
+  prepareJobWorkspace,
+  serializeJobGitState,
+} from "./gitWorkflow";
 import { buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
 import { InProcessQueue } from "./queue";
 import {
@@ -44,13 +50,16 @@ type JobStatusChangedInput = {
 export class ExecuteRunner {
   private readonly queue = new InProcessQueue();
   private readonly apiUrl: string;
+  private readonly salmonCliCommand: string;
   private readonly onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
 
   constructor(options: {
     apiUrl: string;
+    salmonCliCommand: string;
     onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
   }) {
     this.apiUrl = options.apiUrl;
+    this.salmonCliCommand = options.salmonCliCommand;
     this.onJobStatusChanged = options.onJobStatusChanged;
   }
 
@@ -58,6 +67,7 @@ export class ExecuteRunner {
     this.queue.enqueue(async () => {
       await runExecuteTask(input, {
         apiUrl: this.apiUrl,
+        salmonCliCommand: this.salmonCliCommand,
         onJobStatusChanged: this.onJobStatusChanged,
       });
     });
@@ -68,18 +78,37 @@ async function runExecuteTask(
   input: EnqueueExecuteInput,
   options: {
     apiUrl: string;
+    salmonCliCommand: string;
     onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
   },
 ): Promise<void> {
   const db = await openDatabase(input.workspaceName);
   const paths = getWorkspacePaths(input.workspaceName);
 
-  const jobRootDir = join(paths.worktreesDir, input.jobId);
-  const jobCodeDir = join(jobRootDir, "code");
-  const outputDir = join(jobRootDir, "outputs");
+  const jobStateResult = await db.query<{ git_state_json: string | null }>(
+    `
+SELECT git_state_json
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+    [input.jobId],
+  );
+  if (!jobStateResult.rows[0]) {
+    throw new Error(`Job not found: ${input.jobId}`);
+  }
+
+  const existingGitState = parseJobGitState(jobStateResult.rows[0].git_state_json);
+  const prepared = await prepareJobWorkspace({
+    workspacePaths: paths,
+    jobId: input.jobId,
+    existingState: existingGitState,
+  });
+  const outputDir = prepared.outputDir;
+  const jobWorkspaceDir = prepared.jobWorkspaceDir;
+  const gitState = prepared.gitState;
+  const serializedGitState = serializeJobGitState(gitState);
   const logFile = join(outputDir, "events.jsonl");
-  await mkdir(jobRootDir, { recursive: true });
-  await ensureJobCodeDir(paths.codeDir, jobCodeDir);
   await mkdir(outputDir, { recursive: true });
 
   const turnId = `turn_${randomUUID().slice(0, 12)}`;
@@ -104,10 +133,12 @@ async function runExecuteTask(
 UPDATE jobs
 SET status = 'orchestrating',
     output_dir = $2,
+    git_branch_name = $3,
+    git_state_json = $4,
     assigned_to = NULL
 WHERE id = $1
 `,
-    [input.jobId, outputDir],
+    [input.jobId, outputDir, gitState.branch_name, serializedGitState],
   );
   await notifyJobStatus("orchestrating", "execute_runner");
 
@@ -189,6 +220,7 @@ WHERE id = $1
       })),
       forcedRecipientAgentId: requestedRecipientId,
       reasoningEffort,
+      salmonCliCommand: options.salmonCliCommand,
     });
 
     const orchestratorAdapter = getConversationAdapter(orchestrator.harness);
@@ -198,9 +230,12 @@ WHERE id = $1
       prompt: orchestratorPrompt,
       modelId: orchestrator.model_id,
       sessionId: null,
-      cwd: jobCodeDir,
+      cwd: jobWorkspaceDir,
       env: buildAgentRuntimeEnv({
         apiUrl: options.apiUrl,
+        salmonCliCommand: options.salmonCliCommand,
+        codeDir: join(jobWorkspaceDir, "code"),
+        outputDir,
         workspaceName: input.workspaceName,
         jobId: input.jobId,
         threadId: input.threadId,
@@ -362,6 +397,7 @@ WHERE id = $1
       workerName: selectedWorker.name,
       workerAgentFile: selectedWorker.agent_file ?? "",
       reasoningEffort,
+      salmonCliCommand: options.salmonCliCommand,
     });
 
     let workerText = "";
@@ -369,9 +405,12 @@ WHERE id = $1
       prompt: workerPrompt,
       modelId: selectedWorker.model_id,
       sessionId: null,
-      cwd: jobCodeDir,
+      cwd: jobWorkspaceDir,
       env: buildAgentRuntimeEnv({
         apiUrl: options.apiUrl,
+        salmonCliCommand: options.salmonCliCommand,
+        codeDir: join(jobWorkspaceDir, "code"),
+        outputDir,
         workspaceName: input.workspaceName,
         jobId: input.jobId,
         threadId: input.threadId,
@@ -441,6 +480,13 @@ WHERE id = $1
         selected_agent_id: selectedWorker.id,
         worker_session_id: workerResult.sessionId,
       },
+    });
+
+    await checkpointJobRepos({
+      workspacePaths: paths,
+      jobId: input.jobId,
+      gitState,
+      commitMessage: `salmon: job ${input.jobId} checkpoint`,
     });
 
     await closeThread(db, input.threadId);
@@ -551,6 +597,9 @@ LIMIT 1
 
 function buildAgentRuntimeEnv(input: {
   apiUrl: string;
+  salmonCliCommand: string;
+  codeDir: string;
+  outputDir: string;
   workspaceName: string;
   jobId: string;
   threadId: string;
@@ -559,6 +608,9 @@ function buildAgentRuntimeEnv(input: {
 }): Record<string, string> {
   return {
     SALMON_API_URL: input.apiUrl,
+    SALMON_CLI_COMMAND: input.salmonCliCommand,
+    SALMON_CODE_DIR: input.codeDir,
+    SALMON_OUTPUT_DIR: input.outputDir,
     SALMON_WORKSPACE_NAME: input.workspaceName,
     SALMON_JOB_ID: input.jobId,
     SALMON_THREAD_ID: input.threadId,
@@ -583,32 +635,4 @@ function appendText(current: string, next: string): string {
     return current;
   }
   return `${current}\n${next}`;
-}
-
-async function ensureJobCodeDir(sourceCodeDir: string, targetCodeDir: string): Promise<void> {
-  await mkdir(targetCodeDir, { recursive: true });
-
-  const targetEntries = await readdir(targetCodeDir).catch(() => []);
-  if (targetEntries.length > 0) {
-    return;
-  }
-
-  const sourceStat = await stat(sourceCodeDir).catch(() => null);
-  if (!sourceStat?.isDirectory()) {
-    return;
-  }
-
-  const sourceEntries = await readdir(sourceCodeDir).catch(() => []);
-  if (sourceEntries.length === 0) {
-    return;
-  }
-
-  await Promise.all(
-    sourceEntries.map((entry) =>
-      cp(join(sourceCodeDir, entry), join(targetCodeDir, entry), {
-        recursive: true,
-        force: true,
-      }),
-    ),
-  );
 }
