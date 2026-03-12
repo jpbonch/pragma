@@ -44,17 +44,17 @@ export function FeedView({
       {!loading && !error && jobs.length > 0 && (
         <div className="jobs-list">
           {jobs.map((job) => {
-            const isNeedsInput = String(job.status || '').toLowerCase() === 'needs_input'
+            const isNeedsInput = String(job.status || '').toLowerCase() === 'waiting_for_recipient'
             return (
               <div key={job.id} className="job-row">
                 <button
                   className="job-row-main"
                   onClick={() => onOpenJobConversation?.(job)}
-                  title="Open task conversation"
+                  title="Open task review"
                 >
                   <div className="job-title">{job.title}</div>
                   <div className="job-meta">
-                    <span className="job-chip">{job.status || 'open'}</span>
+                    <span className="job-chip">{job.status || 'queued'}</span>
                     {job.assigned_to && <span>assigned to {job.assigned_to}</span>}
                     {job.output_dir && <span>output: {job.output_dir}</span>}
                   </div>

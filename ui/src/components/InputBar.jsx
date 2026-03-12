@@ -14,7 +14,13 @@ const REASONING_EFFORTS = [
   { id: 'extra_high', label: 'Extra High' },
 ]
 
-export function InputBar({ onSubmit, disabled = false, preferredMode = '' }) {
+export function InputBar({
+  onSubmit,
+  disabled = false,
+  preferredMode = '',
+  embedded = false,
+  lockedMode = '',
+}) {
   const [input, setInput] = useState('')
   const [mode, setMode] = useState('execute')
   const [reasoningEffort, setReasoningEffort] = useState('medium')
@@ -27,13 +33,15 @@ export function InputBar({ onSubmit, disabled = false, preferredMode = '' }) {
   const SelectedModeIcon = selectedMode.icon
   const selectedReasoning =
     REASONING_EFFORTS.find((option) => option.id === reasoningEffort) ?? REASONING_EFFORTS[1]
+  const isModeLocked = Boolean(lockedMode && MODES.some((item) => item.id === lockedMode))
 
   useEffect(() => {
-    if (!preferredMode || !MODES.some((item) => item.id === preferredMode)) {
+    const nextMode = isModeLocked ? lockedMode : preferredMode
+    if (!nextMode || !MODES.some((item) => item.id === nextMode)) {
       return
     }
-    setMode((current) => (current === preferredMode ? current : preferredMode))
-  }, [preferredMode])
+    setMode((current) => (current === nextMode ? current : nextMode))
+  }, [preferredMode, lockedMode, isModeLocked])
 
   useEffect(() => {
     if (!openMenu) {
@@ -79,9 +87,8 @@ export function InputBar({ onSubmit, disabled = false, preferredMode = '' }) {
   }
 
   return (
-    <div className="input-wrap">
+    <div className={`input-wrap ${embedded ? 'input-wrap-embedded' : ''}`}>
       <div className="input-container">
-        <div className="orchestrator-chip">Orchestrator</div>
         <textarea
           ref={textareaRef}
           className="input-textarea"
@@ -113,39 +120,46 @@ export function InputBar({ onSubmit, disabled = false, preferredMode = '' }) {
               <Plus size={14} />
             </button>
 
-            <div className="input-selector">
-              <button className="selector-btn" onClick={() => setOpenMenu(openMenu === 'mode' ? null : 'mode')}>
+            {isModeLocked ? (
+              <div className="selector-btn selector-btn-static">
                 <SelectedModeIcon size={14} strokeWidth={2} />
                 {selectedMode.label}
-                <ChevronDown size={12} style={{ opacity: 0.5 }} />
-              </button>
-              {openMenu === 'mode' && (
-                <div className="selector-dropdown selector-dropdown-wide">
-                  {MODES.map((m) => {
-                    const Icon = m.icon
-                    return (
-                      <div
-                        key={m.id}
-                        className={`selector-option ${mode === m.id ? 'active' : ''}`}
-                        onClick={() => {
-                          setMode(m.id)
-                          setOpenMenu(null)
-                        }}
-                      >
-                        <Icon size={16} strokeWidth={2} />
-                        <div>
-                          <div className="selector-option-label">{m.label}</div>
-                          <div className="selector-option-desc">{m.desc}</div>
+              </div>
+            ) : (
+              <div className="input-selector">
+                <button className="selector-btn" onClick={() => setOpenMenu(openMenu === 'mode' ? null : 'mode')}>
+                  <SelectedModeIcon size={14} strokeWidth={2} />
+                  {selectedMode.label}
+                  <ChevronDown size={12} style={{ opacity: 0.5 }} />
+                </button>
+                {openMenu === 'mode' && (
+                  <div className="selector-dropdown selector-dropdown-wide">
+                    {MODES.map((m) => {
+                      const Icon = m.icon
+                      return (
+                        <div
+                          key={m.id}
+                          className={`selector-option ${mode === m.id ? 'active' : ''}`}
+                          onClick={() => {
+                            setMode(m.id)
+                            setOpenMenu(null)
+                          }}
+                        >
+                          <Icon size={16} strokeWidth={2} />
+                          <div>
+                            <div className="selector-option-label">{m.label}</div>
+                            <div className="selector-option-desc">{m.desc}</div>
+                          </div>
+                          {mode === m.id && (
+                            <Check size={14} style={{ marginLeft: 'auto', color: '#2383e2' }} />
+                          )}
                         </div>
-                        {mode === m.id && (
-                          <Check size={14} style={{ marginLeft: 'auto', color: '#2383e2' }} />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="input-selector">
               <button

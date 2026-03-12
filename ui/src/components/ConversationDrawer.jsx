@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUp, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import { OutputPanel } from './OutputPanel'
 
 export function ConversationDrawer({
   open,
@@ -14,8 +15,14 @@ export function ConversationDrawer({
   recipientAgents = [],
   selectedRecipientAgentId = '',
   onSelectRecipientAgentId,
+  onPromptSubmit,
+  jobId = '',
+  jobStatus = '',
+  onReviewAction,
 }) {
   const bodyRef = useRef(null)
+  const [prompt, setPrompt] = useState('')
+  const showOutputPanel = Boolean(jobId) && mode === 'chat'
 
   const title = useMemo(() => {
     if (mode === 'plan') return 'Plan Conversation'
@@ -28,7 +35,25 @@ export function ConversationDrawer({
       return
     }
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight
-  }, [entries, loading, error])
+  }, [entries, loading, error, showOutputPanel])
+
+  useEffect(() => {
+    if (!open) {
+      setPrompt('')
+    }
+  }, [open])
+
+  function submitPrompt() {
+    if (loading) {
+      return
+    }
+    const message = prompt.trim()
+    if (!message) {
+      return
+    }
+    onPromptSubmit?.(message)
+    setPrompt('')
+  }
 
   if (!open) {
     return null
@@ -46,70 +71,152 @@ export function ConversationDrawer({
           )}
         </div>
 
-        <div className="conversation-drawer-body" ref={bodyRef}>
-          {entries.length === 0 && <div className="muted">No messages yet.</div>}
+        <div className={`conversation-drawer-body ${showOutputPanel ? 'with-output' : ''}`}>
+          {showOutputPanel ? (
+            <>
+              <div className="conversation-history-pane" ref={bodyRef}>
+                {entries.length === 0 && <div className="muted">No messages yet.</div>}
 
-          {entries.map((entry) => {
-            if (entry.type === 'tool') {
-              return (
-                <div key={entry.id} className="conversation-tool-row">
-                  <div className="conversation-tool-name">{entry.label || entry.name || 'Tool'}</div>
-                  {entry.summary ? (
-                    <div className="conversation-tool-summary">{entry.summary}</div>
-                  ) : null}
-                </div>
-              )
-            }
+                {entries.map((entry) => {
+                  if (entry.type === 'tool') {
+                    return (
+                      <div key={entry.id} className="conversation-tool-row">
+                        <div className="conversation-tool-name">{entry.label || entry.name || 'Tool'}</div>
+                        {entry.summary ? (
+                          <div className="conversation-tool-summary">{entry.summary}</div>
+                        ) : null}
+                      </div>
+                    )
+                  }
 
-            if (entry.type === 'status') {
-              return (
-                <div key={entry.id} className="conversation-status-row">
-                  {entry.content}
-                </div>
-              )
-            }
+                  if (entry.type === 'status') {
+                    return (
+                      <div key={entry.id} className="conversation-status-row">
+                        {entry.content}
+                      </div>
+                    )
+                  }
 
-            return (
-              <div key={entry.id} className={`conversation-message ${entry.type === 'user' ? 'from-user' : 'from-assistant'}`}>
-                <div className="conversation-role">{entry.type === 'user' ? 'You' : 'Assistant'}</div>
-                {entry.type === 'assistant' ? (
-                  <div className="conversation-markdown">
-                    <ReactMarkdown>{entry.content || ''}</ReactMarkdown>
-                  </div>
-                ) : (
-                  <div className="conversation-content">{entry.content}</div>
-                )}
+                  return (
+                    <div
+                      key={entry.id}
+                      className={`conversation-message ${entry.type === 'user' ? 'from-user' : 'from-assistant'}`}
+                    >
+                      <div className="conversation-role">{entry.type === 'user' ? 'You' : 'Assistant'}</div>
+                      {entry.type === 'assistant' ? (
+                        <div className="conversation-markdown">
+                          <ReactMarkdown>{entry.content || ''}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="conversation-content">{entry.content}</div>
+                      )}
+                    </div>
+                  )
+                })}
+
+                {loading && <div className="conversation-status">Streaming...</div>}
+                {error && <div className="error">Error: {error}</div>}
               </div>
-            )
-          })}
+              <div className="conversation-output-pane">
+                <OutputPanel jobId={jobId} jobStatus={jobStatus} onReviewAction={onReviewAction} />
+              </div>
+            </>
+          ) : (
+            <div className="conversation-history-pane" ref={bodyRef}>
+              {entries.length === 0 && <div className="muted">No messages yet.</div>}
 
-          {loading && <div className="conversation-status">Streaming...</div>}
-          {error && <div className="error">Error: {error}</div>}
+              {entries.map((entry) => {
+                if (entry.type === 'tool') {
+                  return (
+                    <div key={entry.id} className="conversation-tool-row">
+                      <div className="conversation-tool-name">{entry.label || entry.name || 'Tool'}</div>
+                      {entry.summary ? (
+                        <div className="conversation-tool-summary">{entry.summary}</div>
+                      ) : null}
+                    </div>
+                  )
+                }
+
+                if (entry.type === 'status') {
+                  return (
+                    <div key={entry.id} className="conversation-status-row">
+                      {entry.content}
+                    </div>
+                  )
+                }
+
+                return (
+                  <div
+                    key={entry.id}
+                    className={`conversation-message ${entry.type === 'user' ? 'from-user' : 'from-assistant'}`}
+                  >
+                    <div className="conversation-role">{entry.type === 'user' ? 'You' : 'Assistant'}</div>
+                    {entry.type === 'assistant' ? (
+                      <div className="conversation-markdown">
+                        <ReactMarkdown>{entry.content || ''}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <div className="conversation-content">{entry.content}</div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {loading && <div className="conversation-status">Streaming...</div>}
+              {error && <div className="error">Error: {error}</div>}
+            </div>
+          )}
         </div>
 
-        {mode === 'plan' && (
-          <div className="conversation-drawer-footer">
-            <div className="conversation-recipient-picker">
-              <label className="conversation-recipient-label">Recipient</label>
-              <select
-                className="conversation-recipient-select"
-                value={selectedRecipientAgentId}
-                onChange={(event) => onSelectRecipientAgentId?.(event.target.value)}
-                disabled={loading}
-              >
-                <option value="">Auto-select</option>
-                {recipientAgents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name || agent.id}
-                  </option>
-                ))}
-              </select>
+        <div className="conversation-drawer-footer-stack">
+          {mode === 'plan' && (
+            <div className="conversation-drawer-footer">
+              <div className="conversation-recipient-picker">
+                <label className="conversation-recipient-label">Recipient</label>
+                <select
+                  className="conversation-recipient-select"
+                  value={selectedRecipientAgentId}
+                  onChange={(event) => onSelectRecipientAgentId?.(event.target.value)}
+                  disabled={loading}
+                >
+                  <option value="">Auto-select</option>
+                  {recipientAgents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name || agent.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button className="conversation-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
+                Execute
+              </button>
             </div>
-            <button className="conversation-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
-              Execute
+          )}
+          <div className="conversation-drawer-prompt-row">
+            <input
+              className="conversation-drawer-prompt-input"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder={mode === 'plan' ? 'Refine this plan...' : 'Continue this conversation...'}
+              disabled={loading}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submitPrompt()
+                }
+              }}
+            />
+            <button
+              className="conversation-drawer-prompt-send"
+              onClick={submitPrompt}
+              disabled={loading || !prompt.trim()}
+              title="Send"
+              aria-label="Send"
+            >
+              <ArrowUp size={16} strokeWidth={2.5} />
             </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

@@ -32,7 +32,7 @@ program
   .argument("<title>", "Job title")
   .option("-a, --assigned-to <agentId>", "Assigned agent id")
   .option("-o, --output-dir <outputDir>", "Output directory")
-  .option("-s, --status <status>", "Job status", "open")
+  .option("-s, --status <status>", "Job status", "queued")
   .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
   .action(
     async (
@@ -84,6 +84,169 @@ program
       }
 
       console.table(result.jobs);
+    },
+  );
+
+const jobCommand = program
+  .command("job")
+  .description("Agent job-control commands");
+
+jobCommand
+  .command("select-recipient")
+  .description("Select a worker recipient for the current orchestrating job")
+  .requiredOption("--agent-id <id>", "Worker agent id")
+  .requiredOption("--reason <text>", "Selection reason")
+  .option("--job-id <id>", "Job id")
+  .option("--turn-id <id>", "Turn id")
+  .option("--api-url <url>", "Salmon API base URL")
+  .action(
+    async (options: {
+      agentId: string;
+      reason: string;
+      jobId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
+      const result = await apiRequest<{ assigned_to?: string }>(
+        apiUrl,
+        `/jobs/${encodeURIComponent(jobId)}/agent/select-recipient`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            agent_id: options.agentId,
+            reason: options.reason,
+            turn_id: turnId,
+          }),
+        },
+      );
+
+      const selected = result.assigned_to || options.agentId;
+      console.log(`Selected recipient ${selected} for job ${jobId}.`);
+    },
+  );
+
+jobCommand
+  .command("ask-question")
+  .description("Pause execution and ask the human a clarification question")
+  .requiredOption("--question <text>", "Question for the human")
+  .option("--details <text>", "Optional context details")
+  .option("--job-id <id>", "Job id")
+  .option("--turn-id <id>", "Turn id")
+  .option("--api-url <url>", "Salmon API base URL")
+  .action(
+    async (options: {
+      question: string;
+      details?: string;
+      jobId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
+      const agentId = normalizeOptionalString(process.env.SALMON_AGENT_ID);
+      await apiRequest<{ status: string }>(
+        apiUrl,
+        `/jobs/${encodeURIComponent(jobId)}/agent/ask-question`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            question: options.question,
+            details: options.details,
+            turn_id: turnId,
+            agent_id: agentId,
+          }),
+        },
+      );
+
+      console.log(`Question submitted for job ${jobId}.`);
+    },
+  );
+
+jobCommand
+  .command("request-help")
+  .description("Pause execution and request human help")
+  .requiredOption("--summary <text>", "Help summary")
+  .option("--details <text>", "Optional context details")
+  .option("--job-id <id>", "Job id")
+  .option("--turn-id <id>", "Turn id")
+  .option("--api-url <url>", "Salmon API base URL")
+  .action(
+    async (options: {
+      summary: string;
+      details?: string;
+      jobId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
+      const agentId = normalizeOptionalString(process.env.SALMON_AGENT_ID);
+      await apiRequest<{ status: string }>(
+        apiUrl,
+        `/jobs/${encodeURIComponent(jobId)}/agent/request-help`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            summary: options.summary,
+            details: options.details,
+            turn_id: turnId,
+            agent_id: agentId,
+          }),
+        },
+      );
+
+      console.log(`Help request submitted for job ${jobId}.`);
+    },
+  );
+
+jobCommand
+  .command("plan-summary")
+  .description("Submit structured plan summary for the current plan turn")
+  .requiredOption("--title <text>", "Plan title")
+  .requiredOption("--summary <text>", "Plan summary")
+  .option(
+    "--step <text>",
+    "Plan step (repeat for multiple steps)",
+    (value: string, prev: string[]) => [...prev, value],
+    [],
+  )
+  .option("--thread-id <id>", "Conversation thread id")
+  .option("--turn-id <id>", "Conversation turn id")
+  .option("--api-url <url>", "Salmon API base URL")
+  .action(
+    async (options: {
+      title: string;
+      summary: string;
+      step: string[];
+      threadId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, threadId, turnId } = resolveThreadTurnCommandContext(options);
+      const steps = (Array.isArray(options.step) ? options.step : [])
+        .map((step) => step.trim())
+        .filter(Boolean);
+      if (steps.length === 0) {
+        throw new Error("At least one --step is required.");
+      }
+
+      await apiRequest(
+        apiUrl,
+        `/conversations/${encodeURIComponent(threadId)}/turns/${encodeURIComponent(turnId)}/agent/plan-summary`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: options.title.trim(),
+            summary: options.summary.trim(),
+            steps,
+          }),
+        },
+      );
+
+      console.log(`Plan summary submitted for turn ${turnId}.`);
     },
   );
 
@@ -252,6 +415,62 @@ function parsePort(portValue: string): number {
     throw new Error(`Invalid --port value: ${portValue}. Use an integer 1-65535.`);
   }
   return port;
+}
+
+function resolveJobCommandContext(input: {
+  apiUrl?: string;
+  jobId?: string;
+  turnId?: string;
+}): {
+  apiUrl: string;
+  jobId: string;
+  turnId?: string;
+} {
+  const apiUrl = resolveRequiredOptionOrEnv(input.apiUrl, "SALMON_API_URL", "--api-url");
+  const jobId = resolveRequiredOptionOrEnv(input.jobId, "SALMON_JOB_ID", "--job-id");
+  const turnId = normalizeOptionalString(input.turnId) || normalizeOptionalString(process.env.SALMON_TURN_ID);
+  return { apiUrl, jobId, turnId };
+}
+
+function resolveThreadTurnCommandContext(input: {
+  apiUrl?: string;
+  threadId?: string;
+  turnId?: string;
+}): {
+  apiUrl: string;
+  threadId: string;
+  turnId: string;
+} {
+  const apiUrl = resolveRequiredOptionOrEnv(input.apiUrl, "SALMON_API_URL", "--api-url");
+  const threadId = resolveRequiredOptionOrEnv(input.threadId, "SALMON_THREAD_ID", "--thread-id");
+  const turnId = resolveRequiredOptionOrEnv(input.turnId, "SALMON_TURN_ID", "--turn-id");
+  return { apiUrl, threadId, turnId };
+}
+
+function resolveRequiredOptionOrEnv(
+  optionValue: string | undefined,
+  envName: string,
+  optionLabel: string,
+): string {
+  const fromOption = normalizeOptionalString(optionValue);
+  if (fromOption) {
+    return fromOption;
+  }
+
+  const fromEnv = normalizeOptionalString(process.env[envName]);
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  throw new Error(`Missing ${optionLabel}. Pass ${optionLabel} or set ${envName}.`);
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function openBrowser(url: string): void {

@@ -1,20 +1,10 @@
-import type { PlanSummary, ReasoningEffort } from "./types";
-
-const PLAN_START = "<PLAN_SUMMARY_JSON>";
-const PLAN_END = "</PLAN_SUMMARY_JSON>";
-const RECIPIENT_START = "<RECIPIENT_JSON>";
-const RECIPIENT_END = "</RECIPIENT_JSON>";
+import type { ReasoningEffort } from "./types";
 
 type WorkerCandidate = {
   id: string;
   name: string;
   harness: string;
   modelLabel: string;
-};
-
-export type ParsedRecipient = {
-  agentId: string;
-  reason: string;
 };
 
 export function buildPrompt(
@@ -38,13 +28,15 @@ export function buildPrompt(
   if (mode === "plan") {
     return [
       "You are planning work for an implementation agent.",
-      "Return a concrete, decision-complete plan.",
-      "After the human-readable plan, you MUST include one JSON object wrapped exactly in these tags:",
-      `${PLAN_START}{\"title\":\"...\",\"summary\":\"...\",\"steps\":[\"...\"]}${PLAN_END}`,
-      "Rules for JSON:",
-      "- title: short title",
-      "- summary: 1-2 sentence summary",
-      "- steps: ordered list of implementation steps",
+      "Plan mode is planning-only.",
+      "Do not execute the task, do not edit files, and do not run implementation commands/tools.",
+      "Return a concrete, decision-complete plan in plain language.",
+      "Then persist structured plan data by calling exactly one CLI command:",
+      "salmon job plan-summary --title \"<short title>\" --summary \"<1-2 sentence summary>\" --step \"<step 1>\" --step \"<step 2>\"",
+      "Rules:",
+      "- Use at least one --step flag and keep steps ordered.",
+      "- Title and summary must be concise and specific.",
+      "- Do not emit PLAN_SUMMARY_JSON tags.",
       reasoningLine,
       "User request:",
       cleanMessage,
@@ -76,11 +68,13 @@ export function buildOrchestratorPrompt(input: {
     "You are an Orchestrator.",
     "Your only job is to pick the best worker agent for the task.",
     "Do not execute the task.",
-    "Return a short rationale, then include exactly one JSON object wrapped in tags:",
-    `${RECIPIENT_START}{\"agent_id\":\"...\",\"reason\":\"...\"}${RECIPIENT_END}`,
+    "Call exactly one CLI command to persist the selected worker:",
+    "salmon job select-recipient --agent-id <candidate_id> --reason \"<one sentence reason>\"",
     "Rules:",
-    "- agent_id MUST be one of the listed candidate ids.",
+    "- You MUST execute the command exactly once.",
+    "- agent-id MUST be one of the listed candidate ids.",
     "- reason must be one sentence.",
+    "- Do not output JSON tags or any RECIPIENT payload.",
     reasoningLine,
     forced
       ? `- A recipient was manually requested. You MUST choose this exact agent id: ${forced}`
@@ -89,29 +83,8 @@ export function buildOrchestratorPrompt(input: {
     input.task.trim(),
     "Candidate workers:",
     candidateLines.length > 0 ? candidateLines.join("\n") : "(none)",
+    "After the command succeeds, return a concise plain-text confirmation.",
   ].join("\n\n");
-}
-
-export function parseOrchestratorRecipient(finalText: string): ParsedRecipient | null {
-  const parsed = extractJsonBetweenTags<Record<string, unknown>>(
-    finalText,
-    RECIPIENT_START,
-    RECIPIENT_END,
-  );
-  if (!parsed) {
-    return null;
-  }
-
-  const agentId = typeof parsed.agent_id === "string" ? parsed.agent_id.trim() : "";
-  const reason = typeof parsed.reason === "string" ? parsed.reason.trim() : "";
-  if (!agentId) {
-    return null;
-  }
-
-  return {
-    agentId,
-    reason,
-  };
 }
 
 export function buildWorkerPrompt(input: {
@@ -127,6 +100,12 @@ export function buildWorkerPrompt(input: {
   return [
     `You are ${input.workerName}.`,
     "Follow your agent instructions exactly, then execute the task.",
+    "If you need clarification from the human, run:",
+    "salmon job ask-question --question \"<question>\" [--details \"<optional context>\"]",
+    "If you are blocked and need human help, run:",
+    "salmon job request-help --summary \"<short summary>\" [--details \"<optional context>\"]",
+    "After either CLI escalation command, stop doing further work.",
+    "Do not ask for clarification/help only in plain text without calling the CLI.",
     reasoningLine,
     "Agent instructions:",
     agentFile || "(No agent file provided. Use pragmatic software engineering judgement.)",
@@ -134,97 +113,6 @@ export function buildWorkerPrompt(input: {
     task,
     "Return a concise final result.",
   ].join("\n\n");
-}
-
-export function parsePlanSummary(finalText: string): PlanSummary {
-  const parsed = extractJsonBetweenTags<PlanSummary>(finalText, PLAN_START, PLAN_END);
-  if (parsed && isPlanSummary(parsed)) {
-    return normalizePlanSummary(parsed);
-  }
-
-  return {
-    title: fallbackTitle(finalText),
-    summary: fallbackSummary(finalText),
-    steps: fallbackSteps(finalText),
-  };
-}
-
-function extractJsonBetweenTags<T>(text: string, startTag: string, endTag: string): T | null {
-  const start = text.indexOf(startTag);
-  const end = text.indexOf(endTag);
-  if (start === -1 || end === -1 || end <= start) {
-    return null;
-  }
-
-  const jsonText = text.slice(start + startTag.length, end).trim();
-  if (!jsonText) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(jsonText) as T;
-  } catch {
-    return null;
-  }
-}
-
-function isPlanSummary(value: unknown): value is PlanSummary {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const data = value as Record<string, unknown>;
-  return (
-    typeof data.title === "string" &&
-    typeof data.summary === "string" &&
-    Array.isArray(data.steps) &&
-    data.steps.every((step) => typeof step === "string")
-  );
-}
-
-function normalizePlanSummary(summary: PlanSummary): PlanSummary {
-  return {
-    title: summary.title.trim() || "Execution Plan",
-    summary: summary.summary.trim() || "Planned work.",
-    steps: summary.steps.map((step) => step.trim()).filter(Boolean),
-  };
-}
-
-function fallbackTitle(text: string): string {
-  const line = text
-    .split(/\r?\n/)
-    .map((part) => part.trim())
-    .find(Boolean);
-
-  if (!line) {
-    return "Execution Plan";
-  }
-
-  return line.length > 80 ? `${line.slice(0, 77)}...` : line;
-}
-
-function fallbackSummary(text: string): string {
-  const collapsed = text.replace(/\s+/g, " ").trim();
-  if (!collapsed) {
-    return "No summary available.";
-  }
-
-  return collapsed.length > 220 ? `${collapsed.slice(0, 217)}...` : collapsed;
-}
-
-function fallbackSteps(text: string): string[] {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^[-*]\s+|^\d+\.\s+/.test(line))
-    .map((line) => line.replace(/^[-*]\s+|^\d+\.\s+/, ""))
-    .filter(Boolean);
-
-  if (lines.length > 0) {
-    return lines.slice(0, 8);
-  }
-
-  return [fallbackSummary(text)];
 }
 
 function formatReasoningInstruction(reasoningEffort: ReasoningEffort): string {

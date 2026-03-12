@@ -64,6 +64,71 @@ export async function fetchJobs(limit = 200) {
   return Array.isArray(data.jobs) ? data.jobs : []
 }
 
+export function openJobsStream({ onReady, onJobStatusChanged, onError } = {}) {
+  const stream = new EventSource(`${API_URL}/jobs/stream`)
+
+  stream.addEventListener('ready', (event) => {
+    const payload = parseEventPayload(event)
+    onReady?.(payload)
+  })
+
+  stream.addEventListener('job_status_changed', (event) => {
+    const payload = parseEventPayload(event)
+    if (!payload || typeof payload !== 'object') {
+      return
+    }
+    onJobStatusChanged?.(payload)
+  })
+
+  stream.addEventListener('error', (event) => {
+    onError?.(event)
+  })
+
+  return () => {
+    stream.close()
+  }
+}
+
+export async function fetchJobOutputChanges(jobId) {
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/output/changes`)
+}
+
+export async function fetchJobOutputFiles(jobId) {
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/output/files`)
+}
+
+export function jobOutputContentUrl(jobId, path) {
+  const params = new URLSearchParams()
+  params.set('path', path)
+  return `${API_URL}/jobs/${encodeURIComponent(jobId)}/output/file/content?${params.toString()}`
+}
+
+export function jobOutputDownloadUrl(jobId, path) {
+  const params = new URLSearchParams()
+  params.set('path', path)
+  return `${API_URL}/jobs/${encodeURIComponent(jobId)}/output/file/download?${params.toString()}`
+}
+
+export async function openJobOutputFolder(jobId, path = '') {
+  const body = {}
+  if (path) {
+    body.path = path
+  }
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/output/open-folder`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export async function reviewJob(jobId, action) {
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/review`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action }),
+  })
+}
+
 export async function fetchAgents() {
   const data = await fetchJson('/agents')
   return Array.isArray(data.agents) ? data.agents : []
@@ -146,6 +211,14 @@ export async function setJobRecipient(jobId, recipient_agent_id) {
   })
 }
 
+export async function respondToJob(jobId, message) {
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/respond`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message }),
+  })
+}
+
 export async function fetchConversationThread(threadId) {
   return fetchJson(`/conversations/${encodeURIComponent(threadId)}`)
 }
@@ -210,6 +283,18 @@ export async function streamConversationTurn(payload, { onEvent, signal } = {}) 
       buffer = buffer.slice(splitIndex + (buffer.startsWith('\r\n', splitIndex) ? 4 : 2))
       parseAndDispatchEventBlock(chunk, onEvent)
     }
+  }
+}
+
+function parseEventPayload(event) {
+  if (!event || typeof event.data !== 'string' || !event.data) {
+    return null
+  }
+
+  try {
+    return JSON.parse(event.data)
+  } catch {
+    return null
   }
 }
 

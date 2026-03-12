@@ -13,7 +13,10 @@ import {
   fetchContextFiles,
   fetchConversationThread,
   fetchJobs,
+  openJobsStream,
   fetchWorkspaces,
+  respondToJob,
+  reviewJob,
   setJobRecipient,
   setActiveWorkspace,
   streamConversationTurn,
@@ -32,8 +35,17 @@ import { Sidebar } from './components/Sidebar'
 function getPendingCount(jobs) {
   return jobs.filter((job) => {
     const status = String(job.status || '').toLowerCase()
-    return status === 'review' || status === 'pending_review' || status === 'needs_review'
+    return (
+      status === 'pending_review' ||
+      status === 'waiting_for_recipient' ||
+      status === 'waiting_for_question_response' ||
+      status === 'waiting_for_help_response'
+    )
   }).length
+}
+
+function isWaitingForHumanResponse(status) {
+  return status === 'waiting_for_question_response' || status === 'waiting_for_help_response'
 }
 
 function errorText(error) {
@@ -208,11 +220,24 @@ function summarizeStatusEvent(name, payload) {
     const id = payload?.selected_agent_id || 'unknown'
     return `Recipient selected: ${id}`
   }
+  if (name === 'recipient_selected_via_cli') {
+    const id = payload?.selected_agent_id || 'unknown'
+    return `Recipient selected via CLI: ${id}`
+  }
   if (name === 'worker_started') {
     return `Worker started: ${payload?.worker_agent_id || 'unknown'}`
   }
   if (name === 'recipient_required') {
     return payload?.reason || 'Recipient selection requires input.'
+  }
+  if (name === 'worker_question_requested') {
+    return payload?.question || 'Worker requested clarification from the human.'
+  }
+  if (name === 'worker_help_requested') {
+    return payload?.summary || 'Worker requested human help.'
+  }
+  if (name === 'human_response_received') {
+    return 'Human response received. Resuming worker.'
   }
   if (name === 'worker_completed') {
     return 'Worker completed.'
@@ -365,6 +390,8 @@ export default function App() {
     open: false,
     mode: 'chat',
     threadId: '',
+    jobId: '',
+    jobStatus: '',
     harness: '',
     modelLabel: '',
     reasoningEffort: 'medium',
@@ -375,6 +402,7 @@ export default function App() {
   })
 
   const streamAbortRef = useRef(null)
+  const jobsRefreshTimerRef = useRef(null)
 
   useEffect(() => {
     void bootstrap()
@@ -383,8 +411,74 @@ export default function App() {
   useEffect(() => {
     return () => {
       streamAbortRef.current?.abort()
+      if (jobsRefreshTimerRef.current) {
+        clearTimeout(jobsRefreshTimerRef.current)
+        jobsRefreshTimerRef.current = null
+      }
     }
   }, [])
+
+  useEffect(() => {
+    if (!activeWorkspaceName) {
+      return
+    }
+
+    const closeStream = openJobsStream({
+      onJobStatusChanged: (event) => {
+        const jobId = typeof event?.job_id === 'string' ? event.job_id : ''
+        const status = typeof event?.status === 'string' ? event.status : ''
+
+        if (jobId && status) {
+          setJobs((prev) =>
+            prev.map((job) => (job.id === jobId ? { ...job, status } : job)),
+          )
+          setConversation((prev) => {
+            if (prev.jobId !== jobId || prev.jobStatus === status) {
+              return prev
+            }
+            return {
+              ...prev,
+              jobStatus: status,
+            }
+          })
+        }
+
+        if (jobsRefreshTimerRef.current) {
+          clearTimeout(jobsRefreshTimerRef.current)
+        }
+        jobsRefreshTimerRef.current = setTimeout(() => {
+          jobsRefreshTimerRef.current = null
+          void loadJobs()
+        }, 250)
+      },
+    })
+
+    return () => {
+      closeStream()
+    }
+  }, [activeWorkspaceName])
+
+  useEffect(() => {
+    if (!conversation.jobId) {
+      return
+    }
+
+    const match = jobs.find((job) => job.id === conversation.jobId)
+    const nextStatus = typeof match?.status === 'string' ? match.status : ''
+    if (!nextStatus || nextStatus === conversation.jobStatus) {
+      return
+    }
+
+    setConversation((prev) => {
+      if (prev.jobId !== conversation.jobId || prev.jobStatus === nextStatus) {
+        return prev
+      }
+      return {
+        ...prev,
+        jobStatus: nextStatus,
+      }
+    })
+  }, [jobs, conversation.jobId, conversation.jobStatus])
 
   const pendingCount = useMemo(() => getPendingCount(jobs), [jobs])
   const orchestratorRuntime = useMemo(() => {
@@ -646,6 +740,8 @@ export default function App() {
       open: false,
       mode: 'chat',
       threadId: '',
+      jobId: '',
+      jobStatus: '',
       harness: '',
       modelLabel: '',
       reasoningEffort: 'medium',
@@ -667,6 +763,35 @@ export default function App() {
         })
         await loadJobs()
         setActiveTab('feed')
+      } catch (error) {
+        setWorkspaceError(errorText(error))
+      }
+      return
+    }
+
+    const conversationStatus = String(conversation.jobStatus || '').toLowerCase()
+    if (
+      mode === 'chat' &&
+      conversation.open &&
+      conversation.jobId &&
+      isWaitingForHumanResponse(conversationStatus)
+    ) {
+      try {
+        await respondToJob(conversation.jobId, message)
+        setConversation((prev) => ({
+          ...prev,
+          jobStatus: 'queued',
+          entries: [
+            ...prev.entries,
+            { id: nextEntryId('user'), type: 'user', content: message },
+            {
+              id: nextEntryId('status'),
+              type: 'status',
+              content: 'Response sent. Job re-queued with the same worker.',
+            },
+          ],
+        }))
+        await loadJobs()
       } catch (error) {
         setWorkspaceError(errorText(error))
       }
@@ -702,6 +827,8 @@ export default function App() {
       open: true,
       mode,
       threadId: nextThreadId || '',
+      jobId: '',
+      jobStatus: '',
       harness: effectiveHarness,
       modelLabel: effectiveModelLabel,
       reasoningEffort: reasoningEffort || 'medium',
@@ -844,6 +971,8 @@ export default function App() {
         open: true,
         mode: 'chat',
         threadId: thread.id,
+        jobId: '',
+        jobStatus: '',
         harness: thread.harness || 'claude_code',
         modelLabel: thread.model_label || 'Opus 4.6',
         reasoningEffort: 'medium',
@@ -861,17 +990,65 @@ export default function App() {
   }
 
   async function handleOpenJobConversation(job) {
+    const jobId = typeof job?.id === 'string' ? job.id : ''
+    if (!jobId) {
+      setWorkspaceError('Task is missing a job id.')
+      return
+    }
+
     const threadId = typeof job?.thread_id === 'string' ? job.thread_id : ''
+    const fallbackTitle = typeof job?.title === 'string' && job.title ? job.title : 'Task'
+    const fallbackStatus = typeof job?.status === 'string' && job.status ? job.status : 'queued'
+
     if (!threadId) {
-      setWorkspaceError('No conversation is available for this task yet.')
+      setConversation({
+        open: true,
+        mode: 'chat',
+        threadId: '',
+        jobId,
+        jobStatus: fallbackStatus,
+        harness: orchestratorRuntime.harness,
+        modelLabel: orchestratorRuntime.modelLabel,
+        reasoningEffort: 'medium',
+        recipientAgentId: '',
+        entries: [
+          {
+            id: nextEntryId('status'),
+            type: 'status',
+            content: `Opened output review for ${fallbackTitle}.`,
+          },
+        ],
+        loading: false,
+        error: '',
+      })
+      setActiveTab('feed')
       return
     }
 
     try {
       const data = await fetchConversationThread(threadId)
       if (!data?.thread) {
-        setWorkspaceError('Task conversation not found.')
-        await loadJobs()
+        setConversation({
+          open: true,
+          mode: 'chat',
+          threadId: '',
+          jobId,
+          jobStatus: fallbackStatus,
+          harness: orchestratorRuntime.harness,
+          modelLabel: orchestratorRuntime.modelLabel,
+          reasoningEffort: 'medium',
+          recipientAgentId: '',
+          entries: [
+            {
+              id: nextEntryId('status'),
+              type: 'status',
+              content: `Opened output review for ${fallbackTitle}. Conversation history is unavailable.`,
+            },
+          ],
+          loading: false,
+          error: '',
+        })
+        setActiveTab('feed')
         return
       }
 
@@ -882,6 +1059,8 @@ export default function App() {
         open: true,
         mode: 'chat',
         threadId: thread.id,
+        jobId,
+        jobStatus: fallbackStatus,
         harness: thread.harness || 'claude_code',
         modelLabel: thread.model_label || 'Opus 4.6',
         reasoningEffort: 'medium',
@@ -895,6 +1074,24 @@ export default function App() {
     } catch (error) {
       setWorkspaceError(errorText(error))
     }
+  }
+
+  async function handleReviewJob(jobId, action) {
+    if (!jobId || action !== 'approve') {
+      return
+    }
+
+    await reviewJob(jobId, action)
+    await loadJobs()
+    setConversation((prev) => {
+      if (!prev.open || prev.jobId !== jobId) {
+        return prev
+      }
+      return {
+        ...prev,
+        jobStatus: 'completed',
+      }
+    })
   }
 
   async function handleSetJobRecipient(jobId, recipientAgentId) {
@@ -924,6 +1121,15 @@ export default function App() {
         ...prev,
         [activeWorkspaceName]: [...existing, threadId],
       }
+    })
+  }
+
+  function handleDrawerPromptSubmit(message) {
+    const mode = conversation.mode === 'plan' ? 'plan' : 'chat'
+    void handleInputSubmit({
+      message,
+      mode,
+      reasoningEffort: conversation.reasoningEffort || 'medium',
     })
   }
 
@@ -975,6 +1181,9 @@ export default function App() {
               entries={conversation.entries}
               loading={conversation.loading}
               error={conversation.error}
+              jobId={conversation.jobId || ''}
+              jobStatus={conversation.jobStatus || ''}
+              onReviewAction={(jobId, action) => handleReviewJob(jobId, action)}
               onClose={closeConversationDrawer}
               recipientAgents={recipientAgents}
               selectedRecipientAgentId={conversation.recipientAgentId || ''}
@@ -984,18 +1193,21 @@ export default function App() {
                   recipientAgentId,
                 }))
               }}
+              onPromptSubmit={handleDrawerPromptSubmit}
               onExecute={() => {
                 void handleExecuteFromPlan()
               }}
               executeDisabled={!conversation.threadId}
             />
-            <InputBar
-              disabled={conversation.loading}
-              preferredMode={conversation.open ? conversation.mode : ''}
-              onSubmit={(payload) => {
-                void handleInputSubmit(payload)
-              }}
-            />
+            {!(conversation.open && (conversation.mode === 'chat' || conversation.mode === 'plan')) && (
+              <InputBar
+                disabled={conversation.loading}
+                preferredMode={conversation.open ? conversation.mode : ''}
+                onSubmit={(payload) => {
+                  void handleInputSubmit(payload)
+                }}
+              />
+            )}
           </div>
         )}
 

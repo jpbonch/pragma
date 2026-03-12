@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, cp, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
 import { getConversationAdapter } from "./adapters";
-import { buildOrchestratorPrompt, buildWorkerPrompt, parseOrchestratorRecipient } from "./prompts";
+import { buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
 import { InProcessQueue } from "./queue";
 import {
   closeThread,
@@ -14,7 +14,7 @@ import {
   insertMessage,
   updateThreadSession,
 } from "./store";
-import type { HarnessId, ReasoningEffort } from "./types";
+import type { HarnessId, JobStatus, ReasoningEffort } from "./types";
 
 type EnqueueExecuteInput = {
   workspaceName: string;
@@ -34,38 +34,82 @@ type AgentRow = {
   model_id: string;
 };
 
+type JobStatusChangedInput = {
+  workspaceName: string;
+  jobId: string;
+  status: JobStatus;
+  source: string;
+};
+
 export class ExecuteRunner {
   private readonly queue = new InProcessQueue();
+  private readonly apiUrl: string;
+  private readonly onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+
+  constructor(options: {
+    apiUrl: string;
+    onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+  }) {
+    this.apiUrl = options.apiUrl;
+    this.onJobStatusChanged = options.onJobStatusChanged;
+  }
 
   enqueue(input: EnqueueExecuteInput): void {
     this.queue.enqueue(async () => {
-      await runExecuteTask(input);
+      await runExecuteTask(input, {
+        apiUrl: this.apiUrl,
+        onJobStatusChanged: this.onJobStatusChanged,
+      });
     });
   }
 }
 
-async function runExecuteTask(input: EnqueueExecuteInput): Promise<void> {
+async function runExecuteTask(
+  input: EnqueueExecuteInput,
+  options: {
+    apiUrl: string;
+    onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+  },
+): Promise<void> {
   const db = await openDatabase(input.workspaceName);
   const paths = getWorkspacePaths(input.workspaceName);
 
-  const outputDir = join(paths.outputsDir, input.jobId);
+  const jobRootDir = join(paths.worktreesDir, input.jobId);
+  const jobCodeDir = join(jobRootDir, "code");
+  const outputDir = join(jobRootDir, "outputs");
   const logFile = join(outputDir, "events.jsonl");
+  await mkdir(jobRootDir, { recursive: true });
+  await ensureJobCodeDir(paths.codeDir, jobCodeDir);
   await mkdir(outputDir, { recursive: true });
 
   const turnId = `turn_${randomUUID().slice(0, 12)}`;
   const userMessageId = `msg_${randomUUID().slice(0, 12)}`;
   const task = input.prompt.trim();
   const reasoningEffort = input.reasoningEffort ?? "medium";
+  const notifyJobStatus = async (status: JobStatus, source: string): Promise<void> => {
+    try {
+      await options.onJobStatusChanged?.({
+        workspaceName: input.workspaceName,
+        jobId: input.jobId,
+        status,
+        source,
+      });
+    } catch {
+      // Status streaming should not break execution flow.
+    }
+  };
 
   await db.query(
     `
 UPDATE jobs
 SET status = 'orchestrating',
-    output_dir = $2
+    output_dir = $2,
+    assigned_to = NULL
 WHERE id = $1
 `,
     [input.jobId, outputDir],
   );
+  await notifyJobStatus("orchestrating", "execute_runner");
 
   try {
     const orchestrator = await getAgentById(db, DEFAULT_AGENT_ID);
@@ -154,7 +198,15 @@ WHERE id = $1
       prompt: orchestratorPrompt,
       modelId: orchestrator.model_id,
       sessionId: null,
-      cwd: paths.codeDir,
+      cwd: jobCodeDir,
+      env: buildAgentRuntimeEnv({
+        apiUrl: options.apiUrl,
+        workspaceName: input.workspaceName,
+        jobId: input.jobId,
+        threadId: input.threadId,
+        turnId,
+        agentId: orchestrator.id,
+      }),
       mode: "execute",
       reasoningEffort,
       onEvent: async (event) => {
@@ -186,8 +238,8 @@ WHERE id = $1
     });
 
     let selectedWorker: AgentRow | null = null;
-    let selectionStatus: "auto_selected" | "manual_selected" | "needs_input" | "invalid" =
-      "needs_input";
+    let selectionStatus: "auto_selected" | "manual_selected" | "recipient_required" | "invalid" =
+      "recipient_required";
     let selectionReason = "";
 
     if (requestedWorker) {
@@ -195,22 +247,22 @@ WHERE id = $1
       selectionStatus = "manual_selected";
       selectionReason = "Manual recipient override.";
     } else {
-      const parsed = parseOrchestratorRecipient(finalOrchestratorText);
-      if (parsed) {
-        const match = workers.find((worker) => worker.id === parsed.agentId) ?? null;
-        if (match) {
+      const selectedRecipientId = await getJobAssignedRecipientId(db, input.jobId);
+      if (selectedRecipientId) {
+        const match = workers.find((worker) => worker.id === selectedRecipientId) ?? null;
+        if (!match) {
+          selectionStatus = "invalid";
+          selectionReason = `Orchestrator selected invalid worker id: ${selectedRecipientId}`;
+        } else {
           selectedWorker = match;
           selectionStatus = "auto_selected";
-          selectionReason = parsed.reason;
-        } else {
-          selectionStatus = "invalid";
-          selectionReason = `Orchestrator selected invalid worker id: ${parsed.agentId}`;
+          selectionReason = finalOrchestratorText || "Recipient selected via CLI.";
         }
       }
     }
 
     if (!selectedWorker) {
-      const unresolvedStatus = selectionStatus === "invalid" ? "invalid" : "needs_input";
+      const unresolvedStatus = selectionStatus === "invalid" ? "invalid" : "recipient_required";
       const reason =
         workers.length === 0
           ? "No eligible worker agents exist."
@@ -252,13 +304,14 @@ WHERE id = $1
       await db.query(
         `
 UPDATE jobs
-SET status = 'needs_input',
+SET status = 'waiting_for_recipient',
     assigned_to = NULL,
     session_id = $2
 WHERE id = $1
 `,
         [input.jobId, orchestratorResult.sessionId],
       );
+      await notifyJobStatus("waiting_for_recipient", "execute_runner");
 
       await appendJsonLine(logFile, {
         type: "recipient_required",
@@ -288,6 +341,7 @@ WHERE id = $1
 `,
       [input.jobId, selectedWorker.id],
     );
+    await notifyJobStatus("running", "execute_runner");
 
     await insertEvent(db, {
       id: `evt_${randomUUID().slice(0, 12)}`,
@@ -315,7 +369,15 @@ WHERE id = $1
       prompt: workerPrompt,
       modelId: selectedWorker.model_id,
       sessionId: null,
-      cwd: paths.codeDir,
+      cwd: jobCodeDir,
+      env: buildAgentRuntimeEnv({
+        apiUrl: options.apiUrl,
+        workspaceName: input.workspaceName,
+        jobId: input.jobId,
+        threadId: input.threadId,
+        turnId,
+        agentId: selectedWorker.id,
+      }),
       mode: "execute",
       reasoningEffort,
       onEvent: async (event) => {
@@ -382,16 +444,29 @@ WHERE id = $1
     });
 
     await closeThread(db, input.threadId);
-
-    await db.query(
+    const statusResult = await db.query<{ status: JobStatus }>(
       `
+SELECT status
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+      [input.jobId],
+    );
+
+    const currentStatus = statusResult.rows[0]?.status ?? null;
+    if (!isWaitingForHumanResponseStatus(currentStatus)) {
+      await db.query(
+        `
 UPDATE jobs
 SET status = 'pending_review',
     session_id = $2
 WHERE id = $1
 `,
-      [input.jobId, workerResult.sessionId],
-    );
+        [input.jobId, workerResult.sessionId],
+      );
+      await notifyJobStatus("pending_review", "execute_runner");
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -415,6 +490,7 @@ WHERE id = $1
 `,
       [input.jobId],
     ).catch(() => undefined);
+    await notifyJobStatus("failed", "execute_runner");
 
     await appendJsonLine(logFile, { type: "error", message });
   } finally {
@@ -456,6 +532,45 @@ ORDER BY name ASC
   return result.rows;
 }
 
+async function getJobAssignedRecipientId(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  jobId: string,
+): Promise<string | null> {
+  const result = await db.query<{ assigned_to: string | null }>(
+    `
+SELECT assigned_to
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+    [jobId],
+  );
+
+  return result.rows[0]?.assigned_to ?? null;
+}
+
+function buildAgentRuntimeEnv(input: {
+  apiUrl: string;
+  workspaceName: string;
+  jobId: string;
+  threadId: string;
+  turnId: string;
+  agentId: string;
+}): Record<string, string> {
+  return {
+    SALMON_API_URL: input.apiUrl,
+    SALMON_WORKSPACE_NAME: input.workspaceName,
+    SALMON_JOB_ID: input.jobId,
+    SALMON_THREAD_ID: input.threadId,
+    SALMON_TURN_ID: input.turnId,
+    SALMON_AGENT_ID: input.agentId,
+  };
+}
+
+function isWaitingForHumanResponseStatus(status: JobStatus | null): boolean {
+  return status === "waiting_for_question_response" || status === "waiting_for_help_response";
+}
+
 async function appendJsonLine(filePath: string, payload: unknown): Promise<void> {
   await appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf8");
 }
@@ -468,4 +583,32 @@ function appendText(current: string, next: string): string {
     return current;
   }
   return `${current}\n${next}`;
+}
+
+async function ensureJobCodeDir(sourceCodeDir: string, targetCodeDir: string): Promise<void> {
+  await mkdir(targetCodeDir, { recursive: true });
+
+  const targetEntries = await readdir(targetCodeDir).catch(() => []);
+  if (targetEntries.length > 0) {
+    return;
+  }
+
+  const sourceStat = await stat(sourceCodeDir).catch(() => null);
+  if (!sourceStat?.isDirectory()) {
+    return;
+  }
+
+  const sourceEntries = await readdir(sourceCodeDir).catch(() => []);
+  if (sourceEntries.length === 0) {
+    return;
+  }
+
+  await Promise.all(
+    sourceEntries.map((entry) =>
+      cp(join(sourceCodeDir, entry), join(targetCodeDir, entry), {
+        recursive: true,
+        force: true,
+      }),
+    ),
+  );
 }

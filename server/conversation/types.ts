@@ -3,6 +3,27 @@ export type ConversationMode = "chat" | "plan" | "execute";
 export type HarnessId = "codex" | "claude_code";
 export type ReasoningEffort = "low" | "medium" | "high" | "extra_high";
 
+export const JOB_STATUS_VALUES = [
+  "queued",
+  "orchestrating",
+  "running",
+  "waiting_for_recipient",
+  "waiting_for_question_response",
+  "waiting_for_help_response",
+  "pending_review",
+  "needs_fix",
+  "completed",
+  "failed",
+] as const;
+
+export type JobStatus = (typeof JOB_STATUS_VALUES)[number];
+
+const JOB_STATUS_SET = new Set<string>(JOB_STATUS_VALUES);
+
+export function isJobStatus(value: unknown): value is JobStatus {
+  return typeof value === "string" && JOB_STATUS_SET.has(value);
+}
+
 export type ConversationStatus = "open" | "closed";
 
 export type ConversationThread = {
@@ -43,7 +64,7 @@ export type ConversationTurn = {
   selected_agent_id: string | null;
   orchestrator_agent_id: string | null;
   worker_session_id: string | null;
-  selection_status: "auto_selected" | "manual_selected" | "needs_input" | "invalid" | null;
+  selection_status: "auto_selected" | "manual_selected" | "recipient_required" | "invalid" | null;
   status: "running" | "completed" | "failed";
   created_at: string;
   completed_at: string | null;
@@ -76,6 +97,7 @@ export type AdapterSendTurnInput = {
   modelId: string;
   sessionId: string | null;
   cwd: string;
+  env?: Record<string, string>;
   mode: ConversationMode;
   reasoningEffort?: ReasoningEffort;
   onEvent: (event: AdapterEvent) => void | Promise<void>;
@@ -90,9 +112,3 @@ export type AdapterSendTurnResult = {
 export interface ConversationAdapter {
   sendTurn(input: AdapterSendTurnInput): Promise<AdapterSendTurnResult>;
 }
-
-export type PlanSummary = {
-  title: string;
-  summary: string;
-  steps: string[];
-};

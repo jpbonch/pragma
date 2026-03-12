@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { spawn } from "node:child_process";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -22,7 +23,7 @@ import {
 import { getConversationAdapter } from "./conversation/adapters";
 import { ExecuteRunner } from "./conversation/executeRunner";
 import { resolveModelId } from "./conversation/models";
-import { buildPrompt, parsePlanSummary } from "./conversation/prompts";
+import { buildPrompt } from "./conversation/prompts";
 import {
   closeThread,
   createThread,
@@ -43,18 +44,85 @@ import {
   completeTurn,
   failTurn,
 } from "./conversation/store";
-import type { HarnessId, ReasoningEffort } from "./conversation/types";
+import { isJobStatus } from "./conversation/types";
+import type { HarnessId, JobStatus, ReasoningEffort } from "./conversation/types";
 
 type StartServerOptions = {
   port: number;
 };
 
+type JobStatusStreamEvent = {
+  job_id: string;
+  status: JobStatus;
+  changed_at: string;
+  source: string;
+};
+
+type JobStatusListener = (event: JobStatusStreamEvent) => void;
+
+const JOB_STATUS_LISTENERS = new Map<string, Set<JobStatusListener>>();
+
+function subscribeJobStatus(workspaceName: string, listener: JobStatusListener): () => void {
+  const current = JOB_STATUS_LISTENERS.get(workspaceName);
+  if (current) {
+    current.add(listener);
+  } else {
+    JOB_STATUS_LISTENERS.set(workspaceName, new Set([listener]));
+  }
+
+  return () => {
+    const listeners = JOB_STATUS_LISTENERS.get(workspaceName);
+    if (!listeners) {
+      return;
+    }
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      JOB_STATUS_LISTENERS.delete(workspaceName);
+    }
+  };
+}
+
+function publishJobStatus(workspaceName: string, event: JobStatusStreamEvent): void {
+  const listeners = JOB_STATUS_LISTENERS.get(workspaceName);
+  if (!listeners || listeners.size === 0) {
+    return;
+  }
+
+  for (const listener of listeners) {
+    listener(event);
+  }
+}
+
 export async function startServer(options: StartServerOptions): Promise<void> {
   await setupSalmon();
-  const executeRunner = new ExecuteRunner();
+  const apiUrl = process.env.SALMON_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
+  const executeRunner = new ExecuteRunner({
+    apiUrl,
+    onJobStatusChanged: (input) => {
+      publishJobStatus(input.workspaceName, {
+        job_id: input.jobId,
+        status: input.status,
+        changed_at: new Date().toISOString(),
+        source: input.source,
+      });
+    },
+  });
 
   const app = new Hono();
   app.use("*", cors());
+  const emitJobStatus = (
+    workspaceName: string,
+    jobId: string,
+    status: JobStatus,
+    source: string,
+  ): void => {
+    publishJobStatus(workspaceName, {
+      job_id: jobId,
+      status,
+      changed_at: new Date().toISOString(),
+      source,
+    });
+  };
 
   app.get("/health", (c) => c.json({ ok: true }));
 
@@ -271,6 +339,10 @@ WHERE id = $1
     const limitValue = c.req.query("limit") ?? "25";
     const limit = parseLimit(limitValue);
 
+    if (status && !isJobStatus(status)) {
+      throw new SalmonError("INVALID_JOB_STATUS", 400, `Invalid job status: ${status}`);
+    }
+
     const db = await openDatabase(workspaceName);
 
     try {
@@ -303,7 +375,7 @@ FROM jobs j
       const result = await db.query<{
         id: string;
         title: string;
-        status: string;
+        status: JobStatus;
         assigned_to: string | null;
         output_dir: string | null;
         session_id: string | null;
@@ -312,6 +384,259 @@ FROM jobs j
       }>(query, params);
 
       return c.json({ jobs: result.rows });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.get("/jobs/stream", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+
+    c.header("cache-control", "no-store");
+    c.header("connection", "keep-alive");
+
+    return streamSSE(c, async (stream) => {
+      let closed = false;
+      const writeEvent = (eventName: string, payload: Record<string, unknown>): void => {
+        if (closed) {
+          return;
+        }
+        void stream.writeSSE({
+          event: eventName,
+          data: JSON.stringify(payload),
+        }).catch(() => undefined);
+      };
+
+      writeEvent("ready", { workspace: workspaceName, ts: new Date().toISOString() });
+
+      const unsubscribe = subscribeJobStatus(workspaceName, (event) => {
+        writeEvent("job_status_changed", event);
+      });
+
+      const pingTimer = setInterval(() => {
+        writeEvent("ping", { ts: new Date().toISOString() });
+      }, 15000);
+
+      const abortSignal = c.req.raw.signal;
+      await new Promise<void>((resolve) => {
+        const closeStream = () => resolve();
+        if (abortSignal.aborted) {
+          resolve();
+          return;
+        }
+        abortSignal.addEventListener("abort", closeStream, { once: true });
+      });
+
+      closed = true;
+      clearInterval(pingTimer);
+      unsubscribe();
+    });
+  });
+
+  app.get("/jobs/:jobId/output/changes", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      await assertJobExists(db, jobId);
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const roots = await resolveJobCodeRoots(workspacePaths, jobId);
+      const repoDirs = await discoverGitRepos(roots);
+
+      const repoDiffs = await Promise.all(
+        repoDirs.map(async (repoDir) => {
+          const repoLabel = relative(roots[0], repoDir) || ".";
+          try {
+            const diff = await runCommandCapture("git", ["-C", repoDir, "diff", "--", "."]);
+            return {
+              repo_path: repoLabel,
+              diff,
+              has_changes: diff.trim().length > 0,
+              error: "",
+            };
+          } catch (error: unknown) {
+            return {
+              repo_path: repoLabel,
+              diff: "",
+              has_changes: false,
+              error: errorMessage(error),
+            };
+          }
+        }),
+      );
+
+      const combinedDiff = repoDiffs
+        .filter((entry) => entry.diff.trim().length > 0)
+        .map((entry) => {
+          if (repoDiffs.length === 1) {
+            return entry.diff;
+          }
+          return `# repo: ${entry.repo_path}\n${entry.diff}`;
+        })
+        .join("\n\n");
+
+      return c.json({
+        roots,
+        repos: repoDiffs,
+        diff: combinedDiff,
+      });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.get("/jobs/:jobId/output/files", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      await assertJobExists(db, jobId);
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const outputsRoot = await resolveJobOutputsRoot(workspacePaths, jobId);
+      const files = await listOutputFiles(outputsRoot);
+
+      return c.json({
+        root: outputsRoot,
+        files,
+      });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.get("/jobs/:jobId/output/file/content", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+    const relativePath = c.req.query("path") ?? "";
+    const db = await openDatabase(workspaceName);
+
+    try {
+      await assertJobExists(db, jobId);
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const outputsRoot = await resolveJobOutputsRoot(workspacePaths, jobId);
+      const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
+      const fileInfo = await stat(absolutePath).catch(() => null);
+      if (!fileInfo?.isFile()) {
+        throw new SalmonError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
+      }
+
+      const mime = inferMimeType(absolutePath);
+      const content = await readFile(absolutePath);
+      return c.body(content, 200, {
+        "content-type": mime,
+        "content-disposition": `inline; filename="${basename(absolutePath)}"`,
+        "cache-control": "no-store",
+      });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.get("/jobs/:jobId/output/file/download", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+    const relativePath = c.req.query("path") ?? "";
+    const db = await openDatabase(workspaceName);
+
+    try {
+      await assertJobExists(db, jobId);
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const outputsRoot = await resolveJobOutputsRoot(workspacePaths, jobId);
+      const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
+      const fileInfo = await stat(absolutePath).catch(() => null);
+      if (!fileInfo?.isFile()) {
+        throw new SalmonError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
+      }
+
+      const mime = inferMimeType(absolutePath);
+      const content = await readFile(absolutePath);
+      return c.body(content, 200, {
+        "content-type": mime,
+        "content-disposition": `attachment; filename="${basename(absolutePath)}"`,
+        "cache-control": "no-store",
+      });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.post("/jobs/:jobId/output/open-folder", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+
+    let body: unknown = null;
+    try {
+      body = await c.req.json();
+    } catch {
+      body = null;
+    }
+
+    if (!isOpenOutputFolderBody(body)) {
+      throw new SalmonError("INVALID_OPEN_FOLDER_BODY", 400, "Invalid open-folder request.");
+    }
+
+    const db = await openDatabase(workspaceName);
+    try {
+      await assertJobExists(db, jobId);
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const outputsRoot = await resolveJobOutputsRoot(workspacePaths, jobId);
+
+      let targetPath = outputsRoot;
+      if (body.path) {
+        const { absolutePath } = resolveOutputPath(outputsRoot, body.path);
+        const fileInfo = await stat(absolutePath).catch(() => null);
+        if (!fileInfo) {
+          throw new SalmonError("OUTPUT_PATH_NOT_FOUND", 404, "Output path does not exist.");
+        }
+        targetPath = fileInfo.isDirectory() ? absolutePath : dirname(absolutePath);
+      }
+
+      await openFolder(targetPath);
+      return c.json({ ok: true, path: targetPath });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.post("/jobs/:jobId/review", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new SalmonError("INVALID_JSON", 400, "Invalid JSON body.");
+    }
+
+    if (!isReviewJobBody(body)) {
+      throw new SalmonError(
+        "INVALID_REVIEW_ACTION",
+        400,
+        "`action` must be `approve`.",
+      );
+    }
+
+    const nextStatus: JobStatus = "completed";
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query(
+        `
+UPDATE jobs
+SET status = $2
+WHERE id = $1
+`,
+        [jobId, nextStatus],
+      );
+
+      if ((result.affectedRows ?? 0) === 0) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+
+      emitJobStatus(workspaceName, jobId, nextStatus, "review_action");
+      return c.json({ ok: true, status: nextStatus });
     } finally {
       await db.close();
     }
@@ -332,6 +657,10 @@ FROM jobs j
     }
 
     const jobId = `job_${randomUUID().slice(0, 8)}`;
+    const status: JobStatus = body.status ?? "queued";
+    if (!isJobStatus(status)) {
+      throw new SalmonError("INVALID_JOB_STATUS", 400, `Invalid job status: ${body.status}`);
+    }
     const db = await openDatabase(workspaceName);
 
     try {
@@ -343,12 +672,13 @@ VALUES ($1, $2, $3, $4, $5, $6)
         [
           jobId,
           body.title,
-          body.status ?? "open",
+          status,
           body.assigned_to ?? null,
           body.output_dir ?? null,
           body.session_id ?? null,
         ],
       );
+      emitJobStatus(workspaceName, jobId, status, "job_created");
     } catch (error: unknown) {
       throw new SalmonError("CREATE_JOB_FAILED", 400, errorMessage(error));
     } finally {
@@ -413,10 +743,11 @@ VALUES ($1, $2, $3, $4, $5, $6)
       await db.query(
         `
 INSERT INTO jobs (id, title, status, assigned_to, output_dir, session_id)
-VALUES ($1, $2, 'open', NULL, NULL, NULL)
+VALUES ($1, $2, 'queued', NULL, NULL, NULL)
 `,
         [jobId, title || "Execute task"],
       );
+      emitJobStatus(workspaceName, jobId, "queued", "execute_created");
 
       await createThread(db, {
         id: threadId,
@@ -472,7 +803,7 @@ VALUES ($1, $2, 'open', NULL, NULL, NULL)
 
     try {
       await ensureConversationSchema(db);
-      const jobResult = await db.query<{ id: string; status: string }>(
+      const jobResult = await db.query<{ id: string; status: JobStatus }>(
         `
 SELECT id, status
 FROM jobs
@@ -485,7 +816,7 @@ LIMIT 1
       if (!job) {
         throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
       }
-      if (job.status !== "needs_input") {
+      if (job.status !== "waiting_for_recipient") {
         throw new SalmonError(
           "JOB_NOT_WAITING_FOR_RECIPIENT",
           409,
@@ -511,11 +842,12 @@ LIMIT 1
       await db.query(
         `
 UPDATE jobs
-SET status = 'open'
+SET status = 'queued'
 WHERE id = $1
 `,
         [jobId],
       );
+      emitJobStatus(workspaceName, jobId, "queued", "recipient_selected");
 
       executeRunner.enqueue({
         workspaceName,
@@ -530,6 +862,448 @@ WHERE id = $1
     }
 
     return c.json({ ok: true });
+  });
+
+  app.post("/jobs/:jobId/agent/select-recipient", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new SalmonError("INVALID_JSON", 400, "Invalid JSON body.");
+    }
+
+    if (!isAgentSelectRecipientBody(body)) {
+      throw new SalmonError(
+        "INVALID_AGENT_SELECT_RECIPIENT",
+        400,
+        "`agent_id` and `reason` are required.",
+      );
+    }
+
+    const selectedAgentId = body.agent_id.trim();
+    const db = await openDatabase(workspaceName);
+
+    try {
+      await ensureConversationSchema(db);
+      const jobResult = await db.query<{ id: string; status: JobStatus }>(
+        `
+SELECT id, status
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
+      );
+      const job = jobResult.rows[0];
+      if (!job) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+      if (job.status !== "orchestrating") {
+        throw new SalmonError(
+          "JOB_NOT_ORCHESTRATING",
+          409,
+          `Job is not orchestrating: ${jobId}`,
+        );
+      }
+
+      const recipient = await getAgentRow(db, selectedAgentId);
+      if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+        throw new SalmonError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${selectedAgentId}`);
+      }
+
+      await db.query(
+        `
+UPDATE jobs
+SET assigned_to = $2
+WHERE id = $1
+`,
+        [jobId, selectedAgentId],
+      );
+
+      const thread = await getThreadByJobId(db, jobId);
+      if (thread) {
+        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+        await insertEvent(db, {
+          id: `evt_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: body.turn_id?.trim() || latestExecuteTurn?.id || null,
+          eventName: "recipient_selected_via_cli",
+          payload: {
+            selected_agent_id: selectedAgentId,
+            reason: body.reason.trim(),
+            agent_turn_id: body.turn_id?.trim() || null,
+          },
+        });
+      }
+    } finally {
+      await db.close();
+    }
+
+    return c.json({ ok: true, assigned_to: selectedAgentId });
+  });
+
+  app.post("/jobs/:jobId/agent/ask-question", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new SalmonError("INVALID_JSON", 400, "Invalid JSON body.");
+    }
+
+    if (!isAgentAskQuestionBody(body)) {
+      throw new SalmonError(
+        "INVALID_AGENT_ASK_QUESTION",
+        400,
+        "`question` is required.",
+      );
+    }
+
+    const db = await openDatabase(workspaceName);
+    try {
+      await ensureConversationSchema(db);
+      const jobResult = await db.query<{ id: string; status: JobStatus; assigned_to: string | null }>(
+        `
+SELECT id, status, assigned_to
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
+      );
+      emitJobStatus(workspaceName, jobId, "waiting_for_question_response", "worker_ask_question");
+      const job = jobResult.rows[0];
+      if (!job) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+      if (job.status !== "running") {
+        throw new SalmonError("JOB_NOT_RUNNING", 409, `Job is not running: ${jobId}`);
+      }
+
+      await db.query(
+        `
+UPDATE jobs
+SET status = 'waiting_for_question_response'
+WHERE id = $1
+`,
+        [jobId],
+      );
+      emitJobStatus(workspaceName, jobId, "waiting_for_help_response", "worker_request_help");
+
+      const thread = await getThreadByJobId(db, jobId);
+      if (thread) {
+        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+        await insertEvent(db, {
+          id: `evt_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: body.turn_id?.trim() || latestExecuteTurn?.id || null,
+          eventName: "worker_question_requested",
+          payload: {
+            question: body.question.trim(),
+            details: body.details?.trim() || null,
+            agent_id: body.agent_id?.trim() || job.assigned_to || null,
+          },
+        });
+      }
+
+      return c.json({ ok: true, status: "waiting_for_question_response" });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.post("/jobs/:jobId/agent/request-help", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new SalmonError("INVALID_JSON", 400, "Invalid JSON body.");
+    }
+
+    if (!isAgentRequestHelpBody(body)) {
+      throw new SalmonError(
+        "INVALID_AGENT_REQUEST_HELP",
+        400,
+        "`summary` is required.",
+      );
+    }
+
+    const db = await openDatabase(workspaceName);
+    try {
+      await ensureConversationSchema(db);
+      const jobResult = await db.query<{ id: string; status: JobStatus; assigned_to: string | null }>(
+        `
+SELECT id, status, assigned_to
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
+      );
+      const job = jobResult.rows[0];
+      if (!job) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+      if (job.status !== "running") {
+        throw new SalmonError("JOB_NOT_RUNNING", 409, `Job is not running: ${jobId}`);
+      }
+
+      await db.query(
+        `
+UPDATE jobs
+SET status = 'waiting_for_help_response'
+WHERE id = $1
+`,
+        [jobId],
+      );
+      emitJobStatus(workspaceName, jobId, "queued", "human_response");
+
+      const thread = await getThreadByJobId(db, jobId);
+      if (thread) {
+        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+        await insertEvent(db, {
+          id: `evt_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: body.turn_id?.trim() || latestExecuteTurn?.id || null,
+          eventName: "worker_help_requested",
+          payload: {
+            summary: body.summary.trim(),
+            details: body.details?.trim() || null,
+            agent_id: body.agent_id?.trim() || job.assigned_to || null,
+          },
+        });
+      }
+
+      return c.json({ ok: true, status: "waiting_for_help_response" });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.post("/jobs/:jobId/respond", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new SalmonError("INVALID_JSON", 400, "Invalid JSON body.");
+    }
+
+    if (!isJobRespondBody(body)) {
+      throw new SalmonError(
+        "INVALID_JOB_RESPONSE",
+        400,
+        "`message` is required.",
+      );
+    }
+
+    const db = await openDatabase(workspaceName);
+    let requeue: {
+      threadId: string;
+      prompt: string;
+      recipientAgentId: string;
+      reasoningEffort: ReasoningEffort;
+    } | null = null;
+
+    try {
+      await ensureConversationSchema(db);
+      const jobResult = await db.query<{
+        id: string;
+        status: JobStatus;
+        assigned_to: string | null;
+      }>(
+        `
+SELECT id, status, assigned_to
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
+      );
+      const job = jobResult.rows[0];
+      if (!job) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+      if (
+        job.status !== "waiting_for_question_response" &&
+        job.status !== "waiting_for_help_response"
+      ) {
+        throw new SalmonError(
+          "JOB_NOT_WAITING_FOR_RESPONSE",
+          409,
+          `Job is not waiting for a human response: ${jobId}`,
+        );
+      }
+      if (!job.assigned_to) {
+        throw new SalmonError(
+          "JOB_MISSING_ASSIGNED_WORKER",
+          409,
+          `Job has no assigned worker to resume: ${jobId}`,
+        );
+      }
+      const resumeWorker = await getAgentRow(db, job.assigned_to);
+      if (!resumeWorker || resumeWorker.id === DEFAULT_AGENT_ID) {
+        throw new SalmonError(
+          "JOB_INVALID_ASSIGNED_WORKER",
+          409,
+          `Assigned worker is invalid for resume: ${jobId}`,
+        );
+      }
+
+      const thread = await getThreadByJobId(db, jobId);
+      if (!thread) {
+        throw new SalmonError("JOB_THREAD_NOT_FOUND", 404, `No conversation thread found for job: ${jobId}`);
+      }
+
+      const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+      if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
+        throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this job.");
+      }
+
+      await insertMessage(db, {
+        id: `msg_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: null,
+        role: "user",
+        content: body.message.trim(),
+      });
+
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: latestExecuteTurn.id,
+        eventName: "human_response_received",
+        payload: {
+          message: body.message.trim(),
+          responded_to_status: job.status,
+        },
+      });
+
+      await db.query(
+        `
+UPDATE jobs
+SET status = 'queued'
+WHERE id = $1
+`,
+        [jobId],
+      );
+
+      requeue = {
+        threadId: thread.id,
+        prompt: latestExecuteTurn.user_message,
+        recipientAgentId: resumeWorker.id,
+        reasoningEffort: latestExecuteTurn.reasoning_effort ?? "medium",
+      };
+    } finally {
+      await db.close();
+    }
+
+    if (requeue) {
+      executeRunner.enqueue({
+        workspaceName,
+        jobId,
+        threadId: requeue.threadId,
+        prompt: requeue.prompt,
+        requestedRecipientAgentId: requeue.recipientAgentId,
+        reasoningEffort: requeue.reasoningEffort,
+      });
+    }
+
+    return c.json({ ok: true, status: "queued" });
+  });
+
+  app.post("/conversations/:threadId/turns/:turnId/agent/plan-summary", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const threadId = c.req.param("threadId");
+    const turnId = c.req.param("turnId");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new SalmonError("INVALID_JSON", 400, "Invalid JSON body.");
+    }
+
+    if (!isPlanSummarySubmissionBody(body)) {
+      throw new SalmonError(
+        "INVALID_PLAN_SUMMARY",
+        400,
+        "`title`, `summary`, and non-empty `steps` are required.",
+      );
+    }
+
+    const db = await openDatabase(workspaceName);
+    try {
+      await ensureConversationSchema(db);
+
+      const turnResult = await db.query<{
+        id: string;
+        thread_id: string;
+        mode: "chat" | "plan" | "execute";
+      }>(
+        `
+SELECT id, thread_id, mode
+FROM conversation_turns
+WHERE id = $1
+  AND thread_id = $2
+LIMIT 1
+`,
+        [turnId, threadId],
+      );
+
+      const turn = turnResult.rows[0];
+      if (!turn) {
+        throw new SalmonError(
+          "TURN_NOT_FOUND",
+          404,
+          `Conversation turn not found: ${turnId}`,
+        );
+      }
+      if (turn.mode !== "plan") {
+        throw new SalmonError(
+          "TURN_NOT_PLAN_MODE",
+          409,
+          `Turn is not in plan mode: ${turnId}`,
+        );
+      }
+
+      const normalized = normalizePlanSummary(body);
+      await db.query(
+        `
+UPDATE conversation_turns
+SET plan_summary = $2
+WHERE id = $1
+`,
+        [turnId, JSON.stringify(normalized)],
+      );
+
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId,
+        turnId,
+        eventName: "plan_summary_submitted",
+        payload: {
+          source: "cli",
+          title: normalized.title,
+          summary: normalized.summary,
+          steps_count: normalized.steps.length,
+        },
+      });
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
   });
 
   app.get("/conversations/chats", async (c) => {
@@ -707,12 +1481,21 @@ WHERE id = $1
         });
 
         let assistantText = "";
+        let planToolExecutionDetected = false;
 
         const result = await adapter.sendTurn({
           prompt: buildPrompt(body.mode, message, reasoningEffort),
           modelId,
           sessionId: thread.harness_session_id,
           cwd: paths.codeDir,
+          env: buildConversationAgentEnv({
+            apiUrl,
+            workspaceName,
+            threadId,
+            turnId,
+            agentId: DEFAULT_AGENT_ID,
+            jobId: thread.job_id,
+          }),
           mode: body.mode,
           reasoningEffort,
           onEvent: async (event) => {
@@ -730,6 +1513,10 @@ WHERE id = $1
                 data: JSON.stringify({ delta: event.delta, turn_id: turnId }),
               });
               return;
+            }
+
+            if (body.mode === "plan" && !isAllowedPlanModeToolEvent(event)) {
+              planToolExecutionDetected = true;
             }
 
             await insertEvent(db, {
@@ -750,9 +1537,26 @@ WHERE id = $1
           },
         });
 
+        if (body.mode === "plan" && planToolExecutionDetected) {
+          throw new SalmonError(
+            "PLAN_MODE_TOOL_USE",
+            409,
+            "Plan mode is planning-only. Tool execution is not allowed.",
+          );
+        }
+
         const finalAssistantText = (result.finalText || assistantText || "").trim();
         const assistantMessageId = `msg_${randomUUID().slice(0, 12)}`;
-        const planSummary = body.mode === "plan" ? parsePlanSummary(finalAssistantText) : null;
+        const declaredPlanSummary =
+          body.mode === "plan" ? await getStoredPlanSummaryForTurn(db, turnId) : null;
+        if (body.mode === "plan" && !declaredPlanSummary) {
+          throw new SalmonError(
+            "PLAN_SUMMARY_REQUIRED",
+            409,
+            "Plan mode requires exactly one `salmon job plan-summary` CLI submission.",
+          );
+        }
+        const planSummary = body.mode === "plan" ? declaredPlanSummary : null;
 
         await completeTurn(db, {
           turnId,
@@ -909,10 +1713,11 @@ WHERE id = $1
       await db.query(
         `
 INSERT INTO jobs (id, title, status, assigned_to, output_dir, session_id)
-VALUES ($1, $2, 'open', NULL, NULL, NULL)
+VALUES ($1, $2, 'queued', NULL, NULL, NULL)
 `,
         [jobId, `Execute: ${planTitle}`],
       );
+      emitJobStatus(workspaceName, jobId, "queued", "execute_from_plan_created");
 
       await createThread(db, {
         id: executeThreadId,
@@ -1112,7 +1917,7 @@ type SetActiveWorkspaceBody = {
 
 type CreateJobBody = {
   title: string;
-  status?: string;
+  status?: JobStatus;
   assigned_to?: string;
   output_dir?: string;
   session_id?: string;
@@ -1141,6 +1946,44 @@ type ExecuteFromThreadBody = {
 
 type JobRecipientBody = {
   recipient_agent_id: string;
+};
+
+type AgentSelectRecipientBody = {
+  agent_id: string;
+  reason: string;
+  turn_id?: string;
+};
+
+type AgentAskQuestionBody = {
+  question: string;
+  details?: string;
+  turn_id?: string;
+  agent_id?: string;
+};
+
+type AgentRequestHelpBody = {
+  summary: string;
+  details?: string;
+  turn_id?: string;
+  agent_id?: string;
+};
+
+type JobRespondBody = {
+  message: string;
+};
+
+type PlanSummarySubmissionBody = {
+  title: string;
+  summary: string;
+  steps: string[];
+};
+
+type ReviewJobBody = {
+  action: "approve";
+};
+
+type OpenOutputFolderBody = {
+  path?: string;
 };
 
 type CreateAgentBody = {
@@ -1208,12 +2051,11 @@ function isCreateJobBody(value: unknown): value is CreateJobBody {
     return false;
   }
 
-  const optionalStringFields = [
-    "status",
-    "assigned_to",
-    "output_dir",
-    "session_id",
-  ] as const;
+  if (body.status !== undefined && !isJobStatus(body.status)) {
+    return false;
+  }
+
+  const optionalStringFields = ["assigned_to", "output_dir", "session_id"] as const;
 
   for (const field of optionalStringFields) {
     const fieldValue = body[field];
@@ -1255,6 +2097,121 @@ function isJobRecipientBody(value: unknown): value is JobRecipientBody {
     return false;
   }
   return true;
+}
+
+function isAgentSelectRecipientBody(value: unknown): value is AgentSelectRecipientBody {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  if (typeof body.agent_id !== "string" || body.agent_id.trim().length === 0) {
+    return false;
+  }
+  if (typeof body.reason !== "string" || body.reason.trim().length === 0) {
+    return false;
+  }
+  if (body.turn_id !== undefined && typeof body.turn_id !== "string") {
+    return false;
+  }
+  return true;
+}
+
+function isAgentAskQuestionBody(value: unknown): value is AgentAskQuestionBody {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  if (typeof body.question !== "string" || body.question.trim().length === 0) {
+    return false;
+  }
+  if (body.details !== undefined && typeof body.details !== "string") {
+    return false;
+  }
+  if (body.turn_id !== undefined && typeof body.turn_id !== "string") {
+    return false;
+  }
+  if (body.agent_id !== undefined && typeof body.agent_id !== "string") {
+    return false;
+  }
+  return true;
+}
+
+function isAgentRequestHelpBody(value: unknown): value is AgentRequestHelpBody {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  if (typeof body.summary !== "string" || body.summary.trim().length === 0) {
+    return false;
+  }
+  if (body.details !== undefined && typeof body.details !== "string") {
+    return false;
+  }
+  if (body.turn_id !== undefined && typeof body.turn_id !== "string") {
+    return false;
+  }
+  if (body.agent_id !== undefined && typeof body.agent_id !== "string") {
+    return false;
+  }
+  return true;
+}
+
+function isJobRespondBody(value: unknown): value is JobRespondBody {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  return typeof body.message === "string" && body.message.trim().length > 0;
+}
+
+function isPlanSummarySubmissionBody(value: unknown): value is PlanSummarySubmissionBody {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  if (typeof body.title !== "string" || body.title.trim().length === 0) {
+    return false;
+  }
+  if (typeof body.summary !== "string" || body.summary.trim().length === 0) {
+    return false;
+  }
+  if (!Array.isArray(body.steps) || body.steps.length === 0) {
+    return false;
+  }
+  if (!body.steps.every((step) => typeof step === "string" && step.trim().length > 0)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isReviewJobBody(value: unknown): value is ReviewJobBody {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  return body.action === "approve";
+}
+
+function isOpenOutputFolderBody(value: unknown): value is OpenOutputFolderBody {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (typeof value !== "object") {
+    return false;
+  }
+
+  const body = value as Record<string, unknown>;
+  if (body.path === undefined) {
+    return true;
+  }
+  return typeof body.path === "string";
 }
 
 function isConversationTurnBody(value: unknown): value is ConversationTurnBody {
@@ -1563,6 +2520,408 @@ function truncateChatText(value: string, maxLength: number): string {
     return normalized;
   }
   return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function normalizePlanSummary(input: PlanSummarySubmissionBody): {
+  title: string;
+  summary: string;
+  steps: string[];
+} {
+  return {
+    title: input.title.trim(),
+    summary: input.summary.trim(),
+    steps: input.steps.map((step) => step.trim()).filter(Boolean),
+  };
+}
+
+async function getStoredPlanSummaryForTurn(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  turnId: string,
+): Promise<{ title: string; summary: string; steps: string[] } | null> {
+  const result = await db.query<{ plan_summary: string | null }>(
+    `
+SELECT plan_summary
+FROM conversation_turns
+WHERE id = $1
+LIMIT 1
+`,
+    [turnId],
+  );
+
+  const raw = result.rows[0]?.plan_summary;
+  if (!raw) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  if (!isPlanSummaryRecord(parsed)) {
+    return null;
+  }
+
+  return normalizePlanSummary(parsed);
+}
+
+function isPlanSummaryRecord(value: unknown): value is PlanSummarySubmissionBody {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.title === "string" &&
+    typeof record.summary === "string" &&
+    Array.isArray(record.steps) &&
+    record.steps.every((step) => typeof step === "string")
+  );
+}
+
+function buildConversationAgentEnv(input: {
+  apiUrl: string;
+  workspaceName: string;
+  threadId: string;
+  turnId: string;
+  agentId: string;
+  jobId?: string | null;
+}): Record<string, string> {
+  const env: Record<string, string> = {
+    SALMON_API_URL: input.apiUrl,
+    SALMON_WORKSPACE_NAME: input.workspaceName,
+    SALMON_THREAD_ID: input.threadId,
+    SALMON_TURN_ID: input.turnId,
+    SALMON_AGENT_ID: input.agentId,
+  };
+
+  if (input.jobId && input.jobId.trim()) {
+    env.SALMON_JOB_ID = input.jobId;
+  }
+
+  return env;
+}
+
+function isAllowedPlanModeToolEvent(event: {
+  name: string;
+  payload: Record<string, unknown> | string | null;
+}): boolean {
+  const command = extractPlanToolCommand(event.payload);
+  if (!command) {
+    return false;
+  }
+
+  const normalized = command.trim();
+  return /^salmon\s+job\s+plan-summary(\s|$)/.test(normalized);
+}
+
+function extractPlanToolCommand(payload: Record<string, unknown> | string | null): string {
+  if (typeof payload === "string") {
+    return payload;
+  }
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  if (typeof payload.command === "string") {
+    return payload.command;
+  }
+
+  const input = payload.input;
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    const record = input as Record<string, unknown>;
+    if (typeof record.command === "string") {
+      return record.command;
+    }
+  }
+
+  return "";
+}
+
+async function assertJobExists(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  jobId: string,
+): Promise<void> {
+  const result = await db.query<{ id: string }>(
+    `
+SELECT id
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+    [jobId],
+  );
+
+  if (!result.rows[0]) {
+    throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+  }
+}
+
+async function resolveJobCodeRoots(
+  workspacePaths: ReturnType<typeof getWorkspacePaths>,
+  jobId: string,
+): Promise<string[]> {
+  const preferred = join(workspacePaths.worktreesDir, jobId, "code");
+  return [preferred];
+}
+
+async function resolveJobOutputsRoot(
+  workspacePaths: ReturnType<typeof getWorkspacePaths>,
+  jobId: string,
+): Promise<string> {
+  const preferred = join(workspacePaths.worktreesDir, jobId, "outputs");
+  return preferred;
+}
+
+async function discoverGitRepos(roots: string[]): Promise<string[]> {
+  const repos = new Set<string>();
+
+  for (const root of roots) {
+    if (!(await isDirectory(root))) {
+      continue;
+    }
+    const state = { visited: 0 };
+    await walkForGitRepos(root, repos, state, 0);
+  }
+
+  return [...repos].sort((a, b) => a.localeCompare(b));
+}
+
+async function walkForGitRepos(
+  currentDir: string,
+  repos: Set<string>,
+  state: { visited: number },
+  depth: number,
+): Promise<void> {
+  if (depth > 8 || state.visited > 3000) {
+    return;
+  }
+  state.visited += 1;
+
+  const entries = await readdir(currentDir, { withFileTypes: true }).catch(() => []);
+  if (entries.length === 0) {
+    return;
+  }
+
+  const hasGitMarker = entries.some(
+    (entry) => entry.name === ".git" && (entry.isDirectory() || entry.isFile()),
+  );
+  if (hasGitMarker) {
+    repos.add(currentDir);
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "build") {
+      continue;
+    }
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+    await walkForGitRepos(join(currentDir, entry.name), repos, state, depth + 1);
+  }
+}
+
+async function runCommandCapture(
+  command: string,
+  args: string[],
+): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.once("error", (error) => {
+      reject(error);
+    });
+
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolvePromise(stdout);
+        return;
+      }
+      reject(new Error(stderr.trim() || `${command} exited with code ${code ?? "unknown"}`));
+    });
+  });
+}
+
+async function listOutputFiles(
+  outputsRoot: string,
+): Promise<Array<{ path: string; size: number; modified_at: string }>> {
+  if (!(await isDirectory(outputsRoot))) {
+    return [];
+  }
+
+  const files: Array<{ path: string; size: number; modified_at: string }> = [];
+  await walkOutputFiles(outputsRoot, outputsRoot, files, { count: 0 }, 0);
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return files;
+}
+
+async function walkOutputFiles(
+  rootDir: string,
+  currentDir: string,
+  files: Array<{ path: string; size: number; modified_at: string }>,
+  state: { count: number },
+  depth: number,
+): Promise<void> {
+  if (depth > 12 || state.count > 5000) {
+    return;
+  }
+
+  const entries = await readdir(currentDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+    if (entry.name === "events.jsonl") {
+      continue;
+    }
+
+    const fullPath = join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      await walkOutputFiles(rootDir, fullPath, files, state, depth + 1);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const fileInfo = await stat(fullPath).catch(() => null);
+    if (!fileInfo?.isFile()) {
+      continue;
+    }
+
+    const relPath = relative(rootDir, fullPath).split(sep).join("/");
+    files.push({
+      path: relPath,
+      size: fileInfo.size,
+      modified_at: fileInfo.mtime.toISOString(),
+    });
+    state.count += 1;
+  }
+}
+
+function resolveOutputPath(
+  outputsRoot: string,
+  requestedPath: string,
+): { absolutePath: string; normalizedPath: string } {
+  const value = requestedPath.trim();
+  if (!value) {
+    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path is required.");
+  }
+  if (value.includes("\0")) {
+    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path is invalid.");
+  }
+  if (value.startsWith("/") || /^[A-Za-z]:/.test(value)) {
+    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path must be relative.");
+  }
+
+  const normalized = value.replace(/\\/g, "/").replace(/^\.\/+/, "");
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path is invalid.");
+  }
+  if (segments.some((segment) => segment === "." || segment === "..")) {
+    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path cannot traverse directories.");
+  }
+
+  const normalizedPath = segments.join("/");
+  const root = resolve(outputsRoot);
+  const absolutePath = resolve(root, normalizedPath);
+  if (absolutePath !== root && !absolutePath.startsWith(`${root}${sep}`)) {
+    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path is out of bounds.");
+  }
+
+  return { absolutePath, normalizedPath };
+}
+
+function inferMimeType(path: string): string {
+  const extension = extname(path).toLowerCase();
+  if (extension === ".md") {
+    return "text/markdown; charset=utf-8";
+  }
+  if (extension === ".html" || extension === ".htm") {
+    return "text/html; charset=utf-8";
+  }
+  if (extension === ".txt" || extension === ".diff" || extension === ".patch") {
+    return "text/plain; charset=utf-8";
+  }
+  if (extension === ".json") {
+    return "application/json; charset=utf-8";
+  }
+  if (extension === ".csv") {
+    return "text/csv; charset=utf-8";
+  }
+  if (extension === ".png") {
+    return "image/png";
+  }
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return "image/jpeg";
+  }
+  if (extension === ".gif") {
+    return "image/gif";
+  }
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+  if (extension === ".svg") {
+    return "image/svg+xml";
+  }
+  return "application/octet-stream";
+}
+
+async function openFolder(targetPath: string): Promise<void> {
+  const fullPath = resolve(targetPath);
+  const fileInfo = await stat(fullPath).catch(() => null);
+  if (!fileInfo) {
+    throw new SalmonError("OUTPUT_PATH_NOT_FOUND", 404, "Path does not exist.");
+  }
+
+  const command =
+    process.platform === "darwin"
+      ? { command: "open", args: [fullPath] }
+      : process.platform === "win32"
+        ? { command: "explorer", args: [fullPath] }
+        : { command: "xdg-open", args: [fullPath] };
+
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = spawn(command.command, command.args, {
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    });
+
+    child.once("error", (error) => {
+      reject(new SalmonError("OPEN_FOLDER_FAILED", 400, errorMessage(error)));
+    });
+    child.unref();
+    resolvePromise();
+  });
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  const info = await stat(path).catch(() => null);
+  return Boolean(info?.isDirectory());
 }
 
 async function requireActiveWorkspaceName(): Promise<string> {

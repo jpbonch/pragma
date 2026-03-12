@@ -70,23 +70,6 @@ CREATE INDEX IF NOT EXISTS idx_conversation_messages_thread ON conversation_mess
 CREATE INDEX IF NOT EXISTS idx_conversation_events_thread ON conversation_events(thread_id, created_at ASC);
 `);
 
-  // Backward-compatible additive columns for existing workspaces.
-  await db.exec(`
-ALTER TABLE conversation_threads ADD COLUMN IF NOT EXISTS chat_title TEXT;
-ALTER TABLE conversation_threads ADD COLUMN IF NOT EXISTS chat_preview TEXT;
-ALTER TABLE conversation_threads ADD COLUMN IF NOT EXISTS chat_last_message_at TIMESTAMPTZ;
-`);
-
-  await db.exec(`
-ALTER TABLE conversation_turns DROP COLUMN IF EXISTS execution_summary;
-ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS reasoning_effort VARCHAR(16);
-ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS requested_recipient_agent_id VARCHAR(64);
-ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS selected_agent_id VARCHAR(64);
-ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS orchestrator_agent_id VARCHAR(64);
-ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS worker_session_id VARCHAR(255);
-ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS selection_status VARCHAR(32);
-`);
-
   await db.exec(`
 CREATE INDEX IF NOT EXISTS idx_conversation_chat_mode_sort ON conversation_threads(mode, chat_last_message_at DESC, updated_at DESC);
 `);
@@ -270,7 +253,7 @@ export async function createTurn(
     selectedAgentId?: string | null;
     orchestratorAgentId?: string | null;
     workerSessionId?: string | null;
-    selectionStatus?: "auto_selected" | "manual_selected" | "needs_input" | "invalid" | null;
+    selectionStatus?: "auto_selected" | "manual_selected" | "recipient_required" | "invalid" | null;
   },
 ): Promise<void> {
   await db.query(
@@ -313,7 +296,7 @@ export async function completeTurn(
     planSummary: string | null;
     selectedAgentId?: string | null;
     workerSessionId?: string | null;
-    selectionStatus?: "auto_selected" | "manual_selected" | "needs_input" | "invalid" | null;
+    selectionStatus?: "auto_selected" | "manual_selected" | "recipient_required" | "invalid" | null;
   },
 ): Promise<void> {
   await db.query(

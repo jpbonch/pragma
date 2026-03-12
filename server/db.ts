@@ -24,8 +24,11 @@ Your job is to:
 
 ## Salmon Commands
 - \`salmon setup\`: Calls the API setup endpoint. This only bootstraps \`~/.salmon\`.
-- \`salmon create-job <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`jobs\` table.
+- \`salmon create-job <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`jobs\` table. Default status is \`queued\`.
 - \`salmon list-jobs [--status <status>] [--limit <n>]\`: Calls the API to list jobs from newest to oldest.
+- \`salmon job select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
+- \`salmon job ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
+- \`salmon job request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
 - \`salmon server [--port <n>]\`: Starts the Salmon API server.
 - \`salmon ui [--port <n>] [--api-url <url>]\`: Starts the Salmon UI.
 - \`salmon\` (no args): Starts server + UI and opens the UI.
@@ -140,7 +143,6 @@ export function getWorkspacePaths(name: string): {
   workspaceDir: string;
   contextDir: string;
   codeDir: string;
-  outputsDir: string;
   worktreesDir: string;
   goalFile: string;
 } {
@@ -155,7 +157,6 @@ export function getWorkspacePaths(name: string): {
     workspaceDir,
     contextDir,
     codeDir: join(workspaceDir, "code"),
-    outputsDir: join(workspaceDir, "outputs"),
     worktreesDir: join(rootDir, "worktrees"),
     goalFile: join(contextDir, "goal.md"),
   };
@@ -254,7 +255,6 @@ export async function createWorkspace(input: {
   await mkdir(paths.dbDir, { recursive: true });
   await mkdir(paths.contextDir, { recursive: true });
   await mkdir(paths.codeDir, { recursive: true });
-  await mkdir(paths.outputsDir, { recursive: true });
   await mkdir(paths.worktreesDir, { recursive: true });
 
   await initializeDatabase(name);
@@ -386,14 +386,6 @@ export function validateWorkspaceName(name: string): void {
   }
 }
 
-function sameColumns(actual: string[], expected: string[]): boolean {
-  if (actual.length !== expected.length) {
-    return false;
-  }
-
-  return actual.every((column, index) => column === expected[index]);
-}
-
 function isPGliteAbortError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("Aborted(). Build with -sASSERTIONS");
@@ -437,50 +429,10 @@ function patchDatabaseClose(db: PGlite): PGlite {
 }
 
 async function ensureRequiredSchema(db: PGlite): Promise<void> {
-  const expectedJobsColumns = [
-    "id",
-    "title",
-    "status",
-    "assigned_to",
-    "output_dir",
-    "session_id",
-    "created_at",
-  ];
-  const requiredAgentsColumns = ["id", "name", "status", "agent_file"];
-
-  const currentColumns = await getColumnsByTable(db);
-  const jobsMatch = sameColumns(currentColumns.jobs, expectedJobsColumns);
-  const agentsHaveRequiredColumns = requiredAgentsColumns.every((column) =>
-    currentColumns.agents.includes(column),
-  );
-
-  if (jobsMatch && agentsHaveRequiredColumns) {
-    if (!currentColumns.agents.includes("emoji")) {
-      await db.exec(`ALTER TABLE agents ADD COLUMN emoji VARCHAR(32);`);
-    }
-    if (!currentColumns.agents.includes("harness")) {
-      await db.exec(
-        `ALTER TABLE agents ADD COLUMN harness VARCHAR(32) NOT NULL DEFAULT 'claude_code';`,
-      );
-    }
-    if (!currentColumns.agents.includes("model_label")) {
-      await db.exec(
-        `ALTER TABLE agents ADD COLUMN model_label VARCHAR(128) NOT NULL DEFAULT 'Opus 4.6';`,
-      );
-    }
-    if (!currentColumns.agents.includes("model_id")) {
-      await db.exec(
-        `ALTER TABLE agents ADD COLUMN model_id VARCHAR(128) NOT NULL DEFAULT 'opus';`,
-      );
-    }
-    return;
-  }
+  await ensureJobStatusEnumType(db);
 
   await db.exec(`
-DROP TABLE IF EXISTS jobs;
-DROP TABLE IF EXISTS agents CASCADE;
-
-CREATE TABLE agents (
+CREATE TABLE IF NOT EXISTS agents (
   id VARCHAR(64) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'idle',
@@ -490,11 +442,13 @@ CREATE TABLE agents (
   model_label VARCHAR(128) NOT NULL DEFAULT 'Opus 4.6',
   model_id VARCHAR(128) NOT NULL DEFAULT 'opus'
 );
+`);
 
-CREATE TABLE jobs (
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS jobs (
   id VARCHAR(64) PRIMARY KEY,
   title TEXT NOT NULL,
-  status VARCHAR(32) NOT NULL DEFAULT 'open',
+  status job_status NOT NULL DEFAULT 'queued',
   assigned_to VARCHAR(64),
   output_dir TEXT,
   session_id VARCHAR(255),
@@ -502,33 +456,62 @@ CREATE TABLE jobs (
   FOREIGN KEY (assigned_to) REFERENCES agents(id)
 );
 `);
-}
-
-async function getColumnsByTable(
-  db: PGlite,
-): Promise<{ jobs: string[]; agents: string[] }> {
-  const result = await db.query<{ table_name: string; column_name: string }>(`
-SELECT table_name, column_name
+  const statusColumn = await db.query<{ udt_name: string }>(
+    `
+SELECT udt_name
 FROM information_schema.columns
 WHERE table_schema = 'public'
-  AND table_name IN ('jobs', 'agents')
-ORDER BY table_name, ordinal_position
+  AND table_name = 'jobs'
+  AND column_name = 'status'
+LIMIT 1
+`,
+  );
+
+  const statusType = statusColumn.rows[0]?.udt_name ?? "";
+  if (statusType && statusType !== "job_status") {
+    await db.exec(`
+ALTER TABLE jobs
+ALTER COLUMN status TYPE job_status
+USING status::job_status
 `);
-
-  const columns: { jobs: string[]; agents: string[] } = {
-    jobs: [],
-    agents: [],
-  };
-
-  for (const row of result.rows) {
-    if (row.table_name === "jobs") {
-      columns.jobs.push(row.column_name);
-    } else if (row.table_name === "agents") {
-      columns.agents.push(row.column_name);
-    }
   }
 
-  return columns;
+  await db.exec(`
+ALTER TABLE jobs
+ALTER COLUMN status SET DEFAULT 'queued'
+`);
+
+  await db.exec(`
+ALTER TABLE jobs
+ALTER COLUMN status SET NOT NULL
+`);
+}
+
+async function ensureJobStatusEnumType(db: PGlite): Promise<void> {
+  await db.exec(`
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type
+    WHERE typname = 'job_status'
+  ) THEN
+    CREATE TYPE job_status AS ENUM (
+      'queued',
+      'orchestrating',
+      'running',
+      'waiting_for_recipient',
+      'waiting_for_question_response',
+      'waiting_for_help_response',
+      'pending_review',
+      'needs_fix',
+      'completed',
+      'failed'
+    );
+  END IF;
+END
+$$;
+`);
 }
 
 async function ensureDefaultAgents(db: PGlite): Promise<void> {

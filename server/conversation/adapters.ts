@@ -20,6 +20,7 @@ const codexAdapter: ConversationAdapter = {
       command: "codex",
       args,
       cwd: input.cwd,
+      env: input.env,
       onJsonLine: async (line, state) => {
         const eventType = readString(line, "type");
         if (eventType === "thread.started") {
@@ -71,6 +72,7 @@ const claudeAdapter: ConversationAdapter = {
       command: "claude",
       args,
       cwd: input.cwd,
+      env: input.env,
       onJsonLine: async (line, state) => {
         const eventType = readString(line, "type");
 
@@ -134,6 +136,7 @@ type RunAdapterCommandInput = {
   command: string;
   args: string[];
   cwd: string;
+  env?: Record<string, string>;
   onJsonLine: (line: Record<string, unknown>, state: RunState) => Promise<void>;
 };
 
@@ -153,7 +156,10 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
   const child = spawn(input.command, input.args, {
     cwd: input.cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
+    env: {
+      ...process.env,
+      ...(input.env ?? {}),
+    },
   });
 
   let stderrText = "";
