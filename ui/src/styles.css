@@ -2343,7 +2343,12 @@ select { cursor: pointer; }
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0,0,0,0.16);
-  animation: fadeIn 0.12s ease;
+  animation: emojiPickerFadeIn 0.12s ease;
+}
+
+@keyframes emojiPickerFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 .agent-profile-name-input {
