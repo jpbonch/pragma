@@ -296,24 +296,16 @@ export async function buildRepoDiffEntries(input: {
         "--",
         ".",
       ]);
-      const stagedDiff = await runGitCapture(jobRepoPath, ["diff", "--cached", "--", "."]);
-      const workingDiff = await runGitCapture(jobRepoPath, ["diff", "--", "."]);
-      const sections = [
-        commitDiff.trim().length > 0 ? `# committed (${repo.base_commit}..${headCommit})\n${commitDiff}` : "",
-        stagedDiff.trim().length > 0 ? `# staged\n${stagedDiff}` : "",
-        workingDiff.trim().length > 0 ? `# unstaged\n${workingDiff}` : "",
-      ].filter(Boolean);
-      const combined = sections.join("\n\n");
 
       entries.push({
         repo_path: repo.relative_path,
         base_commit: repo.base_commit,
         head_commit: headCommit,
         commit_diff: commitDiff,
-        staged_diff: stagedDiff,
-        working_diff: workingDiff,
-        diff: combined,
-        has_changes: combined.trim().length > 0,
+        staged_diff: "",
+        working_diff: "",
+        diff: commitDiff,
+        has_changes: commitDiff.trim().length > 0,
         error: "",
       });
     } catch (error: unknown) {
