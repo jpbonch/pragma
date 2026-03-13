@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiError,
+  copyCodeFolderFromLocal,
   createAgent,
   cloneCodeRepo,
   createContextFile,
@@ -16,6 +17,7 @@ import {
   fetchContextFiles,
   fetchConversationThread,
   fetchJobs,
+  pickLocalCodeFolder,
   openConversationThreadStream,
   openJobsStream,
   fetchWorkspaces,
@@ -24,7 +26,6 @@ import {
   setJobRecipient,
   setActiveWorkspace,
   streamConversationTurn,
-  importCodeFolder,
   updateAgent,
   updateContextFile,
 } from './api'
@@ -1072,9 +1073,20 @@ export default function App() {
     await loadCode()
   }
 
-  async function handleImportCodeFolder(files) {
-    await importCodeFolder(files)
+  async function handleCopyCodeFolderFromLocal(localPath) {
+    await copyCodeFolderFromLocal(localPath)
     await loadCode()
+  }
+
+  async function handlePickLocalCodeFolder() {
+    const result = await pickLocalCodeFolder()
+    if (!result || typeof result !== 'object') {
+      throw new Error('Invalid folder picker response.')
+    }
+    if (result.cancelled === true) {
+      return ''
+    }
+    return typeof result.path === 'string' ? result.path : ''
   }
 
   async function refreshWorkspaces() {
@@ -1789,7 +1801,8 @@ export default function App() {
             loading={codeLoading}
             error={codeError}
             onCloneRepo={handleCloneCodeRepo}
-            onImportFolder={handleImportCodeFolder}
+            onCopyLocalFolder={handleCopyCodeFolderFromLocal}
+            onPickLocalFolder={handlePickLocalCodeFolder}
           />
         )}
         {activeTab === 'files' && <EmptyPane title="Files" />}

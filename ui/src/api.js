@@ -333,31 +333,17 @@ export async function cloneCodeRepo(git_url) {
   })
 }
 
-export async function importCodeFolder(files) {
-  const fileList = Array.from(files || [])
-  if (fileList.length === 0) {
-    throw new ApiError('No folder selected.', 400, 'INVALID_CODE_IMPORT')
-  }
-
-  const formData = new FormData()
-  let rootName = ''
-  for (const file of fileList) {
-    const relPath = typeof file.webkitRelativePath === 'string' && file.webkitRelativePath
-      ? file.webkitRelativePath
-      : file.name
-    formData.append('files', file)
-    formData.append('paths', relPath)
-    if (!rootName && relPath.includes('/')) {
-      rootName = relPath.split('/')[0]
-    }
-  }
-  if (rootName) {
-    formData.append('root_name', rootName)
-  }
-
-  return fetchJson('/code/folders/import', {
+export async function copyCodeFolderFromLocal(local_path) {
+  return fetchJson('/code/folders/copy-local', {
     method: 'POST',
-    body: formData,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ local_path }),
+  })
+}
+
+export async function pickLocalCodeFolder() {
+  return fetchJson('/code/folders/pick-local', {
+    method: 'POST',
   })
 }
 

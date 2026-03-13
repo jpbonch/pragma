@@ -196,6 +196,12 @@ export const createCodeRepoCloneSchema = z
   })
   .strict();
 
+export const createCodeFolderCopySchema = z
+  .object({
+    local_path: nonEmptyString,
+  })
+  .strict();
+
 export const createContextFileSchema = z
   .object({
     name: nonEmptyString,

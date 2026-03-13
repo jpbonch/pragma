@@ -1,15 +1,14 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 
-function folderLabelFromFiles(files) {
-  const first = files[0]
-  if (!first || typeof first.webkitRelativePath !== 'string') {
+function formatCommitTimestamp(value) {
+  if (typeof value !== 'string' || !value.trim()) {
     return ''
   }
-  const rel = first.webkitRelativePath
-  if (!rel.includes('/')) {
-    return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
   }
-  return rel.split('/')[0]
+  return parsed.toLocaleString()
 }
 
 export function CodeView({
@@ -17,23 +16,47 @@ export function CodeView({
   loading,
   error,
   onCloneRepo,
-  onImportFolder,
+  onCopyLocalFolder,
+  onPickLocalFolder,
 }) {
   const [gitUrl, setGitUrl] = useState('')
   const [cloneLoading, setCloneLoading] = useState(false)
   const [cloneError, setCloneError] = useState('')
-  const [importLoading, setImportLoading] = useState(false)
-  const [importError, setImportError] = useState('')
-  const [selectedFiles, setSelectedFiles] = useState([])
-  const [selectedFolderName, setSelectedFolderName] = useState('')
-  const folderInputRef = useRef(null)
+  const [localPath, setLocalPath] = useState('')
+  const [copyLoading, setCopyLoading] = useState(false)
+  const [copyError, setCopyError] = useState('')
+  const [pickLoading, setPickLoading] = useState(false)
 
-  const names = useMemo(() => {
+  const folderItems = useMemo(() => {
     if (!Array.isArray(folders)) {
       return []
     }
     return folders
-      .map((folder) => (folder && typeof folder.name === 'string' ? folder.name : ''))
+      .map((folder) => {
+        if (!folder || typeof folder !== 'object') {
+          return null
+        }
+
+        const name = typeof folder.name === 'string' ? folder.name : ''
+        if (!name) {
+          return null
+        }
+
+        const path = typeof folder.path === 'string' && folder.path ? folder.path : `code/${name}`
+        return {
+          name,
+          path,
+          isGitRepo: folder.is_git_repo === true,
+          branch: typeof folder.git_branch === 'string' ? folder.git_branch : '',
+          defaultBranch: typeof folder.git_default_branch === 'string' ? folder.git_default_branch : '',
+          remote: typeof folder.git_remote === 'string' ? folder.git_remote : '',
+          dirty: typeof folder.git_dirty === 'boolean' ? folder.git_dirty : null,
+          lastCommitHash: typeof folder.git_last_commit_hash === 'string' ? folder.git_last_commit_hash : '',
+          lastCommitMessage:
+            typeof folder.git_last_commit_message === 'string' ? folder.git_last_commit_message : '',
+          lastCommitAt: typeof folder.git_last_commit_at === 'string' ? folder.git_last_commit_at : '',
+        }
+      })
       .filter(Boolean)
   }, [folders])
 
@@ -56,25 +79,41 @@ export function CodeView({
     }
   }
 
-  async function handleImportSubmit(event) {
+  async function handleCopySubmit(event) {
     event.preventDefault()
-    if (importLoading || selectedFiles.length === 0) {
+    const nextPath = localPath.trim()
+    if (copyLoading || !nextPath) {
       return
     }
 
-    setImportLoading(true)
-    setImportError('')
+    setCopyLoading(true)
+    setCopyError('')
     try {
-      await onImportFolder(selectedFiles)
-      setSelectedFiles([])
-      setSelectedFolderName('')
-      if (folderInputRef.current) {
-        folderInputRef.current.value = ''
+      await onCopyLocalFolder(nextPath)
+      setLocalPath('')
+    } catch (err) {
+      setCopyError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCopyLoading(false)
+    }
+  }
+
+  async function handlePickFolder() {
+    if (copyLoading || pickLoading) {
+      return
+    }
+
+    setPickLoading(true)
+    setCopyError('')
+    try {
+      const picked = await onPickLocalFolder()
+      if (typeof picked === 'string' && picked.trim()) {
+        setLocalPath(picked.trim())
       }
     } catch (err) {
-      setImportError(err instanceof Error ? err.message : String(err))
+      setCopyError(err instanceof Error ? err.message : String(err))
     } finally {
-      setImportLoading(false)
+      setPickLoading(false)
     }
   }
 
@@ -90,15 +129,42 @@ export function CodeView({
           {loading && <div className="muted">Loading...</div>}
           {error && <div className="error">Error: {error}</div>}
 
-          {!loading && !error && names.length === 0 && (
+          {!loading && !error && folderItems.length === 0 && (
             <div className="muted">No folders in code/ yet.</div>
           )}
 
-          {!loading && !error && names.length > 0 && (
+          {!loading && !error && folderItems.length > 0 && (
             <ul className="code-folder-list">
-              {names.map((name) => (
-                <li key={name} className="code-folder-item">
-                  {name}
+              {folderItems.map((folder) => (
+                <li key={folder.name} className="code-folder-item">
+                  <div className="code-folder-name">{folder.name}</div>
+                  <div className="code-folder-meta">{folder.path}</div>
+
+                  {!folder.isGitRepo && (
+                    <div className="code-folder-meta">No git repository detected.</div>
+                  )}
+
+                  {folder.isGitRepo && (
+                    <>
+                      <div className="code-folder-meta">
+                        Branch: {folder.branch || 'unknown'}
+                        {folder.defaultBranch ? ` (default: ${folder.defaultBranch})` : ''}
+                        {folder.dirty === null ? '' : folder.dirty ? ' • Dirty' : ' • Clean'}
+                      </div>
+                      {folder.remote && (
+                        <div className="code-folder-meta">Remote: {folder.remote}</div>
+                      )}
+                      {(folder.lastCommitHash || folder.lastCommitMessage) && (
+                        <div className="code-folder-meta">
+                          Last: {folder.lastCommitHash || 'unknown'}
+                          {folder.lastCommitMessage ? ` - ${folder.lastCommitMessage}` : ''}
+                          {folder.lastCommitAt
+                            ? ` • ${formatCommitTimestamp(folder.lastCommitAt)}`
+                            : ''}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
@@ -122,34 +188,34 @@ export function CodeView({
             {cloneError && <div className="error">Error: {cloneError}</div>}
           </form>
 
-          <form className="code-card" onSubmit={handleImportSubmit}>
-            <div className="code-card-title">Import Local Folder</div>
-            <input
-              ref={folderInputRef}
-              className="code-input-file"
-              type="file"
-              webkitdirectory=""
-              directory=""
-              multiple
-              disabled={importLoading}
-              onChange={(event) => {
-                const files = Array.from(event.target.files || [])
-                setSelectedFiles(files)
-                setSelectedFolderName(folderLabelFromFiles(files))
-                setImportError('')
-              }}
-            />
-            <div className="code-selected-folder">
-              {selectedFolderName || (selectedFiles.length > 0 ? `${selectedFiles.length} files selected` : 'No folder selected')}
+          <form className="code-card" onSubmit={handleCopySubmit}>
+            <div className="code-card-title">Copy Local Folder (On Disk)</div>
+            <div className="code-path-picker">
+              <button
+                className="code-btn code-btn-secondary"
+                type="button"
+                onClick={handlePickFolder}
+                disabled={copyLoading || pickLoading}
+              >
+                {pickLoading ? 'Selecting...' : 'Select Folder'}
+              </button>
             </div>
+            <input
+              className="code-input"
+              type="text"
+              value={localPath}
+              onChange={(event) => setLocalPath(event.target.value)}
+              placeholder="/absolute/path/to/local/folder"
+              disabled={copyLoading}
+            />
             <button
               className="code-btn"
               type="submit"
-              disabled={importLoading || selectedFiles.length === 0}
+              disabled={copyLoading || !localPath.trim()}
             >
-              {importLoading ? 'Copying...' : 'Copy Folder'}
+              {copyLoading ? 'Copying...' : 'Copy Folder'}
             </button>
-            {importError && <div className="error">Error: {importError}</div>}
+            {copyError && <div className="error">Error: {copyError}</div>}
           </form>
         </div>
       </div>

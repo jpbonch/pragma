@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
@@ -59,6 +59,7 @@ import {
   agentRequestHelpSchema,
   agentSelectRecipientSchema,
   chatsQuerySchema,
+  createCodeFolderCopySchema,
   createCodeRepoCloneSchema,
   conversationTurnSchema,
   createAgentSchema,
@@ -2050,6 +2051,80 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     return c.json({ ok: true, folder: { name: folderName }, folders }, 201);
   });
 
+  app.post("/code/folders/pick-local", async (c) => {
+    if (process.platform !== "darwin") {
+      throw new SalmonError(
+        "FOLDER_PICKER_UNSUPPORTED",
+        400,
+        "Folder picker is currently supported on macOS only. Paste a local path manually.",
+      );
+    }
+
+    try {
+      const raw = await runCommand({
+        command: "osascript",
+        args: [
+          "-e",
+          'POSIX path of (choose folder with prompt "Select a local folder to copy into code/")',
+        ],
+        cwd: process.cwd(),
+        env: process.env,
+      });
+      return c.json({
+        ok: true,
+        cancelled: false,
+        path: normalizePickedLocalPath(raw),
+      });
+    } catch (error: unknown) {
+      const message = errorMessage(error);
+      if (/user canceled/i.test(message)) {
+        return c.json({ ok: true, cancelled: true, path: "" });
+      }
+      throw new SalmonError("PICK_LOCAL_CODE_FOLDER_FAILED", 400, message);
+    }
+  });
+
+  app.post("/code/folders/copy-local", validateJson(createCodeFolderCopySchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const paths = getWorkspacePaths(workspaceName);
+    const body = c.req.valid("json");
+
+    if (body.local_path.includes("\0")) {
+      throw new SalmonError("INVALID_LOCAL_CODE_PATH", 400, "Local path is invalid.");
+    }
+
+    const sourcePath = resolve(body.local_path.trim());
+    const sourceInfo = await stat(sourcePath).catch(() => null);
+    if (!sourceInfo?.isDirectory()) {
+      throw new SalmonError("LOCAL_CODE_PATH_NOT_FOUND", 404, "Local folder was not found.");
+    }
+
+    const folderName = normalizeCodeFolderName(basename(sourcePath));
+    const targetPath = join(paths.codeDir, folderName);
+    if (await pathExists(targetPath)) {
+      throw new SalmonError(
+        "CODE_FOLDER_EXISTS",
+        409,
+        `Code folder already exists: ${folderName}`,
+      );
+    }
+
+    try {
+      await cp(sourcePath, targetPath, {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+        preserveTimestamps: true,
+      });
+    } catch (error: unknown) {
+      await rm(targetPath, { recursive: true, force: true });
+      throw new SalmonError("COPY_LOCAL_CODE_FAILED", 400, errorMessage(error));
+    }
+
+    const folders = await listCodeFolders(paths.codeDir);
+    return c.json({ ok: true, folder: { name: folderName }, folders }, 201);
+  });
+
   app.post("/code/folders/import", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const paths = getWorkspacePaths(workspaceName);
@@ -2894,12 +2969,125 @@ function normalizeContextFolderName(name: string): string {
   return trimmed;
 }
 
-async function listCodeFolders(codeDir: string): Promise<Array<{ name: string }>> {
+type CodeFolderSummary = {
+  name: string;
+  path: string;
+  is_git_repo: boolean;
+  git_branch: string | null;
+  git_default_branch: string | null;
+  git_remote: string | null;
+  git_dirty: boolean | null;
+  git_last_commit_hash: string | null;
+  git_last_commit_message: string | null;
+  git_last_commit_at: string | null;
+};
+
+async function listCodeFolders(codeDir: string): Promise<CodeFolderSummary[]> {
   const entries = await readdir(codeDir, { withFileTypes: true }).catch(() => []);
-  return entries
+  const folderNames = entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-    .map((entry) => ({ name: entry.name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  return Promise.all(folderNames.map((name) => buildCodeFolderSummary(codeDir, name)));
+}
+
+async function buildCodeFolderSummary(
+  codeDir: string,
+  name: string,
+): Promise<CodeFolderSummary> {
+  const folderPath = join(codeDir, name);
+  const base: CodeFolderSummary = {
+    name,
+    path: `code/${name}`,
+    is_git_repo: false,
+    git_branch: null,
+    git_default_branch: null,
+    git_remote: null,
+    git_dirty: null,
+    git_last_commit_hash: null,
+    git_last_commit_message: null,
+    git_last_commit_at: null,
+  };
+
+  if (!(await hasGitMarkerInFolder(folderPath))) {
+    return base;
+  }
+
+  const insideGitRepo = (await runGitCaptureOptional(folderPath, ["rev-parse", "--is-inside-work-tree"])) === "true";
+  if (!insideGitRepo) {
+    return base;
+  }
+
+  const branch = await runGitCaptureOptional(folderPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const remote = await runGitCaptureOptional(folderPath, ["config", "--get", "remote.origin.url"]);
+  const remoteHead = await runGitCaptureOptional(folderPath, [
+    "symbolic-ref",
+    "--quiet",
+    "--short",
+    "refs/remotes/origin/HEAD",
+  ]);
+  const statusPorcelain = await runGitCaptureOptional(folderPath, ["status", "--porcelain"]);
+  const lastCommit = await runGitCaptureOptional(folderPath, [
+    "log",
+    "-1",
+    "--pretty=format:%h%x1f%s%x1f%cI",
+  ]);
+  const [lastCommitHash = "", lastCommitMessage = "", lastCommitAt = ""] = (lastCommit || "")
+    .split("\u001f")
+    .map((value) => value.trim());
+
+  return {
+    ...base,
+    is_git_repo: true,
+    git_branch: normalizeOptionalGitValue(branch),
+    git_default_branch: normalizeGitDefaultBranch(remoteHead),
+    git_remote: normalizeOptionalGitValue(remote),
+    git_dirty: typeof statusPorcelain === "string" ? statusPorcelain.trim().length > 0 : null,
+    git_last_commit_hash: normalizeOptionalGitValue(lastCommitHash),
+    git_last_commit_message: normalizeOptionalGitValue(lastCommitMessage),
+    git_last_commit_at: normalizeOptionalGitValue(lastCommitAt),
+  };
+}
+
+async function hasGitMarkerInFolder(path: string): Promise<boolean> {
+  const marker = await stat(join(path, ".git")).catch(() => null);
+  return Boolean(marker?.isDirectory() || marker?.isFile());
+}
+
+async function runGitCaptureOptional(cwd: string, args: string[]): Promise<string | null> {
+  try {
+    const output = await runCommand({
+      command: "git",
+      args,
+      cwd,
+      env: process.env,
+    });
+    return output.trim();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeGitDefaultBranch(value: string | null): string | null {
+  const normalized = normalizeOptionalGitValue(value);
+  if (!normalized) {
+    return null;
+  }
+  const marker = "origin/";
+  const index = normalized.indexOf(marker);
+  if (index < 0) {
+    return normalized;
+  }
+  return normalized.slice(index + marker.length) || null;
+}
+
+function normalizeOptionalGitValue(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function deriveCodeFolderNameFromGitUrl(gitUrl: string): string {
@@ -2923,6 +3111,17 @@ function normalizeCodeFolderName(name: string): string {
   }
 
   return normalized;
+}
+
+function normalizePickedLocalPath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed === "/") {
+    return trimmed;
+  }
+  return trimmed.replace(/\/+$/, "");
 }
 
 function normalizeImportedPath(path: string): string {
