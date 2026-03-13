@@ -315,6 +315,7 @@ export async function initializeDatabase(workspaceName: string): Promise<void> {
   try {
     await ensureRequiredSchema(db);
     await ensureDefaultAgents(db);
+    await ensureDefaultHuman(db);
     await ensureConversationSchema(db);
   } finally {
     await db.close();
@@ -397,6 +398,7 @@ async function createWorkspaceDatabase(dbDir: string): Promise<PGlite> {
   await db.waitReady;
   await ensureRequiredSchema(db);
   await ensureDefaultAgents(db);
+  await ensureDefaultHuman(db);
   await ensureConversationSchema(db);
   return patchDatabaseClose(db);
 }
@@ -576,6 +578,16 @@ ON CONFLICT (id) DO NOTHING
       ],
     );
   }
+}
+
+const DEFAULT_HUMAN_ID = "you";
+const DEFAULT_HUMAN_EMOJI = "🌿";
+
+async function ensureDefaultHuman(db: PGlite): Promise<void> {
+  await db.query(
+    `INSERT INTO humans (id, emoji) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+    [DEFAULT_HUMAN_ID, DEFAULT_HUMAN_EMOJI],
+  );
 }
 
 async function pathExists(path: string): Promise<boolean> {
