@@ -68,6 +68,67 @@ function EmojiPickerPopover({ open, onClose, onSelect }) {
   )
 }
 
+function HumanProfileModal({ open, human, onClose, onSave }) {
+  const [emoji, setEmoji] = useState('🌿')
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setEmoji(human?.emoji || '🌿')
+    setPickerOpen(false)
+  }, [open, human])
+
+  if (!open || !human) return null
+
+  const displayName = human._index === 0 ? 'You' : `Human ${human._index + 1}`
+  const role = human._index === 0 ? 'Owner' : 'Member'
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="agent-profile-card" onClick={(e) => e.stopPropagation()}>
+        <button className="agent-profile-close" onClick={onClose}>×</button>
+
+        <div className="agent-profile-header">
+          <div className="agent-profile-avatar-wrap">
+            <EmojiAvatar emoji={emoji} size={72} onClick={() => setPickerOpen(true)} />
+            <EmojiPickerPopover
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              onSelect={setEmoji}
+            />
+          </div>
+          <div className="agent-profile-name-input" style={{ cursor: 'default', pointerEvents: 'none' }}>
+            {displayName}
+          </div>
+          <div className="agent-profile-subtitle">{role}</div>
+        </div>
+
+        <div className="agent-profile-actions">
+          <button className="agent-profile-cancel" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button
+            className="agent-profile-save"
+            onClick={async () => {
+              setSaving(true)
+              try {
+                await onSave(human.id, emoji)
+                onClose()
+              } finally {
+                setSaving(false)
+              }
+            }}
+            disabled={saving}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClose, onSubmit }) {
   const [name, setName] = useState('')
   const [emoji, setEmoji] = useState('🤖')
@@ -213,7 +274,7 @@ export function RightPanel({
   const [editLoading, setEditLoading] = useState(false)
   const lastOpenOrchestratorRequestRef = useRef(0)
 
-  const [editingHumanId, setEditingHumanId] = useState(null)
+  const [editingHuman, setEditingHuman] = useState(null)
 
   useEffect(() => {
     if (
@@ -329,7 +390,7 @@ export function RightPanel({
           key={human.id}
           className="person-card"
           style={{ position: 'relative' }}
-          onClick={() => setEditingHumanId(editingHumanId === human.id ? null : human.id)}
+          onClick={() => setEditingHuman({ ...human, _index: i })}
         >
           <div className="person-avatar-wrap">
             <div className="person-avatar" style={{ background: '#2383e215' }}>
@@ -341,16 +402,6 @@ export function RightPanel({
             <div className="person-name">{i === 0 ? 'You' : `Human ${i + 1}`}</div>
             <div className="person-role">{i === 0 ? 'Owner' : 'Member'}</div>
           </div>
-          {editingHumanId === human.id && (
-            <EmojiPickerPopover
-              open
-              onClose={() => setEditingHumanId(null)}
-              onSelect={(emoji) => {
-                setEditingHumanId(null)
-                onUpdateHumanEmoji?.(human.id, emoji)
-              }}
-            />
-          )}
         </div>
       ))}
 
@@ -423,6 +474,15 @@ export function RightPanel({
         onClose={() => setEditingAgent(null)}
         onSubmit={(updates) => {
           void handleSubmitEdit(updates)
+        }}
+      />
+
+      <HumanProfileModal
+        open={Boolean(editingHuman)}
+        human={editingHuman}
+        onClose={() => setEditingHuman(null)}
+        onSave={async (id, emoji) => {
+          await onUpdateHumanEmoji?.(id, emoji)
         }}
       />
     </aside>
