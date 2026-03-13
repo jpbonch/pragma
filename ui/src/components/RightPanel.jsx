@@ -200,6 +200,8 @@ export function RightPanel({
   error,
   onCreateAgent,
   onUpdateAgent,
+  humans = [],
+  onUpdateHumanEmoji,
   openOrchestratorConfigRequest = 0,
 }) {
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -210,6 +212,8 @@ export function RightPanel({
   const [editError, setEditError] = useState('')
   const [editLoading, setEditLoading] = useState(false)
   const lastOpenOrchestratorRequestRef = useRef(0)
+
+  const [editingHumanId, setEditingHumanId] = useState(null)
 
   useEffect(() => {
     if (
@@ -306,18 +310,49 @@ export function RightPanel({
   return (
     <aside className="right-panel">
       <div className="right-section-title">Humans</div>
-      <div className="person-card">
-        <div className="person-avatar-wrap">
-          <div className="person-avatar" style={{ background: '#2383e215' }}>
-            <span>🌿</span>
+      {humans.length === 0 && (
+        <div className="person-card" style={{ position: 'relative' }}>
+          <div className="person-avatar-wrap">
+            <div className="person-avatar" style={{ background: '#2383e215' }}>
+              <span>🌿</span>
+            </div>
+            <div className="online-dot" />
           </div>
-          <div className="online-dot" />
+          <div>
+            <div className="person-name">You</div>
+            <div className="person-role">Owner</div>
+          </div>
         </div>
-        <div>
-          <div className="person-name">You</div>
-          <div className="person-role">Owner</div>
+      )}
+      {humans.map((human, i) => (
+        <div
+          key={human.id}
+          className="person-card"
+          style={{ position: 'relative' }}
+          onClick={() => setEditingHumanId(editingHumanId === human.id ? null : human.id)}
+        >
+          <div className="person-avatar-wrap">
+            <div className="person-avatar" style={{ background: '#2383e215' }}>
+              <span>{human.emoji || '🌿'}</span>
+            </div>
+            <div className="online-dot" />
+          </div>
+          <div>
+            <div className="person-name">{i === 0 ? 'You' : `Human ${i + 1}`}</div>
+            <div className="person-role">{i === 0 ? 'Owner' : 'Member'}</div>
+          </div>
+          {editingHumanId === human.id && (
+            <EmojiPickerPopover
+              open
+              onClose={() => setEditingHumanId(null)}
+              onSelect={(emoji) => {
+                setEditingHumanId(null)
+                onUpdateHumanEmoji?.(human.id, emoji)
+              }}
+            />
+          )}
         </div>
-      </div>
+      ))}
 
       <div className="right-section-title" style={{ paddingTop: 20 }}>Agents</div>
 

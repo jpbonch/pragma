@@ -563,4 +563,28 @@ export async function streamConversationTurn(payload, { onEvent, signal } = {}) 
   }
 }
 
+export async function fetchHumans() {
+  const data = asObject(await fetchJson('/humans'), 'Invalid humans response.')
+  if (!Array.isArray(data.humans)) {
+    throw invalidResponse('`humans` must be an array.')
+  }
+  return data.humans
+}
+
+export async function createHuman(emoji) {
+  return fetchJson('/humans', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ emoji }),
+  })
+}
+
+export async function updateHuman(id, emoji) {
+  return fetchJson(`/humans/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ emoji }),
+  })
+}
+
 export { API_URL }

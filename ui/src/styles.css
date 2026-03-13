@@ -2124,7 +2124,9 @@ select { cursor: pointer; }
   align-items: center;
   gap: 10px;
   cursor: pointer;
+  transition: background 0.1s;
 }
+.person-card:hover { background: rgba(0,0,0,0.02); }
 
 .person-avatar-wrap {
   position: relative;

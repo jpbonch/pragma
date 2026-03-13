@@ -12,6 +12,8 @@ import {
   executeFromPlanThread,
   fetchAgents,
   fetchChats,
+  fetchHumans,
+  updateHuman,
   fetchCodeFolders,
   fetchPlans,
   fetchRuntimeServices,
@@ -569,6 +571,8 @@ export default function App() {
   const [agentsLoading, setAgentsLoading] = useState(false)
   const [agentsError, setAgentsError] = useState('')
 
+  const [humans, setHumans] = useState([])
+
   const [contextData, setContextData] = useState({ folders: [], files: [] })
   const [contextLoading, setContextLoading] = useState(false)
   const [contextError, setContextError] = useState('')
@@ -1055,6 +1059,7 @@ export default function App() {
   function clearWorkspaceData() {
     setJobs([])
     setAgents([])
+    setHumans([])
     setContextData({ folders: [], files: [] })
     setCodeFolders([])
     setCodeLoading(false)
@@ -1083,6 +1088,7 @@ export default function App() {
     await Promise.all([
       loadJobs(),
       loadAgents(),
+      loadHumans(),
       loadContext(),
       loadCode(),
       loadPlans(),
@@ -1244,6 +1250,23 @@ export default function App() {
       setAgentsError(errorText(error))
     } finally {
       setAgentsLoading(false)
+    }
+  }
+
+  async function loadHumans() {
+    try {
+      setHumans(await fetchHumans())
+    } catch {
+      // Humans are non-critical; keep empty list on failure.
+    }
+  }
+
+  async function handleUpdateHumanEmoji(id, emoji) {
+    try {
+      await updateHuman(id, emoji)
+      await loadHumans()
+    } catch (error) {
+      setWorkspaceError(errorText(error))
     }
   }
 
@@ -2097,6 +2120,8 @@ export default function App() {
           error={agentsError}
           onCreateAgent={handleCreateAgent}
           onUpdateAgent={handleUpdateAgent}
+          humans={humans}
+          onUpdateHumanEmoji={handleUpdateHumanEmoji}
           openOrchestratorConfigRequest={openOrchestratorConfigRequest}
         />
       )}
