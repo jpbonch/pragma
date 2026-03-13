@@ -48,6 +48,9 @@ export class ApiError extends Error {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000
+const REVIEW_REQUEST_TIMEOUT_MS = 120000
+const CONVERSATION_REQUEST_TIMEOUT_MS = 30000
+const JOB_RESPONSE_REQUEST_TIMEOUT_MS = 30000
 
 function linkAbortSignals(target, source) {
   if (!source) return () => {}
@@ -328,7 +331,7 @@ export async function reviewJob(jobId, action) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ action }),
-  })
+  }, REVIEW_REQUEST_TIMEOUT_MS)
 }
 
 export async function fetchAgents() {
@@ -452,11 +455,11 @@ export async function respondToJob(jobId, message) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ message }),
-  })
+  }, JOB_RESPONSE_REQUEST_TIMEOUT_MS)
 }
 
 export async function fetchConversationThread(threadId) {
-  return fetchJson(`/conversations/${encodeURIComponent(threadId)}`)
+  return fetchJson(`/conversations/${encodeURIComponent(threadId)}`, undefined, CONVERSATION_REQUEST_TIMEOUT_MS)
 }
 
 export async function fetchChats(limit = 20, cursor = '') {
