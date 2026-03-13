@@ -493,6 +493,14 @@ ADD COLUMN IF NOT EXISTS test_commands_json TEXT
 ALTER TABLE jobs
 ADD COLUMN IF NOT EXISTS merge_retry_count INTEGER NOT NULL DEFAULT 0
 `);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS humans (
+  id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR(64),
+  emoji VARCHAR(32) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
 }
 
 async function ensureJobStatusEnumType(db: PGlite): Promise<void> {

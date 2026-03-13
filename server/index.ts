@@ -65,6 +65,7 @@ import {
   conversationTurnSchema,
   createAgentSchema,
   createContextFileSchema,
+  createHumanSchema,
   createContextFolderSchema,
   createExecuteJobSchema,
   createJobSchema,
@@ -83,6 +84,7 @@ import {
   setJobRecipientSchema,
   updateAgentSchema,
   updateContextFileSchema,
+  updateHumanSchema,
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
@@ -612,6 +614,89 @@ WHERE id = $1
 
       if ((updated.affectedRows ?? 0) === 0) {
         throw new SalmonError("AGENT_NOT_FOUND", 404, `Agent not found: ${id}`);
+      }
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // ── Humans ──────────────────────────────────────────────────────────
+
+  app.get("/humans", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const result = await db.query<{
+        id: string;
+        emoji: string;
+        created_at: string;
+      }>(`SELECT id, emoji, created_at FROM humans ORDER BY created_at ASC`);
+
+      return c.json({ humans: result.rows });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.post("/humans", validateJson(createHumanSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const body = c.req.valid("json");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const id = randomUUID().slice(0, 12);
+      await db.query(
+        `INSERT INTO humans (id, emoji) VALUES ($1, $2)`,
+        [id, body.emoji],
+      );
+
+      return c.json({ ok: true, id }, 201);
+    } catch (error: unknown) {
+      const message = errorMessage(error);
+      throw new SalmonError("CREATE_HUMAN_FAILED", 400, message);
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.put("/humans/:id", validateJson(updateHumanSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const updated = await db.query(
+        `UPDATE humans SET emoji = $2 WHERE id = $1`,
+        [id, body.emoji],
+      );
+
+      if ((updated.affectedRows ?? 0) === 0) {
+        throw new SalmonError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
+      }
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.delete("/humans/:id", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const id = c.req.param("id");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const deleted = await db.query(
+        `DELETE FROM humans WHERE id = $1`,
+        [id],
+      );
+
+      if ((deleted.affectedRows ?? 0) === 0) {
+        throw new SalmonError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
       }
 
       return c.json({ ok: true });

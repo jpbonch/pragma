@@ -241,6 +241,18 @@ export const updateContextFileSchema = z
   })
   .strict();
 
+export const createHumanSchema = z
+  .object({
+    emoji: nonEmptyString,
+  })
+  .strict();
+
+export const updateHumanSchema = z
+  .object({
+    emoji: nonEmptyString,
+  })
+  .strict();
+
 export type Harness = z.infer<typeof harnessSchema>;
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 export type JobStatus = z.infer<typeof jobStatusSchema>;
