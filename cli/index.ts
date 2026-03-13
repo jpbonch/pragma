@@ -267,6 +267,75 @@ jobCommand
   );
 
 jobCommand
+  .command("submit-test-commands")
+  .description("Submit runnable test commands for the current job")
+  .requiredOption(
+    "--command <text>",
+    "Test command (repeat for multiple commands)",
+    (value: string, prev: string[]) => [...prev, value],
+    [],
+  )
+  .requiredOption(
+    "--cwd <path>",
+    "Run directory aligned to --command order (repeatable, relative to job workspace root)",
+    (value: string, prev: string[]) => [...prev, value],
+    [],
+  )
+  .option(
+    "--name <text>",
+    "Optional button label aligned to --command order (repeatable)",
+    (value: string, prev: string[]) => [...prev, value],
+    [],
+  )
+  .option("--job-id <id>", "Job id")
+  .option("--turn-id <id>", "Turn id")
+  .option("--api-url <url>", "Salmon API base URL")
+  .action(
+    async (options: {
+      command: string[];
+      cwd: string[];
+      name: string[];
+      jobId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
+      const cwdByIndex = Array.isArray(options.cwd) ? options.cwd : [];
+      const commands = (Array.isArray(options.command) ? options.command : [])
+        .map((value, index) => {
+          const command = value.trim();
+          const cwd = (cwdByIndex[index] ?? "").trim();
+          const label = (Array.isArray(options.name) ? options.name[index] : "")?.trim() || command;
+          return { label, command, cwd };
+        })
+        .filter((item) => item.command.length > 0 && item.cwd.length > 0);
+
+      if (commands.length === 0) {
+        throw new Error("At least one --command and matching --cwd is required.");
+      }
+      if (commands.length !== (Array.isArray(options.command) ? options.command.length : 0)) {
+        throw new Error("Each --command must include a matching --cwd at the same index.");
+      }
+
+      await apiRequest(
+        apiUrl,
+        `/jobs/${encodeURIComponent(jobId)}/agent/test-commands`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            commands,
+            turn_id: turnId,
+            agent_id: normalizeOptionalString(process.env.SALMON_AGENT_ID),
+          }),
+        },
+      );
+
+      console.log(`Submitted ${commands.length} test command(s) for job ${jobId}.`);
+    },
+  );
+
+jobCommand
   .command("plan-summary")
   .description("Submit structured plan summary for the current plan turn")
   .requiredOption("--title <text>", "Plan title")

@@ -11,6 +11,7 @@ import {
   X,
   Code2,
   Folder,
+  TerminalSquare,
 } from 'lucide-react'
 
 const ITEMS = [
@@ -37,6 +38,10 @@ export function Sidebar({
   onOpenPlan,
   onOpenChat,
   onHideChat,
+  services = [],
+  activeServiceId = '',
+  onOpenService,
+  onStopService,
   onSelectWorkspace,
   onCreateWorkspace,
 }) {
@@ -137,6 +142,46 @@ export function Sidebar({
           )
         })}
       </nav>
+
+      <section className="sidebar-services">
+        <div className="sidebar-services-title">Processes</div>
+        <div className="sidebar-services-list">
+          {services.length === 0 && (
+            <div className="sidebar-chat-empty">No running processes</div>
+          )}
+          {services.map((service) => {
+            const isActive = activeServiceId === service.id
+            const status = typeof service.status === 'string' ? service.status : ''
+            return (
+              <div key={service.id} className="sidebar-service-row">
+                <button
+                  className={`sidebar-service-item ${isActive ? 'active' : ''}`}
+                  onClick={() => onOpenService?.(service)}
+                  title={`${service.label || service.command} (${status})`}
+                >
+                  <span className={`sidebar-service-dot ${status === 'running' ? 'running' : ''}`} />
+                  <TerminalSquare size={12} />
+                  <span className="sidebar-service-title">{service.label || service.command}</span>
+                </button>
+                {status === 'running' && (
+                  <button
+                    className="sidebar-service-stop"
+                    aria-label="Stop process"
+                    title="Stop process"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onStopService?.(service.id)
+                    }}
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </section>
 
       <section className="sidebar-plans">
         <div className="sidebar-plans-title">Plans</div>

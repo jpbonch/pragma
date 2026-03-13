@@ -52,6 +52,33 @@ export async function runCommandDetailed(input: {
   };
 }
 
+export async function runShellCommandDetailed(input: {
+  command: string;
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+}): Promise<CommandResult> {
+  const shellCommand =
+    process.platform === "win32" ? "cmd.exe" : "sh";
+  const shellArgs =
+    process.platform === "win32"
+      ? ["/d", "/s", "/c", input.command]
+      : ["-lc", input.command];
+
+  const result = await execa(shellCommand, shellArgs, {
+    cwd: input.cwd,
+    env: input.env,
+    reject: false,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  return {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode ?? -1,
+  };
+}
+
 export function spawnCommand(input: {
   command: string;
   args?: string[];
@@ -70,6 +97,28 @@ export function spawnCommand(input: {
     env: input.env,
     reject: false,
     stdio: stdioOption,
+    buffer: stdio === "pipe",
+  });
+}
+
+export function spawnShellCommand(input: {
+  command: string;
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  stdio?: "pipe" | "inherit";
+}): ExecaChildProcess<string> {
+  const stdio = input.stdio ?? "pipe";
+  const shellCommand = process.platform === "win32" ? "cmd.exe" : "sh";
+  const shellArgs =
+    process.platform === "win32"
+      ? ["/d", "/s", "/c", input.command]
+      : ["-lc", input.command];
+
+  return execa(shellCommand, shellArgs, {
+    cwd: input.cwd,
+    env: input.env,
+    reject: false,
+    stdio,
     buffer: stdio === "pipe",
   });
 }

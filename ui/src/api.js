@@ -87,10 +87,10 @@ function asObject(value, message) {
   return value
 }
 
-async function fetchJson(path, init) {
+async function fetchJson(path, init, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
   let response
   try {
-    response = await fetchWithTimeout(`${API_BASE_URL}${path}`, init)
+    response = await fetchWithTimeout(`${API_BASE_URL}${path}`, init, timeoutMs)
   } catch (error) {
     if (error instanceof Error && /timed out/i.test(error.message)) {
       throw new ApiError(error.message, 408, 'REQUEST_TIMEOUT')
@@ -269,6 +269,58 @@ export async function openJobOutputFolder(jobId, path = '') {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+export async function fetchJobTestCommands(jobId) {
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/test-commands`)
+}
+
+export async function runJobTestCommand(jobId, command, cwd) {
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/test-commands/run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ command, cwd }),
+  }, 10 * 60 * 1000)
+}
+
+export async function fetchRuntimeServices() {
+  const data = asObject(await fetchJson('/services'), 'Invalid services response.')
+  if (!Array.isArray(data.services)) {
+    throw invalidResponse('`services` must be an array.')
+  }
+  return data.services
+}
+
+export async function stopRuntimeService(serviceId) {
+  return fetchJson(`/services/${encodeURIComponent(serviceId)}/stop`, {
+    method: 'POST',
+  })
+}
+
+export function openRuntimeServiceStream(serviceId, { onReady, onLog, onStatus, onError } = {}) {
+  const stream = new EventSource(
+    `${API_BASE_URL}/services/${encodeURIComponent(serviceId)}/stream`,
+  )
+
+  stream.addEventListener('ready', (event) => {
+    onReady?.(parseEventPayload(event))
+  })
+
+  stream.addEventListener('log', (event) => {
+    onLog?.(parseEventPayload(event))
+  })
+
+  stream.addEventListener('status', (event) => {
+    onStatus?.(parseEventPayload(event))
+  })
+
+  stream.addEventListener('error', (event) => {
+    onError?.(event)
+  })
+
+  return () => {
+    stream.close()
+  }
 }
 
 export async function reviewJob(jobId, action) {

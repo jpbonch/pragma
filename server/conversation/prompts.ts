@@ -135,6 +135,7 @@ export function buildWorkerPrompt(input: {
   const preferredCodePath = input.preferredCodePath?.trim() || "";
   const askQuestionCommand = `${cli} job ask-question --question "<question>" [--details "<optional context>"]`;
   const requestHelpCommand = `${cli} job request-help --summary "<short summary>" [--details "<optional context>"]`;
+  const submitTestsCommand = `${cli} job submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]`;
   const codePathPolicyLine = preferredCodePath
     ? `- Put code/source changes under \`${preferredCodePath}/\` unless the task explicitly targets another repo.`
     : "- Put code/source changes under `code/`.";
@@ -152,6 +153,10 @@ export function buildWorkerPrompt(input: {
     askQuestionCommand,
     "If you are blocked and need human help, run:",
     requestHelpCommand,
+    "If you changed code, submit at least one runnable validation command for the task window.",
+    "Include the exact run directory for each command (for example: `--cwd \"code/default/my-app\"`):",
+    submitTestsCommand,
+    "Provide only commands the human can run safely in this workspace.",
     "After either CLI escalation command, stop doing further work.",
     "Do not ask for clarification/help only in plain text without calling the CLI.",
     reasoningLine,

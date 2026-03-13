@@ -174,7 +174,8 @@ SET status = 'running',
     output_dir = $2,
     git_branch_name = $3,
     git_state_json = $4,
-    assigned_to = $5
+    assigned_to = $5,
+    test_commands_json = NULL
 WHERE id = $1
 `,
       [
@@ -194,7 +195,8 @@ SET status = 'orchestrating',
     output_dir = $2,
     git_branch_name = $3,
     git_state_json = $4,
-    assigned_to = NULL
+    assigned_to = NULL,
+    test_commands_json = NULL
 WHERE id = $1
 `,
       [input.jobId, outputDir, gitState.branch_name, serializedGitState],

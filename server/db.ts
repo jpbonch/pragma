@@ -438,6 +438,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   session_id VARCHAR(255),
   git_branch_name VARCHAR(255),
   git_state_json TEXT,
+  test_commands_json TEXT,
   merge_retry_count INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (assigned_to) REFERENCES agents(id)
@@ -481,6 +482,11 @@ ADD COLUMN IF NOT EXISTS git_branch_name VARCHAR(255)
   await db.exec(`
 ALTER TABLE jobs
 ADD COLUMN IF NOT EXISTS git_state_json TEXT
+`);
+
+  await db.exec(`
+ALTER TABLE jobs
+ADD COLUMN IF NOT EXISTS test_commands_json TEXT
 `);
 
   await db.exec(`

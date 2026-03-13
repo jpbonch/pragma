@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, X, Sparkles, User, Wrench, Info } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { OutputPanel } from './OutputPanel'
+import { fetchJobTestCommands, runJobTestCommand } from '../api'
 
 const HEADER_STATUS_LABELS = {
   pending_review: 'Review',
@@ -56,11 +57,20 @@ export function ConversationDrawer({
   headerAgentName = '',
   headerAgentEmoji = '',
   onReviewAction,
+  runtimeService = null,
+  runtimeServiceLogs = [],
+  runtimeServiceError = '',
+  onStopRuntimeService,
+  onServiceStarted,
 }) {
   const bodyRef = useRef(null)
   const [prompt, setPrompt] = useState('')
   const [approveLoading, setApproveLoading] = useState(false)
   const [approveError, setApproveError] = useState('')
+  const [testCommands, setTestCommands] = useState([])
+  const [testCommandsLoading, setTestCommandsLoading] = useState(false)
+  const [testCommandsError, setTestCommandsError] = useState('')
+  const [runningTestCommand, setRunningTestCommand] = useState('')
   const showOutputPanel = Boolean(jobId) && mode === 'chat'
   const canApprove = showOutputPanel && jobStatus === 'pending_review'
   const canReopenCompleted = showOutputPanel && jobStatus === 'completed'
@@ -88,8 +98,46 @@ export function ConversationDrawer({
       setPrompt('')
       setApproveLoading(false)
       setApproveError('')
+      setTestCommands([])
+      setTestCommandsLoading(false)
+      setTestCommandsError('')
+      setRunningTestCommand('')
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open || !jobId || !showOutputPanel) {
+      return
+    }
+
+    let cancelled = false
+    setTestCommandsLoading(true)
+    setTestCommandsError('')
+    void fetchJobTestCommands(jobId)
+      .then((data) => {
+        if (cancelled) {
+          return
+        }
+        const list = Array.isArray(data?.commands) ? data.commands : []
+        setTestCommands(list)
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return
+        }
+        setTestCommands([])
+        setTestCommandsError(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTestCommandsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, jobId, showOutputPanel, entries.length, jobStatus])
 
   function submitPrompt() {
     if (loading) {
@@ -115,6 +163,28 @@ export function ConversationDrawer({
       setApproveError(error instanceof Error ? error.message : String(error))
     } finally {
       setApproveLoading(false)
+    }
+  }
+
+  async function handleRunTestCommand(item) {
+    const command = typeof item?.command === 'string' ? item.command : ''
+    const cwd = typeof item?.cwd === 'string' ? item.cwd : ''
+    const runKey = `${cwd}\n${command}`
+    if (!jobId || !command || !cwd || runningTestCommand) {
+      return
+    }
+    setRunningTestCommand(runKey)
+    setTestCommandsError('')
+    try {
+      const result = await runJobTestCommand(jobId, command, cwd)
+      const service = result?.service && typeof result.service === 'object' ? result.service : null
+      if (service) {
+        onServiceStarted?.(service)
+      }
+    } catch (error) {
+      setTestCommandsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRunningTestCommand('')
     }
   }
 
@@ -244,7 +314,19 @@ export function ConversationDrawer({
                 </div>
               </div>
               <div className="conv-output-side">
-                <OutputPanel jobId={jobId} jobStatus={jobStatus} />
+                <OutputPanel
+                  jobId={jobId}
+                  jobStatus={jobStatus}
+                  testCommands={testCommands}
+                  testCommandsLoading={testCommandsLoading}
+                  testCommandsError={testCommandsError}
+                  runningTestCommand={runningTestCommand}
+                  onRunTestCommand={handleRunTestCommand}
+                  runtimeService={runtimeService}
+                  runtimeServiceLogs={runtimeServiceLogs}
+                  runtimeServiceError={runtimeServiceError}
+                  onStopRuntimeService={onStopRuntimeService}
+                />
               </div>
             </>
           ) : (

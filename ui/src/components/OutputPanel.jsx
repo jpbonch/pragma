@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileCode2, FileImage, FileSpreadsheet, FileText, FileType2 } from 'lucide-react'
 import Papa from 'papaparse'
 import ReactMarkdown from 'react-markdown'
@@ -93,8 +93,30 @@ function DiffViewer({ diff }) {
   )
 }
 
-export function OutputPanel({ jobId, jobStatus }) {
-  const [tab, setTab] = useState('changes')
+function formatRuntimeLogEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return ''
+  }
+  const stream = typeof entry.stream === 'string' ? entry.stream : 'log'
+  const text = typeof entry.text === 'string' ? entry.text : ''
+  return `[${stream}] ${text}`
+}
+
+export function OutputPanel({
+  jobId,
+  jobStatus,
+  testCommands = [],
+  testCommandsLoading = false,
+  testCommandsError = '',
+  runningTestCommand = '',
+  onRunTestCommand,
+  runtimeService = null,
+  runtimeServiceLogs = [],
+  runtimeServiceError = '',
+  onStopRuntimeService,
+}) {
+  const [tab, setTab] = useState('outputs')
+  const runtimeLogRef = useRef(null)
 
   const [changes, setChanges] = useState('')
   const [changesLoading, setChangesLoading] = useState(false)
@@ -111,7 +133,7 @@ export function OutputPanel({ jobId, jobStatus }) {
 
   useEffect(() => {
     if (!jobId) return
-    setTab('changes')
+    setTab('outputs')
     void loadChanges(jobId)
     void loadFiles(jobId)
   }, [jobId])
@@ -215,21 +237,34 @@ export function OutputPanel({ jobId, jobStatus }) {
 
   const outputDownloadUrl = selectedPath ? jobOutputDownloadUrl(jobId, selectedPath) : ''
   const outputContentUrl = selectedPath ? jobOutputContentUrl(jobId, selectedPath) : ''
+  const runtimeLogText = useMemo(() => {
+    if (!Array.isArray(runtimeServiceLogs) || runtimeServiceLogs.length === 0) {
+      return ''
+    }
+    return runtimeServiceLogs.map((entry) => formatRuntimeLogEntry(entry)).join('')
+  }, [runtimeServiceLogs])
+
+  useEffect(() => {
+    if (!runtimeLogRef.current) {
+      return
+    }
+    runtimeLogRef.current.scrollTop = runtimeLogRef.current.scrollHeight
+  }, [runtimeLogText])
 
   return (
     <div className="output-panel">
       <div className="output-tabs">
         <button
-          className={`output-tab-btn ${tab === 'changes' ? 'active' : ''}`}
-          onClick={() => setTab('changes')}
-        >
-          Changes
-        </button>
-        <button
           className={`output-tab-btn ${tab === 'outputs' ? 'active' : ''}`}
           onClick={() => setTab('outputs')}
         >
           Outputs
+        </button>
+        <button
+          className={`output-tab-btn ${tab === 'changes' ? 'active' : ''}`}
+          onClick={() => setTab('changes')}
+        >
+          Changes
         </button>
       </div>
 
@@ -247,6 +282,62 @@ export function OutputPanel({ jobId, jobStatus }) {
 
       {tab === 'outputs' && (
         <div className="output-tab-body output-outputs-layout">
+          <div className="output-run-card">
+            {testCommandsLoading && <div className="muted">Loading test commands...</div>}
+            {!testCommandsLoading && testCommands.length > 0 && (
+              <div className="output-run-list">
+                {testCommands.map((item, index) => {
+                  const command = typeof item?.command === 'string' ? item.command : ''
+                  const cwd = typeof item?.cwd === 'string' ? item.cwd : ''
+                  const runKey = `${cwd}\n${command}`
+                  const label = typeof item?.label === 'string' && item.label.trim()
+                    ? item.label.trim()
+                    : command || `Test ${index + 1}`
+                  if (!command || !cwd) {
+                    return null
+                  }
+                  return (
+                    <button
+                      key={`${runKey}-${index}`}
+                      className="output-run-btn"
+                      title={`${command}\nCWD: ${cwd}`}
+                      onClick={() => { void onRunTestCommand?.(item) }}
+                      disabled={Boolean(runningTestCommand)}
+                    >
+                      {runningTestCommand === runKey ? `Running: ${label}...` : `Run: ${label}`}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            {testCommandsError && <div className="error">Error: {testCommandsError}</div>}
+          </div>
+
+          {runtimeService && runtimeService.job_id === jobId && (
+            <div className="output-runtime-card">
+              <div className="output-runtime-header">
+                <div className="output-runtime-title-wrap">
+                  <div className="output-runtime-title">{runtimeService.label || runtimeService.command}</div>
+                  <div className="output-runtime-meta">
+                    {runtimeService.status} · {runtimeService.cwd}
+                  </div>
+                </div>
+                {runtimeService.status === 'running' && (
+                  <button
+                    className="output-runtime-stop"
+                    onClick={() => onStopRuntimeService?.(runtimeService.id)}
+                  >
+                    Stop
+                  </button>
+                )}
+              </div>
+              {runtimeServiceError && <div className="error">Error: {runtimeServiceError}</div>}
+              <pre className="output-runtime-log" ref={runtimeLogRef}>
+                {runtimeLogText || 'No terminal output yet.'}
+              </pre>
+            </div>
+          )}
+
           {filesLoading && <div className="muted">Loading files...</div>}
           {filesError && <div className="error">Error: {filesError}</div>}
           {!filesLoading && !filesError && files.length === 0 && (

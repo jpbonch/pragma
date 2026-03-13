@@ -110,6 +110,24 @@ export const agentRequestHelpSchema = z
   })
   .strict();
 
+export const agentSubmitTestCommandsSchema = z
+  .object({
+    commands: z
+      .array(
+        z
+          .object({
+            label: nonEmptyString,
+            command: nonEmptyString,
+            cwd: nonEmptyString,
+          })
+          .strict(),
+      )
+      .min(1),
+    turn_id: nonEmptyString.optional(),
+    agent_id: nonEmptyString.optional(),
+  })
+  .strict();
+
 export const jobRespondSchema = z
   .object({
     message: nonEmptyString,
@@ -199,6 +217,13 @@ export const createCodeRepoCloneSchema = z
 export const createCodeFolderCopySchema = z
   .object({
     local_path: nonEmptyString,
+  })
+  .strict();
+
+export const runJobTestCommandSchema = z
+  .object({
+    command: nonEmptyString,
+    cwd: nonEmptyString,
   })
   .strict();
 

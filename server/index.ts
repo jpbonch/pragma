@@ -55,6 +55,7 @@ import {
 } from "./conversation/store";
 import type { HarnessId, JobStatus, ReasoningEffort } from "./conversation/types";
 import {
+  agentSubmitTestCommandsSchema,
   agentAskQuestionSchema,
   agentRequestHelpSchema,
   agentSelectRecipientSchema,
@@ -77,13 +78,14 @@ import {
   planSelectRecipientSchema,
   planSummarySchema,
   reviewJobSchema,
+  runJobTestCommandSchema,
   setActiveWorkspaceSchema,
   setJobRecipientSchema,
   updateAgentSchema,
   updateContextFileSchema,
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
-import { runCommand } from "./process/runCommand";
+import { runCommand, spawnShellCommand } from "./process/runCommand";
 
 type StartServerOptions = {
   port: number;
@@ -103,8 +105,48 @@ type ThreadUpdateListener = (event: {
   source: string;
 }) => void;
 
+type RuntimeServiceStatus = "running" | "exited" | "stopped";
+type RuntimeServiceLogStream = "stdout" | "stderr" | "system";
+
+type RuntimeServiceLogEntry = {
+  seq: number;
+  ts: string;
+  stream: RuntimeServiceLogStream;
+  text: string;
+};
+
+type RuntimeServiceSummary = {
+  id: string;
+  workspace: string;
+  job_id: string;
+  label: string;
+  command: string;
+  cwd: string;
+  status: RuntimeServiceStatus;
+  pid: number | null;
+  exit_code: number | null;
+  started_at: string;
+  ended_at: string | null;
+};
+
+type RuntimeServiceStreamEvent =
+  | { type: "log"; entry: RuntimeServiceLogEntry }
+  | { type: "status"; service: RuntimeServiceSummary };
+
+type RuntimeServiceListener = (event: RuntimeServiceStreamEvent) => void;
+
+type RuntimeServiceRecord = RuntimeServiceSummary & {
+  absolute_cwd: string;
+  stop_requested: boolean;
+  next_seq: number;
+  logs: RuntimeServiceLogEntry[];
+  listeners: Set<RuntimeServiceListener>;
+};
+
 const JOB_STATUS_LISTENERS = new Map<string, Set<JobStatusListener>>();
 const THREAD_UPDATE_LISTENERS = new Map<string, Set<ThreadUpdateListener>>();
+const RUNTIME_SERVICES_BY_WORKSPACE = new Map<string, Map<string, RuntimeServiceRecord>>();
+const MAX_RUNTIME_SERVICE_LOG_ENTRIES = 2000;
 
 function threadListenerKey(workspaceName: string, threadId: string): string {
   return `${workspaceName}:${threadId}`;
@@ -185,6 +227,206 @@ function publishThreadUpdated(
   for (const listener of listeners) {
     listener(event);
   }
+}
+
+function getWorkspaceServiceStore(
+  workspaceName: string,
+  createIfMissing = false,
+): Map<string, RuntimeServiceRecord> {
+  const existing = RUNTIME_SERVICES_BY_WORKSPACE.get(workspaceName);
+  if (existing) {
+    return existing;
+  }
+  if (!createIfMissing) {
+    return new Map<string, RuntimeServiceRecord>();
+  }
+  const created = new Map<string, RuntimeServiceRecord>();
+  RUNTIME_SERVICES_BY_WORKSPACE.set(workspaceName, created);
+  return created;
+}
+
+function toRuntimeServiceSummary(service: RuntimeServiceRecord): RuntimeServiceSummary {
+  return {
+    id: service.id,
+    workspace: service.workspace,
+    job_id: service.job_id,
+    label: service.label,
+    command: service.command,
+    cwd: service.cwd,
+    status: service.status,
+    pid: service.pid,
+    exit_code: service.exit_code,
+    started_at: service.started_at,
+    ended_at: service.ended_at,
+  };
+}
+
+function listRuntimeServices(workspaceName: string): RuntimeServiceSummary[] {
+  const store = getWorkspaceServiceStore(workspaceName);
+  return [...store.values()]
+    .sort((a, b) => {
+      if (a.status === "running" && b.status !== "running") return -1;
+      if (a.status !== "running" && b.status === "running") return 1;
+      return b.started_at.localeCompare(a.started_at);
+    })
+    .map((service) => toRuntimeServiceSummary(service));
+}
+
+function getRuntimeService(workspaceName: string, serviceId: string): RuntimeServiceRecord | null {
+  const store = getWorkspaceServiceStore(workspaceName);
+  return store.get(serviceId) ?? null;
+}
+
+function publishRuntimeServiceEvent(
+  service: RuntimeServiceRecord,
+  event: RuntimeServiceStreamEvent,
+): void {
+  for (const listener of service.listeners) {
+    listener(event);
+  }
+}
+
+function appendRuntimeServiceLog(
+  service: RuntimeServiceRecord,
+  stream: RuntimeServiceLogStream,
+  text: string,
+): void {
+  if (!text) {
+    return;
+  }
+
+  const entry: RuntimeServiceLogEntry = {
+    seq: service.next_seq,
+    ts: new Date().toISOString(),
+    stream,
+    text,
+  };
+  service.next_seq += 1;
+  service.logs.push(entry);
+  if (service.logs.length > MAX_RUNTIME_SERVICE_LOG_ENTRIES) {
+    service.logs.splice(0, service.logs.length - MAX_RUNTIME_SERVICE_LOG_ENTRIES);
+  }
+  publishRuntimeServiceEvent(service, { type: "log", entry });
+}
+
+function updateRuntimeServiceStatus(
+  service: RuntimeServiceRecord,
+  status: RuntimeServiceStatus,
+  exitCode: number | null,
+): void {
+  service.status = status;
+  service.exit_code = exitCode;
+  service.ended_at = new Date().toISOString();
+  publishRuntimeServiceEvent(service, {
+    type: "status",
+    service: toRuntimeServiceSummary(service),
+  });
+}
+
+function startRuntimeService(input: {
+  workspaceName: string;
+  jobId: string;
+  label: string;
+  command: string;
+  requestedCwd: string;
+  absoluteCwd: string;
+  env: NodeJS.ProcessEnv;
+}): RuntimeServiceRecord {
+  const serviceId = `svc_${randomUUID().slice(0, 12)}`;
+  const startedAt = new Date().toISOString();
+  const service: RuntimeServiceRecord = {
+    id: serviceId,
+    workspace: input.workspaceName,
+    job_id: input.jobId,
+    label: input.label,
+    command: input.command,
+    cwd: input.requestedCwd,
+    status: "running",
+    pid: null,
+    exit_code: null,
+    started_at: startedAt,
+    ended_at: null,
+    absolute_cwd: input.absoluteCwd,
+    stop_requested: false,
+    next_seq: 1,
+    logs: [],
+    listeners: new Set<RuntimeServiceListener>(),
+  };
+
+  const store = getWorkspaceServiceStore(input.workspaceName, true);
+  store.set(service.id, service);
+
+  const child = spawnShellCommand({
+    command: input.command,
+    cwd: input.absoluteCwd,
+    env: input.env,
+    stdio: "pipe",
+  });
+  service.pid = typeof child.pid === "number" ? child.pid : null;
+
+  child.stdout?.on("data", (chunk) => {
+    appendRuntimeServiceLog(service, "stdout", String(chunk ?? ""));
+  });
+  child.stderr?.on("data", (chunk) => {
+    appendRuntimeServiceLog(service, "stderr", String(chunk ?? ""));
+  });
+  child.on("error", (error) => {
+    appendRuntimeServiceLog(service, "system", `[spawn error] ${errorMessage(error)}\n`);
+    if (service.status === "running") {
+      updateRuntimeServiceStatus(service, service.stop_requested ? "stopped" : "exited", -1);
+    }
+  });
+  child.on("exit", (code) => {
+    if (service.status !== "running") {
+      return;
+    }
+    updateRuntimeServiceStatus(service, service.stop_requested ? "stopped" : "exited", code ?? -1);
+  });
+
+  appendRuntimeServiceLog(
+    service,
+    "system",
+    `[started] ${input.command} (cwd=${input.requestedCwd})\n`,
+  );
+  publishRuntimeServiceEvent(service, {
+    type: "status",
+    service: toRuntimeServiceSummary(service),
+  });
+
+  return service;
+}
+
+function stopRuntimeService(service: RuntimeServiceRecord): void {
+  if (service.status !== "running") {
+    return;
+  }
+
+  service.stop_requested = true;
+  appendRuntimeServiceLog(service, "system", "[stopping] SIGTERM\n");
+  const pid = service.pid;
+  if (!pid || pid <= 0) {
+    updateRuntimeServiceStatus(service, "stopped", service.exit_code ?? -1);
+    return;
+  }
+
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    updateRuntimeServiceStatus(service, "stopped", service.exit_code ?? -1);
+    return;
+  }
+
+  setTimeout(() => {
+    if (service.status !== "running") {
+      return;
+    }
+    appendRuntimeServiceLog(service, "system", "[stopping] SIGKILL\n");
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      updateRuntimeServiceStatus(service, "stopped", service.exit_code ?? -1);
+    }
+  }, 5000);
 }
 
 export async function startServer(options: StartServerOptions): Promise<void> {
@@ -475,6 +717,87 @@ FROM jobs j
     });
   });
 
+  app.get("/services", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    return c.json({ services: listRuntimeServices(workspaceName) });
+  });
+
+  app.post("/services/:serviceId/stop", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const serviceId = c.req.param("serviceId");
+    const service = getRuntimeService(workspaceName, serviceId);
+    if (!service) {
+      throw new SalmonError("SERVICE_NOT_FOUND", 404, `Service not found: ${serviceId}`);
+    }
+
+    stopRuntimeService(service);
+    return c.json({
+      ok: true,
+      service: toRuntimeServiceSummary(service),
+    });
+  });
+
+  app.get("/services/:serviceId/stream", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const serviceId = c.req.param("serviceId");
+    const service = getRuntimeService(workspaceName, serviceId);
+    if (!service) {
+      throw new SalmonError("SERVICE_NOT_FOUND", 404, `Service not found: ${serviceId}`);
+    }
+
+    c.header("cache-control", "no-store");
+    c.header("connection", "keep-alive");
+
+    return streamSSE(c, async (stream) => {
+      let closed = false;
+      const writeEvent = async (
+        eventName: string,
+        payload: Record<string, unknown>,
+      ): Promise<void> => {
+        if (closed) {
+          return;
+        }
+        await stream.writeSSE({
+          event: eventName,
+          data: JSON.stringify(payload),
+        });
+      };
+
+      await writeEvent("ready", {
+        service: toRuntimeServiceSummary(service),
+        logs: service.logs,
+        ts: new Date().toISOString(),
+      });
+
+      const listener: RuntimeServiceListener = (event) => {
+        if (event.type === "log") {
+          void writeEvent("log", { entry: event.entry });
+          return;
+        }
+        void writeEvent("status", { service: event.service });
+      };
+      service.listeners.add(listener);
+
+      const pingTimer = setInterval(() => {
+        void writeEvent("ping", { ts: new Date().toISOString() });
+      }, 15000);
+
+      const abortSignal = c.req.raw.signal;
+      await new Promise<void>((resolve) => {
+        const closeStream = () => resolve();
+        if (abortSignal.aborted) {
+          resolve();
+          return;
+        }
+        abortSignal.addEventListener("abort", closeStream, { once: true });
+      });
+
+      closed = true;
+      clearInterval(pingTimer);
+      service.listeners.delete(listener);
+    });
+  });
+
   app.get("/conversations/:threadId/stream", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const threadId = c.req.param("threadId");
@@ -691,6 +1014,96 @@ LIMIT 1
 
       await openFolder(targetPath);
       return c.json({ ok: true, path: targetPath });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.get("/jobs/:jobId/test-commands", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const result = await db.query<{ id: string; test_commands_json: string | null }>(
+        `
+SELECT id, test_commands_json
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+
+      return c.json({
+        commands: parseJobTestCommands(row.test_commands_json),
+      });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.post("/jobs/:jobId/test-commands/run", validateJson(runJobTestCommandSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+    const body = c.req.valid("json");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const result = await db.query<{
+        id: string;
+        test_commands_json: string | null;
+      }>(
+        `
+SELECT id, test_commands_json
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+
+      const commands = parseJobTestCommands(row.test_commands_json);
+      const selected = commands.find(
+        (item) => item.command === body.command && item.cwd === body.cwd,
+      );
+      if (!selected) {
+        throw new SalmonError(
+          "TEST_COMMAND_NOT_ALLOWED",
+          409,
+          "Test command is not registered for this job.",
+        );
+      }
+
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const runRoot = await resolveJobExecutionRoot(workspacePaths, jobId);
+      const commandCwd = await resolveJobCommandCwd(runRoot, selected.cwd);
+      const service = startRuntimeService({
+        workspaceName,
+        jobId,
+        label: selected.label,
+        command: selected.command,
+        requestedCwd: selected.cwd,
+        absoluteCwd: commandCwd,
+        env: {
+          ...process.env,
+          SALMON_WORKSPACE_NAME: workspaceName,
+          SALMON_JOB_ID: jobId,
+        },
+      });
+
+      return c.json({
+        ok: true,
+        service: toRuntimeServiceSummary(service),
+      });
     } finally {
       await db.close();
     }
@@ -1150,6 +1563,74 @@ WHERE id = $1
 
     return c.json({ ok: true, assigned_to: selectedAgentId });
   });
+
+  app.post(
+    "/jobs/:jobId/agent/test-commands",
+    validateJson(agentSubmitTestCommandsSchema),
+    async (c) => {
+      const workspaceName = await requireActiveWorkspaceName();
+      const jobId = c.req.param("jobId");
+      const body = c.req.valid("json");
+
+      const db = await openDatabase(workspaceName);
+      try {
+        await ensureConversationSchema(db);
+        const jobResult = await db.query<{ id: string; status: JobStatus; assigned_to: string | null }>(
+          `
+SELECT id, status, assigned_to
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+          [jobId],
+        );
+        const job = jobResult.rows[0];
+        if (!job) {
+          throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+        }
+        if (job.status !== "running" && job.status !== "pending_review") {
+          throw new SalmonError(
+            "JOB_NOT_ACCEPTING_TEST_COMMANDS",
+            409,
+            `Job cannot accept test commands in status: ${job.status}`,
+          );
+        }
+
+        const normalizedCommands = normalizeJobTestCommands(body.commands);
+        await db.query(
+          `
+UPDATE jobs
+SET test_commands_json = $2
+WHERE id = $1
+`,
+          [jobId, JSON.stringify(normalizedCommands)],
+        );
+
+        const thread = await getThreadByJobId(db, jobId);
+        if (thread) {
+          const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+          await insertEvent(db, {
+            id: `evt_${randomUUID().slice(0, 12)}`,
+            threadId: thread.id,
+            turnId: body.turn_id || latestExecuteTurn?.id || null,
+            eventName: "worker_test_commands_submitted",
+            payload: {
+              commands: normalizedCommands,
+              agent_id: body.agent_id ?? job.assigned_to ?? null,
+            },
+          });
+          publishThreadUpdated(workspaceName, thread.id, "worker_test_commands_submitted");
+        }
+
+        return c.json({
+          ok: true,
+          commands: normalizedCommands,
+        });
+      } finally {
+        await db.close();
+      }
+    },
+  );
 
   app.post("/jobs/:jobId/agent/ask-question", validateJson(agentAskQuestionSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
@@ -2967,6 +3448,118 @@ function normalizeContextFolderName(name: string): string {
     throw new SalmonError("INVALID_CONTEXT_FOLDER", 400, "Invalid folder name.");
   }
   return trimmed;
+}
+
+type JobTestCommand = {
+  label: string;
+  command: string;
+  cwd: string;
+};
+
+function parseJobTestCommands(value: string | null | undefined): JobTestCommand[] {
+  if (!value || typeof value !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return normalizeJobTestCommands(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeJobTestCommands(input: unknown): JobTestCommand[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const commands: JobTestCommand[] = [];
+  const seen = new Set<string>();
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const command =
+      typeof record.command === "string" ? record.command.trim() : "";
+    const labelSource =
+      typeof record.label === "string" ? record.label.trim() : "";
+    const cwdSource = typeof record.cwd === "string" ? record.cwd.trim() : "";
+    const cwd = normalizeJobTestCommandCwd(cwdSource);
+    if (!command || !cwd) {
+      continue;
+    }
+    const key = `${cwd}\n${command}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    commands.push({
+      label: labelSource || command,
+      command,
+      cwd,
+    });
+    if (commands.length >= 8) {
+      break;
+    }
+  }
+
+  return commands;
+}
+
+async function resolveJobExecutionRoot(
+  workspacePaths: ReturnType<typeof getWorkspacePaths>,
+  jobId: string,
+): Promise<string> {
+  const worktreeRoot = resolve(join(workspacePaths.worktreesDir, jobId, "workspace"));
+  if (await isDirectory(worktreeRoot)) {
+    return worktreeRoot;
+  }
+  return workspacePaths.workspaceDir;
+}
+
+function normalizeJobTestCommandCwd(value: string): string {
+  if (!value) {
+    return "";
+  }
+  const normalized = value
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .trim();
+  if (!normalized || normalized.includes("\0")) {
+    return "";
+  }
+  return normalized;
+}
+
+async function resolveJobCommandCwd(baseDir: string, requestedCwd: string): Promise<string> {
+  const normalized = normalizeJobTestCommandCwd(requestedCwd);
+  if (!normalized) {
+    throw new SalmonError("INVALID_TEST_COMMAND_CWD", 400, "Test command cwd is invalid.");
+  }
+
+  const candidate = resolve(
+    normalized.startsWith("/") ? normalized : join(baseDir, normalized),
+  );
+  if (!isWithinRoot(baseDir, candidate)) {
+    throw new SalmonError(
+      "INVALID_TEST_COMMAND_CWD",
+      400,
+      "Test command cwd must stay within the job workspace.",
+    );
+  }
+  if (!(await isDirectory(candidate))) {
+    throw new SalmonError(
+      "INVALID_TEST_COMMAND_CWD",
+      400,
+      `Test command cwd does not exist: ${requestedCwd}`,
+    );
+  }
+  return candidate;
 }
 
 type CodeFolderSummary = {

@@ -14,15 +14,18 @@ import {
   fetchChats,
   fetchCodeFolders,
   fetchPlans,
+  fetchRuntimeServices,
   fetchContextFiles,
   fetchConversationThread,
   fetchJobs,
+  openRuntimeServiceStream,
   pickLocalCodeFolder,
   openConversationThreadStream,
   openJobsStream,
   fetchWorkspaces,
   respondToJob,
   reviewJob,
+  stopRuntimeService as stopRuntimeServiceApi,
   setJobRecipient,
   setActiveWorkspace,
   streamConversationTurn,
@@ -581,6 +584,10 @@ export default function App() {
   const [sidebarPlansLoading, setSidebarPlansLoading] = useState(false)
   const [sidebarChats, setSidebarChats] = useState([])
   const [sidebarChatsLoading, setSidebarChatsLoading] = useState(false)
+  const [runtimeServices, setRuntimeServices] = useState([])
+  const [selectedServiceId, setSelectedServiceId] = useState('')
+  const [runtimeServiceLogsById, setRuntimeServiceLogsById] = useState(() => ({}))
+  const [runtimeServiceStreamError, setRuntimeServiceStreamError] = useState('')
   const [hiddenChatsByWorkspace, setHiddenChatsByWorkspace] = useState(() =>
     loadHiddenChatsByWorkspace(),
   )
@@ -614,6 +621,8 @@ export default function App() {
   const conversationSyncRetryTimerRef = useRef(null)
   const jobsRefreshInFlightRef = useRef(false)
   const jobsRefreshQueuedRef = useRef(false)
+  const runtimeServicesPollTimerRef = useRef(null)
+  const runtimeServiceStreamCloseRef = useRef(null)
   const pendingCount = useMemo(() => getPendingCount(jobs), [jobs])
   const orchestratorRuntime = useMemo(() => {
     return agents.find((agent) => agent?.id === ORCHESTRATOR_AGENT_ID) ?? null
@@ -648,6 +657,33 @@ export default function App() {
     }
     return sidebarChats.filter((chat) => !hiddenIds.has(chat.id))
   }, [sidebarChats, hiddenChatsByWorkspace, activeWorkspaceName])
+  const selectedRuntimeService = useMemo(() => {
+    if (!selectedServiceId) {
+      return null
+    }
+    return runtimeServices.find((service) => service.id === selectedServiceId) || null
+  }, [runtimeServices, selectedServiceId])
+  const selectedRuntimeServiceLogs = useMemo(() => {
+    if (!selectedServiceId) {
+      return []
+    }
+    const logs = runtimeServiceLogsById[selectedServiceId]
+    return Array.isArray(logs) ? logs : []
+  }, [runtimeServiceLogsById, selectedServiceId])
+  const conversationRuntimeService =
+    selectedRuntimeService &&
+    conversation.jobId &&
+    selectedRuntimeService.job_id === conversation.jobId
+      ? selectedRuntimeService
+      : null
+  const visibleRuntimeServices = useMemo(() => {
+    return runtimeServices.filter((service) => {
+      if (service?.status === 'running') {
+        return true
+      }
+      return service?.id === selectedServiceId
+    })
+  }, [runtimeServices, selectedServiceId])
 
   useEffect(() => {
     void bootstrap()
@@ -664,6 +700,12 @@ export default function App() {
         clearTimeout(conversationSyncRetryTimerRef.current)
         conversationSyncRetryTimerRef.current = null
       }
+      if (runtimeServicesPollTimerRef.current) {
+        clearInterval(runtimeServicesPollTimerRef.current)
+        runtimeServicesPollTimerRef.current = null
+      }
+      runtimeServiceStreamCloseRef.current?.()
+      runtimeServiceStreamCloseRef.current = null
       conversationSyncPendingRef.current = false
       jobsRefreshQueuedRef.current = false
     }
@@ -824,6 +866,94 @@ export default function App() {
   }, [activeWorkspaceName])
 
   useEffect(() => {
+    if (!activeWorkspaceName) {
+      setRuntimeServices([])
+      setSelectedServiceId('')
+      setRuntimeServiceLogsById({})
+      setRuntimeServiceStreamError('')
+      return
+    }
+
+    void loadRuntimeServices()
+
+    if (runtimeServicesPollTimerRef.current) {
+      clearInterval(runtimeServicesPollTimerRef.current)
+    }
+    runtimeServicesPollTimerRef.current = setInterval(() => {
+      void loadRuntimeServices()
+    }, 3000)
+
+    return () => {
+      if (runtimeServicesPollTimerRef.current) {
+        clearInterval(runtimeServicesPollTimerRef.current)
+        runtimeServicesPollTimerRef.current = null
+      }
+    }
+  }, [activeWorkspaceName])
+
+  useEffect(() => {
+    runtimeServiceStreamCloseRef.current?.()
+    runtimeServiceStreamCloseRef.current = null
+    setRuntimeServiceStreamError('')
+
+    if (!selectedServiceId) {
+      return
+    }
+
+    const close = openRuntimeServiceStream(selectedServiceId, {
+      onReady: (payload) => {
+        if (!payload || typeof payload !== 'object') {
+          return
+        }
+        if (payload.service && typeof payload.service === 'object') {
+          upsertRuntimeService(payload.service)
+        }
+        if (Array.isArray(payload.logs)) {
+          setRuntimeServiceLogsById((prev) => ({
+            ...prev,
+            [selectedServiceId]: payload.logs,
+          }))
+        }
+      },
+      onLog: (payload) => {
+        const entry = payload?.entry
+        if (!entry || typeof entry !== 'object') {
+          return
+        }
+        setRuntimeServiceLogsById((prev) => {
+          const existing = Array.isArray(prev[selectedServiceId]) ? prev[selectedServiceId] : []
+          const nextLogs = [...existing, entry]
+          if (nextLogs.length > 2000) {
+            nextLogs.splice(0, nextLogs.length - 2000)
+          }
+          return {
+            ...prev,
+            [selectedServiceId]: nextLogs,
+          }
+        })
+      },
+      onStatus: (payload) => {
+        const nextService = payload?.service
+        if (!nextService || typeof nextService !== 'object') {
+          return
+        }
+        upsertRuntimeService(nextService)
+      },
+      onError: () => {
+        setRuntimeServiceStreamError('Service log stream disconnected.')
+      },
+    })
+
+    runtimeServiceStreamCloseRef.current = close
+    return () => {
+      close()
+      if (runtimeServiceStreamCloseRef.current === close) {
+        runtimeServiceStreamCloseRef.current = null
+      }
+    }
+  }, [selectedServiceId])
+
+  useEffect(() => {
     if (!conversation.jobId) {
       return
     }
@@ -936,11 +1066,119 @@ export default function App() {
     setAgentsError('')
     setContextError('')
     setCodeError('')
+    setRuntimeServices([])
+    setSelectedServiceId('')
+    setRuntimeServiceLogsById({})
+    setRuntimeServiceStreamError('')
+    runtimeServiceStreamCloseRef.current?.()
+    runtimeServiceStreamCloseRef.current = null
+    if (runtimeServicesPollTimerRef.current) {
+      clearInterval(runtimeServicesPollTimerRef.current)
+      runtimeServicesPollTimerRef.current = null
+    }
     closeConversationDrawer()
   }
 
   async function loadWorkspaceData() {
-    await Promise.all([loadJobs(), loadAgents(), loadContext(), loadCode(), loadPlans(), loadChats()])
+    await Promise.all([
+      loadJobs(),
+      loadAgents(),
+      loadContext(),
+      loadCode(),
+      loadPlans(),
+      loadChats(),
+      loadRuntimeServices(),
+    ])
+  }
+
+  async function loadRuntimeServices() {
+    try {
+      const next = await fetchRuntimeServices()
+      setRuntimeServices(next)
+      if (selectedServiceId && !next.some((service) => service.id === selectedServiceId)) {
+        setSelectedServiceId('')
+        setRuntimeServiceStreamError('')
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'NO_ACTIVE_WORKSPACE') {
+        setRuntimeServices([])
+        setSelectedServiceId('')
+        return
+      }
+      setWorkspaceError((prev) => prev || errorText(error))
+    }
+  }
+
+  function upsertRuntimeService(nextService) {
+    if (!nextService || typeof nextService !== 'object' || !nextService.id) {
+      return
+    }
+    setRuntimeServices((prev) => {
+      const index = prev.findIndex((service) => service.id === nextService.id)
+      if (index === -1) {
+        return [nextService, ...prev]
+      }
+      const next = [...prev]
+      next[index] = { ...next[index], ...nextService }
+      return next
+    })
+  }
+
+  function handleRuntimeServiceStarted(service) {
+    upsertRuntimeService(service)
+    if (service?.id) {
+      setSelectedServiceId(service.id)
+    }
+  }
+
+  async function handleStopRuntimeService(serviceId) {
+    if (!serviceId) {
+      return
+    }
+    try {
+      const result = await stopRuntimeServiceApi(serviceId)
+      if (result?.service) {
+        upsertRuntimeService(result.service)
+      } else {
+        await loadRuntimeServices()
+      }
+    } catch (error) {
+      setWorkspaceError(errorText(error))
+    }
+  }
+
+  async function handleOpenRuntimeService(service) {
+    if (!service || typeof service !== 'object') {
+      return
+    }
+
+    const serviceId = typeof service.id === 'string' ? service.id : ''
+    const jobId = typeof service.job_id === 'string' ? service.job_id : ''
+    if (!serviceId || !jobId) {
+      return
+    }
+
+    setSelectedServiceId(serviceId)
+    const existingJob = jobs.find((job) => job?.id === jobId)
+    if (existingJob) {
+      await handleOpenJobConversation(existingJob, { serviceId })
+      return
+    }
+
+    let refreshedJob = null
+    try {
+      const refreshedJobs = await fetchJobs(300)
+      setJobs(refreshedJobs)
+      refreshedJob = refreshedJobs.find((job) => job?.id === jobId) || null
+    } catch {
+      refreshedJob = null
+    }
+    if (refreshedJob) {
+      await handleOpenJobConversation(refreshedJob, { serviceId })
+      return
+    }
+
+    setWorkspaceError(`Task not found for process job ${jobId}.`)
   }
 
   async function loadPlans() {
@@ -1436,6 +1674,7 @@ export default function App() {
     if (!threadId) {
       return
     }
+    setSelectedServiceId('')
 
     try {
       const data = await fetchConversationThread(threadId)
@@ -1474,6 +1713,7 @@ export default function App() {
     if (!threadId) {
       return
     }
+    setSelectedServiceId('')
 
     try {
       const data = await fetchConversationThread(threadId)
@@ -1526,12 +1766,15 @@ export default function App() {
     }
   }
 
-  async function handleOpenJobConversation(job) {
+  async function handleOpenJobConversation(job, options = {}) {
     const jobId = typeof job?.id === 'string' ? job.id : ''
     if (!jobId) {
       setWorkspaceError('Task is missing a job id.')
       return
     }
+    const requestedServiceId =
+      typeof options.serviceId === 'string' ? options.serviceId : ''
+    setSelectedServiceId(requestedServiceId)
 
     const threadId = typeof job?.thread_id === 'string' ? job.thread_id : ''
     const title = normalizeJobTitle(job?.title)
@@ -1716,12 +1959,20 @@ export default function App() {
         plansLoading={sidebarPlansLoading}
         chats={visibleSidebarChats}
         chatsLoading={sidebarChatsLoading}
+        services={visibleRuntimeServices}
+        activeServiceId={selectedServiceId}
         activePlanThreadId={activePlanThreadId}
         onOpenPlan={(threadId) => {
           void handleOpenPlan(threadId)
         }}
         onOpenChat={(threadId) => {
           void handleOpenChat(threadId)
+        }}
+        onOpenService={(service) => {
+          void handleOpenRuntimeService(service)
+        }}
+        onStopService={(serviceId) => {
+          void handleStopRuntimeService(serviceId)
         }}
         onHideChat={handleHideChat}
         onSelectWorkspace={handleSelectWorkspace}
@@ -1762,6 +2013,13 @@ export default function App() {
               headerAgentName={conversationHeaderAgent.name}
               headerAgentEmoji={conversationHeaderAgent.emoji}
               onReviewAction={(jobId, action) => handleReviewJob(jobId, action)}
+              runtimeService={conversationRuntimeService}
+              runtimeServiceLogs={conversationRuntimeService ? selectedRuntimeServiceLogs : []}
+              runtimeServiceError={
+                conversationRuntimeService && selectedServiceId ? runtimeServiceStreamError : ''
+              }
+              onStopRuntimeService={handleStopRuntimeService}
+              onServiceStarted={handleRuntimeServiceStarted}
               onClose={closeConversationDrawer}
               recipientAgents={recipientAgents}
               selectedRecipientAgentId={conversation.recipientAgentId}
