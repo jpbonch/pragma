@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { Command } from "commander";
+import open from "open";
+import type { ExecaChildProcess } from "execa";
+import { spawnCommand, spawnNodeCommand } from "../server/process/runCommand";
 
 const program = new Command();
 const DEFAULT_API_URL = process.env.SALMON_API_URL ?? "http://127.0.0.1:3000";
@@ -92,6 +94,29 @@ program
     },
   );
 
+program
+  .command("list-agents")
+  .description("Call the API to list all agents")
+  .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
+  .action(async (options: { apiUrl: string }) => {
+    const result = await apiRequest<{
+      agents: Array<{
+        id: string;
+        name: string;
+        status: string;
+        harness: string;
+        model_label: string;
+      }>;
+    }>(options.apiUrl, "/agents");
+
+    if (result.agents.length === 0) {
+      console.log("No agents found.");
+      return;
+    }
+
+    console.table(result.agents);
+  });
+
 const jobCommand = program
   .command("job")
   .description("Agent job-control commands");
@@ -129,6 +154,41 @@ jobCommand
 
       const selected = result.assigned_to || options.agentId;
       console.log(`Selected recipient ${selected} for job ${jobId}.`);
+    },
+  );
+
+jobCommand
+  .command("plan-select-recipient")
+  .description("Select a worker recipient for the current plan turn")
+  .requiredOption("--agent-id <id>", "Worker agent id")
+  .requiredOption("--reason <text>", "Selection reason")
+  .option("--thread-id <id>", "Conversation thread id")
+  .option("--turn-id <id>", "Conversation turn id")
+  .option("--api-url <url>", "Salmon API base URL")
+  .action(
+    async (options: {
+      agentId: string;
+      reason: string;
+      threadId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, threadId, turnId } = resolveThreadTurnCommandContext(options);
+      const result = await apiRequest<{ selected_agent_id?: string }>(
+        apiUrl,
+        `/conversations/${encodeURIComponent(threadId)}/turns/${encodeURIComponent(turnId)}/agent/select-recipient`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            agent_id: options.agentId,
+            reason: options.reason,
+          }),
+        },
+      );
+
+      const selected = result.selected_agent_id || options.agentId;
+      console.log(`Selected plan recipient ${selected} for turn ${turnId}.`);
     },
   );
 
@@ -284,6 +344,7 @@ async function runAll(): Promise<void> {
   const uiPort = parsePort(new URL(uiUrl).port || "5173");
 
   const serverProcess = spawnSelfCommand(["server", "--port", String(serverPort)]);
+  const serverExit = waitForExit(serverProcess, "server");
 
   await waitForHealth(apiUrl);
 
@@ -294,10 +355,22 @@ async function runAll(): Promise<void> {
     "--api-url",
     apiUrl,
   ]);
+  const uiExit = waitForExit(uiProcess, "ui");
 
-  openBrowser(uiUrl);
+  try {
+    await open(uiUrl, { wait: false });
+  } catch (error) {
+    console.warn(`Unable to open browser automatically: ${errorMessage(error)}`);
+    console.warn(`Open ${uiUrl} manually.`);
+  }
+
+  let shuttingDown = false;
 
   const stop = () => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
     serverProcess.kill("SIGTERM");
     uiProcess.kill("SIGTERM");
   };
@@ -305,28 +378,36 @@ async function runAll(): Promise<void> {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
-  await Promise.race([
-    waitForExit(serverProcess, "server"),
-    waitForExit(uiProcess, "ui"),
-  ]);
+  const firstExit = await Promise.race([serverExit, uiExit]);
+
+  if (!shuttingDown) {
+    shuttingDown = true;
+    serverProcess.kill("SIGTERM");
+    uiProcess.kill("SIGTERM");
+
+    await Promise.allSettled([serverExit, uiExit]);
+    throw new Error(
+      `${firstExit.name} exited unexpectedly with ${formatExit(firstExit)}.`,
+    );
+  }
+
+  await Promise.allSettled([serverExit, uiExit]);
 }
 
 async function startUi(options: { port: number; apiUrl: string }): Promise<void> {
   const uiDir = await resolveUiDir();
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
-  const child = spawn(
-    npmCommand,
-    ["run", "dev", "--", "--host", "127.0.0.1", "--port", String(options.port)],
-    {
-      cwd: uiDir,
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        VITE_API_URL: options.apiUrl,
-      },
+  const child = spawnCommand({
+    command: npmCommand,
+    args: ["run", "dev", "--", "--host", "127.0.0.1", "--port", String(options.port)],
+    cwd: uiDir,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      VITE_API_URL: options.apiUrl,
     },
-  );
+  });
 
   await waitForExit(child, "ui");
 }
@@ -364,26 +445,39 @@ async function waitForHealth(apiUrl: string): Promise<void> {
 }
 
 function spawnSelfCommand(args: string[]) {
-  return spawn(process.execPath, [process.argv[1], ...args], {
+  return spawnNodeCommand({
+    modulePath: __filename,
+    args,
+    cwd: process.cwd(),
     stdio: "inherit",
     env: process.env,
   });
 }
 
 function waitForExit(
-  child: ReturnType<typeof spawn>,
+  child: ExecaChildProcess<string>,
   name: string,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code === 0 || code === null || signal === "SIGINT" || signal === "SIGTERM") {
-        resolve();
-        return;
-      }
-      reject(new Error(`${name} exited with code ${code}`));
-    });
+): Promise<{ name: string; exitCode: number | null; signal: string | undefined }> {
+  return child.then((result) => {
+    return {
+      name,
+      exitCode: result.exitCode,
+      signal: result.signal,
+    };
   });
+}
+
+function formatExit(result: {
+  exitCode: number | null;
+  signal: string | undefined;
+}): string {
+  if (result.signal) {
+    return `signal ${result.signal}`;
+  }
+  if (result.exitCode === null) {
+    return "unknown exit";
+  }
+  return `exit code ${result.exitCode}`;
 }
 
 async function apiRequest<T = Record<string, unknown>>(
@@ -480,23 +574,6 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 
 function quoteShellArg(value: string): string {
   return `"${value.replace(/["\\$`]/g, "\\$&")}"`;
-}
-
-function openBrowser(url: string): void {
-  if (process.platform === "darwin") {
-    spawn("open", [url], { stdio: "ignore", detached: true }).unref();
-    return;
-  }
-
-  if (process.platform === "win32") {
-    spawn("cmd", ["/c", "start", "", url], {
-      stdio: "ignore",
-      detached: true,
-    }).unref();
-    return;
-  }
-
-  spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
 }
 
 async function pathExists(path: string): Promise<boolean> {

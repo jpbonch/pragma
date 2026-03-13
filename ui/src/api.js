@@ -1,4 +1,43 @@
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:3000'
+import { createParser } from 'eventsource-parser'
+
+function isLoopbackHost(hostname) {
+  const value = String(hostname || '').trim().toLowerCase()
+  return value === 'localhost' || value === '127.0.0.1' || value === '::1'
+}
+
+function isWildcardHost(hostname) {
+  const value = String(hostname || '').trim().toLowerCase()
+  return value === '0.0.0.0' || value === '::'
+}
+
+function resolveApiUrl() {
+  const raw = typeof import.meta.env.VITE_API_URL === 'string'
+    ? import.meta.env.VITE_API_URL.trim()
+    : ''
+
+  if (!raw) {
+    const fallback = new URL(window.location.origin)
+    fallback.port = import.meta.env.VITE_API_PORT || '3000'
+    return fallback.toString().replace(/\/$/, '')
+  }
+
+  let parsed
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new Error(`Invalid VITE_API_URL: ${raw}`)
+  }
+
+  const uiHost = window.location.hostname
+  if ((isWildcardHost(parsed.hostname) || isLoopbackHost(parsed.hostname)) && !isLoopbackHost(uiHost)) {
+    parsed.hostname = uiHost
+  }
+
+  return parsed.toString().replace(/\/$/, '')
+}
+
+const API_URL = resolveApiUrl()
+const API_BASE_URL = API_URL
 
 export class ApiError extends Error {
   constructor(message, status, code) {
@@ -8,8 +47,56 @@ export class ApiError extends Error {
   }
 }
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000
+
+function linkAbortSignals(target, source) {
+  if (!source) return () => {}
+  if (source.aborted) {
+    target.abort(source.reason)
+    return () => {}
+  }
+
+  const onAbort = () => target.abort(source.reason)
+  source.addEventListener('abort', onAbort, { once: true })
+  return () => source.removeEventListener('abort', onAbort)
+}
+
+async function fetchWithTimeout(url, init, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const detach = linkAbortSignals(controller, init?.signal)
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`Request timed out after ${timeoutMs}ms`))
+  }, timeoutMs)
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    detach()
+    clearTimeout(timeout)
+  }
+}
+
+function invalidResponse(message) {
+  return new ApiError(message, 500, 'INVALID_RESPONSE')
+}
+
+function asObject(value, message) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidResponse(message)
+  }
+  return value
+}
+
 async function fetchJson(path, init) {
-  const response = await fetch(`${API_URL}${path}`, init)
+  let response
+  try {
+    response = await fetchWithTimeout(`${API_BASE_URL}${path}`, init)
+  } catch (error) {
+    if (error instanceof Error && /timed out/i.test(error.message)) {
+      throw new ApiError(error.message, 408, 'REQUEST_TIMEOUT')
+    }
+    throw error
+  }
 
   let body = null
   try {
@@ -19,22 +106,40 @@ async function fetchJson(path, init) {
   }
 
   if (!response.ok) {
-    const code = body?.error ?? `HTTP_${response.status}`
-    const message = body?.message ?? body?.error ?? `HTTP ${response.status}`
+    const code = body && typeof body === 'object' && typeof body.error === 'string'
+      ? body.error
+      : `HTTP_${response.status}`
+    const message = body && typeof body === 'object' && typeof body.message === 'string'
+      ? body.message
+      : `HTTP ${response.status}`
     throw new ApiError(message, response.status, code)
   }
 
-  return body ?? {}
+  if (response.status === 204) {
+    return {}
+  }
+
+  if (!body || typeof body !== 'object') {
+    throw invalidResponse(`Expected JSON object from ${path}`)
+  }
+
+  return body
 }
 
 export async function fetchWorkspaces() {
-  const data = await fetchJson('/workspaces')
-  return Array.isArray(data.workspaces) ? data.workspaces : []
+  const data = asObject(await fetchJson('/workspaces'), 'Invalid workspaces response.')
+  if (!Array.isArray(data.workspaces)) {
+    throw invalidResponse('`workspaces` must be an array.')
+  }
+  return data.workspaces
 }
 
 export async function fetchActiveWorkspace() {
-  const data = await fetchJson('/workspace/active')
-  return data.workspace ?? null
+  const data = asObject(await fetchJson('/workspace/active'), 'Invalid active workspace response.')
+  if (!('workspace' in data)) {
+    throw invalidResponse('`workspace` is required in active workspace response.')
+  }
+  return data.workspace
 }
 
 export async function createWorkspace({ name, goal }) {
@@ -60,12 +165,27 @@ export async function deleteWorkspace(name) {
 }
 
 export async function fetchJobs(limit = 200) {
-  const data = await fetchJson(`/jobs?limit=${limit}`)
-  return Array.isArray(data.jobs) ? data.jobs : []
+  const data = asObject(await fetchJson(`/jobs?limit=${limit}`), 'Invalid jobs response.')
+  if (!Array.isArray(data.jobs)) {
+    throw invalidResponse('`jobs` must be an array.')
+  }
+  return data.jobs
+}
+
+function parseEventPayload(event) {
+  if (!event || typeof event.data !== 'string' || !event.data) {
+    return null
+  }
+
+  try {
+    return JSON.parse(event.data)
+  } catch {
+    return null
+  }
 }
 
 export function openJobsStream({ onReady, onJobStatusChanged, onError } = {}) {
-  const stream = new EventSource(`${API_URL}/jobs/stream`)
+  const stream = new EventSource(`${API_BASE_URL}/jobs/stream`)
 
   stream.addEventListener('ready', (event) => {
     const payload = parseEventPayload(event)
@@ -89,6 +209,36 @@ export function openJobsStream({ onReady, onJobStatusChanged, onError } = {}) {
   }
 }
 
+export function openConversationThreadStream(
+  threadId,
+  { onReady, onThreadUpdated, onError } = {},
+) {
+  const stream = new EventSource(
+    `${API_BASE_URL}/conversations/${encodeURIComponent(threadId)}/stream`,
+  )
+
+  stream.addEventListener('ready', (event) => {
+    const payload = parseEventPayload(event)
+    onReady?.(payload)
+  })
+
+  stream.addEventListener('thread_updated', (event) => {
+    const payload = parseEventPayload(event)
+    if (!payload || typeof payload !== 'object') {
+      return
+    }
+    onThreadUpdated?.(payload)
+  })
+
+  stream.addEventListener('error', (event) => {
+    onError?.(event)
+  })
+
+  return () => {
+    stream.close()
+  }
+}
+
 export async function fetchJobOutputChanges(jobId) {
   return fetchJson(`/jobs/${encodeURIComponent(jobId)}/output/changes`)
 }
@@ -100,13 +250,13 @@ export async function fetchJobOutputFiles(jobId) {
 export function jobOutputContentUrl(jobId, path) {
   const params = new URLSearchParams()
   params.set('path', path)
-  return `${API_URL}/jobs/${encodeURIComponent(jobId)}/output/file/content?${params.toString()}`
+  return `${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/output/file/content?${params.toString()}`
 }
 
 export function jobOutputDownloadUrl(jobId, path) {
   const params = new URLSearchParams()
   params.set('path', path)
-  return `${API_URL}/jobs/${encodeURIComponent(jobId)}/output/file/download?${params.toString()}`
+  return `${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/output/file/download?${params.toString()}`
 }
 
 export async function openJobOutputFolder(jobId, path = '') {
@@ -130,8 +280,11 @@ export async function reviewJob(jobId, action) {
 }
 
 export async function fetchAgents() {
-  const data = await fetchJson('/agents')
-  return Array.isArray(data.agents) ? data.agents : []
+  const data = asObject(await fetchJson('/agents'), 'Invalid agents response.')
+  if (!Array.isArray(data.agents)) {
+    throw invalidResponse('`agents` must be an array.')
+  }
+  return data.agents
 }
 
 export async function createAgent(agent) {
@@ -151,16 +304,61 @@ export async function updateAgent(id, updates) {
 }
 
 export async function fetchContextFiles() {
-  const data = await fetchJson('/context')
-  const context = data.context
-  if (!context || typeof context !== 'object') {
-    return { folders: [], files: [] }
+  const data = asObject(await fetchJson('/context'), 'Invalid context response.')
+  const context = asObject(data.context, '`context` must be an object.')
+
+  if (!Array.isArray(context.folders) || !Array.isArray(context.files)) {
+    throw invalidResponse('`context.folders` and `context.files` must be arrays.')
   }
 
   return {
-    folders: Array.isArray(context.folders) ? context.folders : [],
-    files: Array.isArray(context.files) ? context.files : [],
+    folders: context.folders,
+    files: context.files,
   }
+}
+
+export async function fetchCodeFolders() {
+  const data = asObject(await fetchJson('/code/folders'), 'Invalid code folders response.')
+  if (!Array.isArray(data.folders)) {
+    throw invalidResponse('`folders` must be an array.')
+  }
+  return data.folders
+}
+
+export async function cloneCodeRepo(git_url) {
+  return fetchJson('/code/repos/clone', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ git_url }),
+  })
+}
+
+export async function importCodeFolder(files) {
+  const fileList = Array.from(files || [])
+  if (fileList.length === 0) {
+    throw new ApiError('No folder selected.', 400, 'INVALID_CODE_IMPORT')
+  }
+
+  const formData = new FormData()
+  let rootName = ''
+  for (const file of fileList) {
+    const relPath = typeof file.webkitRelativePath === 'string' && file.webkitRelativePath
+      ? file.webkitRelativePath
+      : file.name
+    formData.append('files', file)
+    formData.append('paths', relPath)
+    if (!rootName && relPath.includes('/')) {
+      rootName = relPath.split('/')[0]
+    }
+  }
+  if (rootName) {
+    formData.append('root_name', rootName)
+  }
+
+  return fetchJson('/code/folders/import', {
+    method: 'POST',
+    body: formData,
+  })
 }
 
 export async function updateContextFile(path, content) {
@@ -229,17 +427,45 @@ export async function fetchChats(limit = 20, cursor = '') {
   if (cursor) {
     params.set('cursor', cursor)
   }
-  const data = await fetchJson(`/conversations/chats?${params.toString()}`)
-  return Array.isArray(data.chats) ? data.chats : []
+  const data = asObject(await fetchJson(`/conversations/chats?${params.toString()}`), 'Invalid chats response.')
+  if (!Array.isArray(data.chats)) {
+    throw invalidResponse('`chats` must be an array.')
+  }
+  return data.chats
+}
+
+export async function fetchPlans(limit = 20, cursor = '') {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (cursor) {
+    params.set('cursor', cursor)
+  }
+  const data = asObject(await fetchJson(`/conversations/plans?${params.toString()}`), 'Invalid plans response.')
+  if (!Array.isArray(data.plans)) {
+    throw invalidResponse('`plans` must be an array.')
+  }
+  return data.plans
 }
 
 export async function streamConversationTurn(payload, { onEvent, signal } = {}) {
-  const response = await fetch(`${API_URL}/conversations/turns/stream`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal,
-  })
+  let response
+  try {
+    response = await fetchWithTimeout(
+      `${API_BASE_URL}/conversations/turns/stream`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+      },
+      15000,
+    )
+  } catch (error) {
+    if (error instanceof Error && /timed out/i.test(error.message)) {
+      throw new ApiError(error.message, 408, 'REQUEST_TIMEOUT')
+    }
+    throw error
+  }
 
   if (!response.ok) {
     let body = null
@@ -249,8 +475,12 @@ export async function streamConversationTurn(payload, { onEvent, signal } = {}) 
       body = null
     }
 
-    const code = body?.error ?? `HTTP_${response.status}`
-    const message = body?.message ?? body?.error ?? `HTTP ${response.status}`
+    const code = body && typeof body === 'object' && typeof body.error === 'string'
+      ? body.error
+      : `HTTP_${response.status}`
+    const message = body && typeof body === 'object' && typeof body.message === 'string'
+      ? body.message
+      : `HTTP ${response.status}`
     throw new ApiError(message, response.status, code)
   }
 
@@ -260,85 +490,39 @@ export async function streamConversationTurn(payload, { onEvent, signal } = {}) 
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  let buffer = ''
+
+  const parser = createParser({
+    onEvent(event) {
+      if (!onEvent) {
+        return
+      }
+
+      let data = null
+      try {
+        data = JSON.parse(event.data)
+      } catch {
+        data = event.data
+      }
+
+      onEvent({
+        event: event.event || 'message',
+        data,
+      })
+    },
+    onError(error) {
+      throw new ApiError(error.message, 500, 'SSE_PARSE_ERROR')
+    },
+  })
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) {
-      if (buffer.trim()) {
-        parseAndDispatchEventBlock(buffer, onEvent)
-      }
+      parser.reset({ consume: true })
       break
     }
 
-    buffer += decoder.decode(value, { stream: true })
-
-    while (true) {
-      const splitIndex = findEventBoundary(buffer)
-      if (splitIndex === -1) {
-        break
-      }
-
-      const chunk = buffer.slice(0, splitIndex)
-      buffer = buffer.slice(splitIndex + (buffer.startsWith('\r\n', splitIndex) ? 4 : 2))
-      parseAndDispatchEventBlock(chunk, onEvent)
-    }
+    parser.feed(decoder.decode(value, { stream: true }))
   }
-}
-
-function parseEventPayload(event) {
-  if (!event || typeof event.data !== 'string' || !event.data) {
-    return null
-  }
-
-  try {
-    return JSON.parse(event.data)
-  } catch {
-    return null
-  }
-}
-
-function findEventBoundary(buffer) {
-  const idxLf = buffer.indexOf('\n\n')
-  const idxCrlf = buffer.indexOf('\r\n\r\n')
-
-  if (idxLf === -1) return idxCrlf
-  if (idxCrlf === -1) return idxLf
-  return Math.min(idxLf, idxCrlf)
-}
-
-function parseAndDispatchEventBlock(block, onEvent) {
-  if (!onEvent) {
-    return
-  }
-
-  const lines = block.split(/\r?\n/)
-  let eventName = 'message'
-  const dataLines = []
-
-  for (const line of lines) {
-    if (line.startsWith('event:')) {
-      eventName = line.slice('event:'.length).trim() || 'message'
-      continue
-    }
-    if (line.startsWith('data:')) {
-      dataLines.push(line.slice('data:'.length).trim())
-    }
-  }
-
-  if (dataLines.length === 0) {
-    return
-  }
-
-  const raw = dataLines.join('\n')
-  let data = null
-  try {
-    data = JSON.parse(raw)
-  } catch {
-    data = raw
-  }
-
-  onEvent({ event: eventName, data })
 }
 
 export { API_URL }

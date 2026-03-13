@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, ChevronDown, MessageSquare, Play, Plus, Route } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, MessageSquare, Play, Plus, Route, Settings } from 'lucide-react'
 
 const MODES = [
   { id: 'plan', icon: Route, label: 'Plan', desc: 'Break work into steps' },
   { id: 'execute', icon: Play, label: 'Execute', desc: 'Run tracked work' },
   { id: 'chat', icon: MessageSquare, label: 'Chat', desc: 'Quick conversation' },
 ]
+const MODE_CYCLE_ORDER = ['plan', 'chat', 'execute']
 
 const REASONING_EFFORTS = [
   { id: 'low', label: 'Low' },
@@ -16,6 +17,7 @@ const REASONING_EFFORTS = [
 
 export function InputBar({
   onSubmit,
+  onOpenOrchestratorConfig,
   disabled = false,
   preferredMode = '',
   embedded = false,
@@ -34,6 +36,17 @@ export function InputBar({
   const selectedReasoning =
     REASONING_EFFORTS.find((option) => option.id === reasoningEffort) ?? REASONING_EFFORTS[1]
   const isModeLocked = Boolean(lockedMode && MODES.some((item) => item.id === lockedMode))
+
+  function cycleMode() {
+    setMode((current) => {
+      const index = MODE_CYCLE_ORDER.indexOf(current)
+      if (index === -1) {
+        return MODE_CYCLE_ORDER[0]
+      }
+      return MODE_CYCLE_ORDER[(index + 1) % MODE_CYCLE_ORDER.length]
+    })
+    setOpenMenu(null)
+  }
 
   useEffect(() => {
     const nextMode = isModeLocked ? lockedMode : preferredMode
@@ -107,6 +120,11 @@ export function InputBar({
             e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
           }}
           onKeyDown={(e) => {
+            if (e.key === 'Tab' && e.shiftKey && !isModeLocked) {
+              e.preventDefault()
+              cycleMode()
+              return
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               submitInput()
@@ -193,6 +211,15 @@ export function InputBar({
           </div>
 
           <div className="input-actions">
+            <button
+              className="input-settings-btn"
+              onClick={() => onOpenOrchestratorConfig?.()}
+              disabled={disabled}
+              title="Open orchestrator settings"
+              aria-label="Open orchestrator settings"
+            >
+              <Settings size={16} strokeWidth={2.1} />
+            </button>
             <button
               className="send-btn"
               style={{ background: mode === 'chat' ? '#4B83D6' : '#2383e2' }}

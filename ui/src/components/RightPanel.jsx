@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus } from 'lucide-react'
+import data from '@emoji-mart/data'
+import Picker from '@emoji-mart/react'
 import { iconForAgent } from '../lib/agentIcon'
 
 const AGENT_COLORS = ['#4B83D6', '#2383e2', '#E09B3D', '#7C6DD7', '#E06B5E', '#9B6DD7']
+const AGENT_AVATAR_BG = '#E09B3D12'
 const HARNESSES = [
   { id: 'claude_code', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
@@ -16,126 +20,81 @@ function getAgentColor(index) {
   return AGENT_COLORS[index % AGENT_COLORS.length]
 }
 
-function AddAgentModal({ open, loading, error, onClose, onSubmit }) {
-  const [name, setName] = useState('')
-  const [emoji, setEmoji] = useState('🤖')
-  const [agentFile, setAgentFile] = useState('')
-  const [harness, setHarness] = useState('claude_code')
-  const [modelLabel, setModelLabel] = useState('Opus 4.6')
+function EmojiAvatar({ emoji, size = 64, onClick }) {
+  return (
+    <button
+      type="button"
+      className="agent-profile-avatar"
+      style={{ width: size, height: size, fontSize: size * 0.48 }}
+      onClick={onClick}
+      title="Change emoji"
+    >
+      {emoji || '🤖'}
+      <span className="agent-profile-avatar-edit">Change</span>
+    </button>
+  )
+}
+
+function EmojiPickerPopover({ open, onClose, onSelect }) {
+  const ref = useRef(null)
 
   useEffect(() => {
-    if (!open) {
-      return
+    if (!open) return
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) {
+        onClose()
+      }
     }
-    setName('')
-    setEmoji('🤖')
-    setAgentFile('')
-    setHarness('claude_code')
-    setModelLabel('Opus 4.6')
-  }, [open])
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open, onClose])
 
-  useEffect(() => {
-    const options = MODELS_BY_HARNESS[harness] || []
-    if (!options.includes(modelLabel)) {
-      setModelLabel(options[0] || '')
-    }
-  }, [harness, modelLabel])
-
-  if (!open) {
-    return null
-  }
+  if (!open) return null
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-card">
-        <h2>Add agent</h2>
-        <p>Create a new agent record in this workspace.</p>
-
-        <label className="modal-label">Name</label>
-        <input
-          className="modal-input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Research Agent"
-        />
-
-        <label className="modal-label">Emoji</label>
-        <input
-          className="modal-input"
-          value={emoji}
-          onChange={(e) => setEmoji(e.target.value)}
-          placeholder="🤖"
-        />
-
-        <label className="modal-label">Agent file (markdown)</label>
-        <textarea
-          className="modal-textarea"
-          value={agentFile}
-          onChange={(e) => setAgentFile(e.target.value)}
-          rows={6}
-          placeholder="# Agent\n\nInstructions..."
-        />
-
-        <label className="modal-label">Harness</label>
-        <select className="modal-input" value={harness} onChange={(e) => setHarness(e.target.value)}>
-          {HARNESSES.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-
-        <label className="modal-label">Model</label>
-        <select
-          className="modal-input"
-          value={modelLabel}
-          onChange={(e) => setModelLabel(e.target.value)}
-        >
-          {(MODELS_BY_HARNESS[harness] || []).map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-
-        {error && <div className="error">Error: {error}</div>}
-
-        <div className="modal-actions">
-          <button className="modal-cancel" onClick={onClose} disabled={loading}>
-            Cancel
-          </button>
-          <button
-            className="modal-create"
-            onClick={() =>
-              onSubmit({ name, emoji, agent_file: agentFile, harness, model_label: modelLabel })
-            }
-            disabled={loading}
-          >
-            {loading ? 'Creating...' : 'Create agent'}
-          </button>
-        </div>
-      </div>
+    <div className="emoji-picker-popover" ref={ref}>
+      <Picker
+        data={data}
+        onEmojiSelect={(emoji) => {
+          onSelect(emoji.native)
+          onClose()
+        }}
+        theme="light"
+        previewPosition="none"
+        skinTonePosition="none"
+        maxFrequentRows={1}
+      />
     </div>
   )
 }
 
-function EditAgentModal({ open, loading, error, agent, onClose, onSubmit }) {
+function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClose, onSubmit }) {
   const [name, setName] = useState('')
   const [emoji, setEmoji] = useState('🤖')
   const [agentFile, setAgentFile] = useState('')
   const [harness, setHarness] = useState('claude_code')
   const [modelLabel, setModelLabel] = useState('Opus 4.6')
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {
-    if (!open || !agent) {
-      return
+    if (!open) return
+    if (agent) {
+      if (!agent.harness || !agent.model_label) {
+        throw new Error('Agent payload is missing harness or model_label.')
+      }
+      setName(agent.name ?? '')
+      setEmoji(agent.emoji ?? '🤖')
+      setAgentFile(agent.agent_file ?? '')
+      setHarness(agent.harness)
+      setModelLabel(agent.model_label)
+    } else {
+      setName('')
+      setEmoji('🤖')
+      setAgentFile('')
+      setHarness('claude_code')
+      setModelLabel('Opus 4.6')
     }
-
-    setName(agent.name ?? '')
-    setEmoji(agent.emoji ?? '🤖')
-    setAgentFile(agent.agent_file ?? '')
-    setHarness(agent.harness ?? 'claude_code')
-    setModelLabel(agent.model_label ?? 'Opus 4.6')
+    setPickerOpen(false)
   }, [open, agent])
 
   useEffect(() => {
@@ -145,76 +104,89 @@ function EditAgentModal({ open, loading, error, agent, onClose, onSubmit }) {
     }
   }, [harness, modelLabel])
 
-  if (!open || !agent) {
-    return null
-  }
+  if (!open) return null
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-card">
-        <h2>Edit agent</h2>
-        <p>{agent.id}</p>
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="agent-profile-card" onClick={(e) => e.stopPropagation()}>
+        {/* Close button */}
+        <button className="agent-profile-close" onClick={onClose}>×</button>
 
-        <label className="modal-label">Name</label>
-        <input
-          className="modal-input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Agent name"
-        />
+        {/* Avatar + Name - profile style */}
+        <div className="agent-profile-header">
+          <div className="agent-profile-avatar-wrap">
+            <EmojiAvatar emoji={emoji} size={72} onClick={() => setPickerOpen(true)} />
+            <EmojiPickerPopover
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              onSelect={setEmoji}
+            />
+          </div>
+          <input
+            className="agent-profile-name-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Agent name"
+          />
+          {subtitle && <div className="agent-profile-subtitle">{subtitle}</div>}
+        </div>
 
-        <label className="modal-label">Emoji</label>
-        <input
-          className="modal-input"
-          value={emoji}
-          onChange={(e) => setEmoji(e.target.value)}
-          placeholder="🤖"
-        />
+        {/* Settings section */}
+        <div className="agent-profile-fields">
+          <div className="agent-profile-field-row">
+            <div className="agent-profile-field">
+              <span className="agent-profile-field-label">Runtime</span>
+              <select
+                className="agent-profile-select"
+                value={harness}
+                onChange={(e) => setHarness(e.target.value)}
+              >
+                {HARNESSES.map((item) => (
+                  <option key={item.id} value={item.id}>{item.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="agent-profile-field">
+              <span className="agent-profile-field-label">Model</span>
+              <select
+                className="agent-profile-select"
+                value={modelLabel}
+                onChange={(e) => setModelLabel(e.target.value)}
+              >
+                {(MODELS_BY_HARNESS[harness] || []).map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-        <label className="modal-label">Agent file (markdown)</label>
-        <textarea
-          className="modal-textarea"
-          value={agentFile}
-          onChange={(e) => setAgentFile(e.target.value)}
-          rows={6}
-        />
+          <div className="agent-profile-field">
+            <span className="agent-profile-field-label">Instructions</span>
+            <textarea
+              className="agent-profile-textarea"
+              value={agentFile}
+              onChange={(e) => setAgentFile(e.target.value)}
+              rows={4}
+              placeholder="Define this agent's behavior..."
+            />
+          </div>
+        </div>
 
-        <label className="modal-label">Harness</label>
-        <select className="modal-input" value={harness} onChange={(e) => setHarness(e.target.value)}>
-          {HARNESSES.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
-            </option>
-          ))}
-        </select>
+        {error && <div className="error" style={{ padding: '0 0 4px' }}>Error: {error}</div>}
 
-        <label className="modal-label">Model</label>
-        <select
-          className="modal-input"
-          value={modelLabel}
-          onChange={(e) => setModelLabel(e.target.value)}
-        >
-          {(MODELS_BY_HARNESS[harness] || []).map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-
-        {error && <div className="error">Error: {error}</div>}
-
-        <div className="modal-actions">
-          <button className="modal-cancel" onClick={onClose} disabled={loading}>
+        {/* Actions */}
+        <div className="agent-profile-actions">
+          <button className="agent-profile-cancel" onClick={onClose} disabled={loading}>
             Cancel
           </button>
           <button
-            className="modal-create"
+            className="agent-profile-save"
             onClick={() =>
               onSubmit({ name, emoji, agent_file: agentFile, harness, model_label: modelLabel })
             }
             disabled={loading}
           >
-            {loading ? 'Saving...' : 'Save changes'}
+            {loading ? 'Saving...' : title === 'Add agent' ? 'Create' : 'Save'}
           </button>
         </div>
       </div>
@@ -222,7 +194,14 @@ function EditAgentModal({ open, loading, error, agent, onClose, onSubmit }) {
   )
 }
 
-export function RightPanel({ agents, loading, error, onCreateAgent, onUpdateAgent }) {
+export function RightPanel({
+  agents,
+  loading,
+  error,
+  onCreateAgent,
+  onUpdateAgent,
+  openOrchestratorConfigRequest = 0,
+}) {
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [createError, setCreateError] = useState('')
   const [createLoading, setCreateLoading] = useState(false)
@@ -230,6 +209,29 @@ export function RightPanel({ agents, loading, error, onCreateAgent, onUpdateAgen
   const [editingAgent, setEditingAgent] = useState(null)
   const [editError, setEditError] = useState('')
   const [editLoading, setEditLoading] = useState(false)
+  const lastOpenOrchestratorRequestRef = useRef(0)
+
+  useEffect(() => {
+    if (
+      !openOrchestratorConfigRequest ||
+      openOrchestratorConfigRequest === lastOpenOrchestratorRequestRef.current
+    ) {
+      return
+    }
+
+    if (loading) {
+      return
+    }
+
+    lastOpenOrchestratorRequestRef.current = openOrchestratorConfigRequest
+    const orchestrator = agents.find((agent) => agent?.id === 'salmon-orchestrator')
+    if (!orchestrator) {
+      return
+    }
+
+    setEditError('')
+    setEditingAgent(orchestrator)
+  }, [openOrchestratorConfigRequest, loading, agents])
 
   async function handleSubmitCreate(agent) {
     setCreateError('')
@@ -238,12 +240,16 @@ export function RightPanel({ agents, loading, error, onCreateAgent, onUpdateAgen
       setCreateError('Name is required.')
       return
     }
+    if (!agent.emoji?.trim()) {
+      setCreateError('Emoji is required.')
+      return
+    }
 
     setCreateLoading(true)
     try {
       await onCreateAgent({
         name: agent.name.trim(),
-        emoji: (agent.emoji || '🤖').trim(),
+        emoji: agent.emoji.trim(),
         agent_file: agent.agent_file ?? '',
         harness: agent.harness,
         model_label: agent.model_label,
@@ -334,44 +340,50 @@ export function RightPanel({ agents, loading, error, onCreateAgent, onUpdateAgen
                 setEditingAgent(agent)
               }}
             >
-              <div className="agent-icon" style={{ background: '#E09B3D18' }}>
+              <div className="agent-icon" style={{ background: AGENT_AVATAR_BG }}>
                 {agent.emoji || iconForAgent(agent.id)}
               </div>
               <div style={{ flex: 1 }}>
                 <div className="agent-name">{agent.name}</div>
                 <div className="agent-status" style={{ '--agent-color': color }}>
                   <span className="agent-status-dot" style={{ background: color }} />
-                  {agent.status || 'unknown'}
-                </div>
-                <div className="agent-model">
-                  {(agent.harness || 'claude_code') + ' · ' + (agent.model_label || 'Opus 4.6')}
+                  {agent.status}
                 </div>
               </div>
             </div>
           )
         })}
 
-      <button className="add-agent-btn" onClick={() => {
-        setCreateError('')
-        setIsAddOpen(true)
-      }}>
-        + Add agent
+      <button
+        className="add-agent-ghost"
+        onClick={() => {
+          setCreateError('')
+          setIsAddOpen(true)
+        }}
+      >
+        <Plus size={13} strokeWidth={2} />
+        <span>Add agent</span>
       </button>
 
-      <AddAgentModal
+      <AgentProfileModal
         open={isAddOpen}
         loading={createLoading}
         error={createError}
+        title="Add agent"
+        subtitle="New agent"
+        agent={null}
         onClose={() => setIsAddOpen(false)}
         onSubmit={(agent) => {
           void handleSubmitCreate(agent)
         }}
       />
 
-      <EditAgentModal
+      <AgentProfileModal
         open={Boolean(editingAgent)}
         loading={editLoading}
         error={editError}
+        title="Edit agent"
+        subtitle={editingAgent?.id}
         agent={editingAgent}
         onClose={() => setEditingAgent(null)}
         onSubmit={(updates) => {

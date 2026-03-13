@@ -1,4 +1,6 @@
 const PANE_CONFIG = {
+  Code: { icon: '💻', desc: 'Code tools and workflows will appear here' },
+  Files: { icon: '📁', desc: 'Browse and manage workspace files' },
   Connections: { icon: '🔗', desc: 'Connect Google Drive, Slack, Stripe, and more' },
   Settings: { icon: '⚙️', desc: 'Team, billing, preferences' },
 }

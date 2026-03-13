@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Zap, BookOpen, Link2, Settings, ChevronDown, Plus, Check, User, X } from 'lucide-react'
+import {
+  Zap,
+  BookOpen,
+  Link2,
+  Settings,
+  ChevronDown,
+  Plus,
+  Check,
+  User,
+  X,
+  Code2,
+  Folder,
+} from 'lucide-react'
 
 const ITEMS = [
   { id: 'feed', icon: Zap, label: 'Feed' },
+  { id: 'code', icon: Code2, label: 'Code' },
+  { id: 'files', icon: Folder, label: 'Files' },
   { id: 'context', icon: BookOpen, label: 'Context' },
   { id: 'connections', icon: Link2, label: 'Connections' },
   { id: 'settings', icon: Settings, label: 'Settings' },
@@ -15,8 +29,12 @@ export function Sidebar({
   workspaces,
   activeWorkspaceName,
   workspacesLoading,
+  plans = [],
+  plansLoading = false,
   chats = [],
   chatsLoading = false,
+  activePlanThreadId = '',
+  onOpenPlan,
   onOpenChat,
   onHideChat,
   onSelectWorkspace,
@@ -119,6 +137,28 @@ export function Sidebar({
           )
         })}
       </nav>
+
+      <section className="sidebar-plans">
+        <div className="sidebar-plans-title">Plans</div>
+        <div className="sidebar-plans-list">
+          {plansLoading && <div className="sidebar-chat-empty">Loading plans...</div>}
+          {!plansLoading && plans.length === 0 && (
+            <div className="sidebar-chat-empty">No pending plans</div>
+          )}
+
+          {!plansLoading &&
+            plans.map((plan) => (
+              <button
+                key={plan.id}
+                className={`sidebar-plan-item ${activePlanThreadId === plan.id ? 'active' : ''}`}
+                onClick={() => onOpenPlan?.(plan.id)}
+                title={plan.plan_title || 'New plan'}
+              >
+                <div className="sidebar-plan-item-title">{plan.plan_title || 'New plan'}</div>
+              </button>
+            ))}
+        </div>
+      </section>
 
       <section className="sidebar-chats">
         <div className="sidebar-chats-title">Chats</div>

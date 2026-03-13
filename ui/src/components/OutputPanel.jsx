@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FileCode2, FileImage, FileSpreadsheet, FileText, FileType2 } from 'lucide-react'
+import Papa from 'papaparse'
 import ReactMarkdown from 'react-markdown'
 import {
   fetchJobOutputChanges,
@@ -47,41 +48,19 @@ function formatBytes(value) {
 }
 
 function parseCsv(text) {
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
-  const filtered = lines.filter((line, index) => line.trim().length > 0 || index === 0)
-  return filtered.map((line) => parseCsvLine(line))
-}
+  const parsed = Papa.parse(text, {
+    skipEmptyLines: 'greedy',
+  })
 
-function parseCsvLine(line) {
-  const cells = []
-  let current = ''
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i]
-    const next = line[i + 1]
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"'
-        i += 1
-        continue
-      }
-      inQuotes = !inQuotes
-      continue
-    }
-
-    if (char === ',' && !inQuotes) {
-      cells.push(current)
-      current = ''
-      continue
-    }
-
-    current += char
+  if (parsed.errors.length > 0) {
+    throw new Error(parsed.errors[0].message || 'Failed to parse CSV.')
   }
 
-  cells.push(current)
-  return cells
+  if (!Array.isArray(parsed.data)) {
+    return []
+  }
+
+  return parsed.data.map((row) => (Array.isArray(row) ? row : [String(row)]))
 }
 
 function DiffViewer({ diff }) {
@@ -114,7 +93,7 @@ function DiffViewer({ diff }) {
   )
 }
 
-export function OutputPanel({ jobId, jobStatus = '' }) {
+export function OutputPanel({ jobId, jobStatus }) {
   const [tab, setTab] = useState('changes')
 
   const [changes, setChanges] = useState('')
@@ -257,7 +236,7 @@ export function OutputPanel({ jobId, jobStatus = '' }) {
       {tab === 'changes' && (
         <div className="output-tab-body">
           <div className="output-toolbar">
-            <div className="output-status">Status: {jobStatus || 'queued'}</div>
+            <div className="output-status">Status: {jobStatus}</div>
           </div>
 
           {changesLoading && <div className="muted">Loading diff...</div>}

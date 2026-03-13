@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { runCommand } from "../process/runCommand";
 
 export type WorkspacePathsLike = {
   workspaceDir: string;
@@ -59,6 +59,7 @@ export async function initializeWorkspaceGit(paths: WorkspacePathsLike): Promise
 
   await ensureGitRepo(paths.workspaceDir);
   await ensureRootGitIgnore(paths.workspaceDir);
+  await ensureDefaultCodeRepo(paths.codeDir);
   await commitIfNeeded(paths.workspaceDir, "salmon: initialize workspace repo");
 }
 
@@ -510,6 +511,43 @@ async function ensureRootGitIgnore(workspaceDir: string): Promise<void> {
   await writeFile(gitIgnorePath, content, "utf8");
 }
 
+async function ensureDefaultCodeRepo(codeDir: string): Promise<void> {
+  const defaultRepoDir = join(codeDir, "default");
+  await mkdir(defaultRepoDir, { recursive: true });
+
+  if (!(await isGitRepo(defaultRepoDir))) {
+    await runGit(defaultRepoDir, ["init"]);
+  }
+
+  if (await hasAnyCommits(defaultRepoDir)) {
+    return;
+  }
+
+  const readmePath = join(defaultRepoDir, "README.md");
+  const existing = await readFile(readmePath, "utf8").catch(() => "");
+  if (!existing.trim()) {
+    const content = [
+      "# Default Code Repo",
+      "",
+      "This repository is created automatically for Salmon workspaces.",
+      "",
+    ].join("\n");
+    await writeFile(readmePath, content, "utf8");
+  }
+
+  await runGit(defaultRepoDir, ["add", "-A"]);
+  await runGit(defaultRepoDir, [
+    "-c",
+    "user.name=Salmon",
+    "-c",
+    "user.email=salmon@local",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "salmon: initialize default code repo",
+  ]);
+}
+
 async function commitIfNeeded(repoPath: string, message: string): Promise<void> {
   await runGit(repoPath, ["add", "-A"]);
   if (!(await hasStagedChanges(repoPath))) {
@@ -524,6 +562,15 @@ async function commitIfNeeded(repoPath: string, message: string): Promise<void> 
     "-m",
     message,
   ]);
+}
+
+async function hasAnyCommits(repoPath: string): Promise<boolean> {
+  try {
+    await runGit(repoPath, ["rev-parse", "--verify", "HEAD"]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function primeConflictInJobRepo(jobRepoPath: string, baseBranch: string): Promise<void> {
@@ -700,53 +747,21 @@ async function runGitSafe(cwd: string, args: string[]): Promise<void> {
 }
 
 async function runGit(cwd: string, args: string[]): Promise<string> {
-  return runCommandCapture("git", cwd, args);
-}
-
-async function runGitCapture(cwd: string, args: string[]): Promise<string> {
-  return runCommandCapture("git", cwd, args);
-}
-
-async function runCommandCapture(command: string, cwd: string, args: string[]): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once("error", (error) => {
-      reject(error);
-    });
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolvePromise(stdout);
-        return;
-      }
-      reject(
-        new Error(
-          `${command} ${args.join(" ")} failed (${code ?? "unknown"}) in ${formatPath(cwd)}: ${
-            stderr.trim() || "unknown git error"
-          }`,
-        ),
-      );
-    });
+  return runCommand({
+    command: "git",
+    args,
+    cwd,
+    env: process.env,
   });
 }
 
-function formatPath(path: string): string {
-  return path.split(sep).join("/");
+async function runGitCapture(cwd: string, args: string[]): Promise<string> {
+  return runCommand({
+    command: "git",
+    args,
+    cwd,
+    env: process.env,
+  });
 }
 
 function errorMessage(error: unknown): string {

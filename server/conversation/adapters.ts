@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import type {
   AdapterSendTurnInput,
   AdapterSendTurnResult,
   ConversationAdapter,
   HarnessId,
 } from "./types";
+import { spawnCommand } from "../process/runCommand";
 
 export function getConversationAdapter(harness: HarnessId): ConversationAdapter {
   if (harness === "codex") {
@@ -153,13 +153,16 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
     commandError: null,
   };
 
-  const child = spawn(input.command, input.args, {
+  const child = spawnCommand({
+    command: input.command,
+    args: input.args,
     cwd: input.cwd,
-    stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
       ...(input.env ?? {}),
     },
+    stdio: "pipe",
+    stdin: "ignore",
   });
 
   let stderrText = "";
@@ -167,8 +170,8 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
   let processing = Promise.resolve();
   let spawnErrorMessage = "";
 
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
+  child.stdout?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => {
     stdoutBuffer += chunk;
     let newlineIndex = stdoutBuffer.indexOf("\n");
 
@@ -188,18 +191,21 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
     }
   });
 
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => {
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string) => {
     stderrText += chunk;
   });
 
-  child.once("error", (error) => {
+  child.once("error", (error: unknown) => {
     spawnErrorMessage = error instanceof Error ? error.message : String(error);
   });
-
-  const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-    child.once("close", (code, signal) => resolve({ code, signal }));
-  });
+  let result: Awaited<typeof child>;
+  try {
+    result = await child;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${input.command} failed to start: ${spawnErrorMessage || message}`);
+  }
 
   if (stdoutBuffer.trim()) {
     const parsed = safeJsonParse(stdoutBuffer.trim());
@@ -218,8 +224,8 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
     throw new Error(state.commandError);
   }
 
-  if (exit.code !== 0) {
-    const reason = stderrText.trim() || `${input.command} exited with code ${exit.code}`;
+  if ((result.exitCode ?? -1) !== 0) {
+    const reason = stderrText.trim() || result.stderr.trim() || `${input.command} exited with code ${result.exitCode ?? -1}`;
     throw new Error(reason);
   }
 

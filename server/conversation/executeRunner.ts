@@ -9,6 +9,7 @@ import {
   prepareJobWorkspace,
   serializeJobGitState,
 } from "./gitWorkflow";
+import type { JobGitState } from "./gitWorkflow";
 import { buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
 import { InProcessQueue } from "./queue";
 import {
@@ -28,7 +29,8 @@ type EnqueueExecuteInput = {
   threadId: string;
   prompt: string;
   requestedRecipientAgentId?: string | null;
-  reasoningEffort?: ReasoningEffort;
+  reasoningEffort: ReasoningEffort;
+  skipOrchestratorSelection?: boolean;
 };
 
 type AgentRow = {
@@ -47,20 +49,29 @@ type JobStatusChangedInput = {
   source: string;
 };
 
+type ThreadUpdatedInput = {
+  workspaceName: string;
+  threadId: string;
+  source: string;
+};
+
 export class ExecuteRunner {
   private readonly queue = new InProcessQueue();
   private readonly apiUrl: string;
   private readonly salmonCliCommand: string;
   private readonly onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+  private readonly onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
 
   constructor(options: {
     apiUrl: string;
     salmonCliCommand: string;
     onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+    onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
   }) {
     this.apiUrl = options.apiUrl;
     this.salmonCliCommand = options.salmonCliCommand;
     this.onJobStatusChanged = options.onJobStatusChanged;
+    this.onThreadUpdated = options.onThreadUpdated;
   }
 
   enqueue(input: EnqueueExecuteInput): void {
@@ -69,6 +80,7 @@ export class ExecuteRunner {
         apiUrl: this.apiUrl,
         salmonCliCommand: this.salmonCliCommand,
         onJobStatusChanged: this.onJobStatusChanged,
+        onThreadUpdated: this.onThreadUpdated,
       });
     });
   }
@@ -80,6 +92,7 @@ async function runExecuteTask(
     apiUrl: string;
     salmonCliCommand: string;
     onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+    onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
   },
 ): Promise<void> {
   const db = await openDatabase(input.workspaceName);
@@ -107,6 +120,7 @@ LIMIT 1
   const outputDir = prepared.outputDir;
   const jobWorkspaceDir = prepared.jobWorkspaceDir;
   const gitState = prepared.gitState;
+  const preferredCodePath = resolvePreferredCodePath(gitState);
   const serializedGitState = serializeJobGitState(gitState);
   const logFile = join(outputDir, "events.jsonl");
   await mkdir(outputDir, { recursive: true });
@@ -114,22 +128,67 @@ LIMIT 1
   const turnId = `turn_${randomUUID().slice(0, 12)}`;
   const userMessageId = `msg_${randomUUID().slice(0, 12)}`;
   const task = input.prompt.trim();
-  const reasoningEffort = input.reasoningEffort ?? "medium";
+  const reasoningEffort = input.reasoningEffort;
+  const shouldSkipOrchestrator = input.skipOrchestratorSelection === true;
   const notifyJobStatus = async (status: JobStatus, source: string): Promise<void> => {
-    try {
-      await options.onJobStatusChanged?.({
-        workspaceName: input.workspaceName,
-        jobId: input.jobId,
-        status,
-        source,
-      });
-    } catch {
-      // Status streaming should not break execution flow.
-    }
+    await options.onJobStatusChanged?.({
+      workspaceName: input.workspaceName,
+      jobId: input.jobId,
+      status,
+      source,
+    });
+  };
+  const notifyThreadUpdated = async (source: string): Promise<void> => {
+    await options.onThreadUpdated?.({
+      workspaceName: input.workspaceName,
+      threadId: input.threadId,
+      source,
+    });
+  };
+  const insertThreadMessage = async (payload: {
+    id: string;
+    threadId: string;
+    turnId: string | null;
+    role: "user" | "assistant" | "system";
+    content: string;
+  }): Promise<void> => {
+    await insertMessage(db, payload);
+    await notifyThreadUpdated("message");
+  };
+  const insertThreadEvent = async (payload: {
+    id: string;
+    threadId: string;
+    turnId: string | null;
+    eventName: string;
+    payload: unknown;
+  }): Promise<void> => {
+    await insertEvent(db, payload);
+    await notifyThreadUpdated(payload.eventName);
   };
 
-  await db.query(
-    `
+  if (shouldSkipOrchestrator) {
+    await db.query(
+      `
+UPDATE jobs
+SET status = 'running',
+    output_dir = $2,
+    git_branch_name = $3,
+    git_state_json = $4,
+    assigned_to = $5
+WHERE id = $1
+`,
+      [
+        input.jobId,
+        outputDir,
+        gitState.branch_name,
+        serializedGitState,
+        input.requestedRecipientAgentId ?? null,
+      ],
+    );
+    await notifyJobStatus("running", "execute_runner");
+  } else {
+    await db.query(
+      `
 UPDATE jobs
 SET status = 'orchestrating',
     output_dir = $2,
@@ -138,9 +197,10 @@ SET status = 'orchestrating',
     assigned_to = NULL
 WHERE id = $1
 `,
-    [input.jobId, outputDir, gitState.branch_name, serializedGitState],
-  );
-  await notifyJobStatus("orchestrating", "execute_runner");
+      [input.jobId, outputDir, gitState.branch_name, serializedGitState],
+    );
+    await notifyJobStatus("orchestrating", "execute_runner");
+  }
 
   try {
     const orchestrator = await getAgentById(db, DEFAULT_AGENT_ID);
@@ -166,10 +226,10 @@ WHERE id = $1
       userMessage: task,
       reasoningEffort,
       requestedRecipientAgentId: requestedRecipientId,
-      orchestratorAgentId: orchestrator.id,
+      orchestratorAgentId: shouldSkipOrchestrator ? null : orchestrator.id,
     });
 
-    await insertMessage(db, {
+    await insertThreadMessage({
       id: userMessageId,
       threadId: input.threadId,
       turnId,
@@ -177,8 +237,8 @@ WHERE id = $1
       content: task,
     });
 
-    if (requestedRecipientId) {
-      await insertEvent(db, {
+    if (requestedRecipientId && !shouldSkipOrchestrator) {
+      await insertThreadEvent({
         id: `evt_${randomUUID().slice(0, 12)}`,
         threadId: input.threadId,
         turnId,
@@ -187,175 +247,203 @@ WHERE id = $1
       });
     }
 
-    await insertEvent(db, {
-      id: `evt_${randomUUID().slice(0, 12)}`,
-      threadId: input.threadId,
-      turnId,
-      eventName: "orchestrator_started",
-      payload: {
-        job_id: input.jobId,
-        orchestrator_agent_id: orchestrator.id,
-        harness: orchestrator.harness,
-        model_label: orchestrator.model_label,
-        model_id: orchestrator.model_id,
-        reasoning_effort: reasoningEffort,
-      },
-    });
-
-    await appendJsonLine(logFile, {
-      type: "orchestrator_started",
-      job_id: input.jobId,
-      thread_id: input.threadId,
-      turn_id: turnId,
-      orchestrator_agent_id: orchestrator.id,
-    });
-
-    const orchestratorPrompt = buildOrchestratorPrompt({
-      task,
-      candidates: workers.map((worker) => ({
-        id: worker.id,
-        name: worker.name,
-        harness: worker.harness,
-        modelLabel: worker.model_label,
-      })),
-      forcedRecipientAgentId: requestedRecipientId,
-      reasoningEffort,
-      salmonCliCommand: options.salmonCliCommand,
-    });
-
-    const orchestratorAdapter = getConversationAdapter(orchestrator.harness);
-    let orchestratorText = "";
-
-    const orchestratorResult = await orchestratorAdapter.sendTurn({
-      prompt: orchestratorPrompt,
-      modelId: orchestrator.model_id,
-      sessionId: null,
-      cwd: jobWorkspaceDir,
-      env: buildAgentRuntimeEnv({
-        apiUrl: options.apiUrl,
-        salmonCliCommand: options.salmonCliCommand,
-        codeDir: join(jobWorkspaceDir, "code"),
-        outputDir,
-        workspaceName: input.workspaceName,
-        jobId: input.jobId,
-        threadId: input.threadId,
-        turnId,
-        agentId: orchestrator.id,
-      }),
-      mode: "execute",
-      reasoningEffort,
-      onEvent: async (event) => {
-        await appendJsonLine(logFile, {
-          phase: "orchestrator",
-          ...event,
-        });
-
-        if (event.type === "assistant_text") {
-          orchestratorText = appendText(orchestratorText, event.delta);
-          return;
-        }
-
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId: input.threadId,
-          turnId,
-          eventName: "tool_event",
-          payload: event,
-        });
-      },
-    });
-
-    const finalOrchestratorText = (orchestratorResult.finalText || orchestratorText || "").trim();
-
-    await updateThreadSession(db, {
-      threadId: input.threadId,
-      sessionId: orchestratorResult.sessionId,
-    });
-
     let selectedWorker: AgentRow | null = null;
     let selectionStatus: "auto_selected" | "manual_selected" | "recipient_required" | "invalid" =
       "recipient_required";
     let selectionReason = "";
-
-    if (requestedWorker) {
-      selectedWorker = requestedWorker;
-      selectionStatus = "manual_selected";
-      selectionReason = "Manual recipient override.";
-    } else {
-      const selectedRecipientId = await getJobAssignedRecipientId(db, input.jobId);
-      if (selectedRecipientId) {
-        const match = workers.find((worker) => worker.id === selectedRecipientId) ?? null;
-        if (!match) {
-          selectionStatus = "invalid";
-          selectionReason = `Orchestrator selected invalid worker id: ${selectedRecipientId}`;
-        } else {
-          selectedWorker = match;
-          selectionStatus = "auto_selected";
-          selectionReason = finalOrchestratorText || "Recipient selected via CLI.";
-        }
+    if (shouldSkipOrchestrator) {
+      if (!requestedWorker) {
+        throw new Error("Planned execution requires a selected recipient worker.");
       }
-    }
-
-    if (!selectedWorker) {
-      const unresolvedStatus = selectionStatus === "invalid" ? "invalid" : "recipient_required";
-      const reason =
-        workers.length === 0
-          ? "No eligible worker agents exist."
-          : selectionReason || "Unable to resolve worker recipient.";
-
-      await completeTurn(db, {
-        turnId,
-        assistantMessage: finalOrchestratorText || "Recipient selection requires input.",
-        planSummary: null,
-        selectionStatus: unresolvedStatus,
+      selectedWorker = requestedWorker;
+      selectionStatus = "auto_selected";
+      selectionReason = "Recipient selected during plan mode.";
+      await appendJsonLine(logFile, {
+        type: "recipient_selected_from_plan",
+        selected_agent_id: selectedWorker.id,
       });
-
-      await insertMessage(db, {
-        id: `msg_${randomUUID().slice(0, 12)}`,
-        threadId: input.threadId,
-        turnId,
-        role: "assistant",
-        content: finalOrchestratorText || "Recipient selection requires input.",
-      });
-
-      await insertEvent(db, {
+    } else {
+      await insertThreadEvent({
         id: `evt_${randomUUID().slice(0, 12)}`,
         threadId: input.threadId,
         turnId,
-        eventName: "recipient_required",
+        eventName: "orchestrator_started",
         payload: {
-          reason,
-          selection_status: unresolvedStatus,
-          requested_recipient_agent_id: requestedRecipientId,
-          candidates: workers.map((worker) => ({
-            id: worker.id,
-            name: worker.name,
-            harness: worker.harness,
-            model_label: worker.model_label,
-          })),
+          job_id: input.jobId,
+          orchestrator_agent_id: orchestrator.id,
+          harness: orchestrator.harness,
+          model_label: orchestrator.model_label,
+          model_id: orchestrator.model_id,
+          reasoning_effort: reasoningEffort,
         },
       });
 
-      await db.query(
-        `
+      await appendJsonLine(logFile, {
+        type: "orchestrator_started",
+        job_id: input.jobId,
+        thread_id: input.threadId,
+        turn_id: turnId,
+        orchestrator_agent_id: orchestrator.id,
+      });
+
+      const orchestratorPrompt = buildOrchestratorPrompt({
+        task,
+        candidates: workers.map((worker) => ({
+          id: worker.id,
+          name: worker.name,
+          harness: worker.harness,
+          modelLabel: worker.model_label,
+        })),
+        forcedRecipientAgentId: requestedRecipientId,
+        reasoningEffort,
+        salmonCliCommand: options.salmonCliCommand,
+      });
+
+      const orchestratorAdapter = getConversationAdapter(orchestrator.harness);
+      let orchestratorText = "";
+
+      const orchestratorResult = await orchestratorAdapter.sendTurn({
+        prompt: orchestratorPrompt,
+        modelId: orchestrator.model_id,
+        sessionId: null,
+        cwd: jobWorkspaceDir,
+        env: buildAgentRuntimeEnv({
+          apiUrl: options.apiUrl,
+          salmonCliCommand: options.salmonCliCommand,
+          codeDir: join(jobWorkspaceDir, "code"),
+          outputDir,
+          workspaceName: input.workspaceName,
+          jobId: input.jobId,
+          threadId: input.threadId,
+          turnId,
+          agentId: orchestrator.id,
+        }),
+        mode: "execute",
+        reasoningEffort,
+        onEvent: async (event) => {
+          await appendJsonLine(logFile, {
+            phase: "orchestrator",
+            ...event,
+          });
+
+          if (event.type === "assistant_text") {
+            orchestratorText = appendText(orchestratorText, event.delta);
+            return;
+          }
+
+          await insertThreadEvent({
+            id: `evt_${randomUUID().slice(0, 12)}`,
+            threadId: input.threadId,
+            turnId,
+            eventName: "tool_event",
+            payload: event,
+          });
+        },
+      });
+
+      const finalOrchestratorText = (orchestratorResult.finalText || orchestratorText || "").trim();
+
+      await updateThreadSession(db, {
+        threadId: input.threadId,
+        sessionId: orchestratorResult.sessionId,
+      });
+
+      if (requestedWorker) {
+        selectedWorker = requestedWorker;
+        selectionStatus = "manual_selected";
+        selectionReason = "Manual recipient override.";
+      } else {
+        const selectedRecipientId = await getJobAssignedRecipientId(db, input.jobId);
+        if (selectedRecipientId) {
+          const match = workers.find((worker) => worker.id === selectedRecipientId) ?? null;
+          if (!match) {
+            selectionStatus = "invalid";
+            selectionReason = `Orchestrator selected invalid worker id: ${selectedRecipientId}`;
+          } else {
+            selectedWorker = match;
+            selectionStatus = "auto_selected";
+            selectionReason = finalOrchestratorText || "Recipient selected via CLI.";
+          }
+        }
+      }
+
+      if (!selectedWorker) {
+        const unresolvedStatus = selectionStatus === "invalid" ? "invalid" : "recipient_required";
+        const reason =
+          workers.length === 0
+            ? "No eligible worker agents exist."
+            : selectionReason || "Unable to resolve worker recipient.";
+
+        await completeTurn(db, {
+          turnId,
+          assistantMessage: finalOrchestratorText || "Recipient selection requires input.",
+          planSummary: null,
+          selectionStatus: unresolvedStatus,
+        });
+
+        await insertThreadMessage({
+          id: `msg_${randomUUID().slice(0, 12)}`,
+          threadId: input.threadId,
+          turnId,
+          role: "assistant",
+          content: finalOrchestratorText || "Recipient selection requires input.",
+        });
+
+        await insertThreadEvent({
+          id: `evt_${randomUUID().slice(0, 12)}`,
+          threadId: input.threadId,
+          turnId,
+          eventName: "recipient_required",
+          payload: {
+            reason,
+            selection_status: unresolvedStatus,
+            requested_recipient_agent_id: requestedRecipientId,
+            candidates: workers.map((worker) => ({
+              id: worker.id,
+              name: worker.name,
+              harness: worker.harness,
+              model_label: worker.model_label,
+            })),
+          },
+        });
+
+        await db.query(
+          `
 UPDATE jobs
 SET status = 'waiting_for_recipient',
     assigned_to = NULL,
     session_id = $2
 WHERE id = $1
 `,
-        [input.jobId, orchestratorResult.sessionId],
-      );
-      await notifyJobStatus("waiting_for_recipient", "execute_runner");
+          [input.jobId, orchestratorResult.sessionId],
+        );
+        await notifyJobStatus("waiting_for_recipient", "execute_runner");
 
-      await appendJsonLine(logFile, {
-        type: "recipient_required",
-        reason,
-      });
-      return;
+        await appendJsonLine(logFile, {
+          type: "recipient_required",
+          reason,
+        });
+        return;
+      }
     }
 
-    await insertEvent(db, {
+    if (!selectedWorker) {
+      throw new Error("Selected worker was not resolved.");
+    }
+
+    // Persist selected worker on the turn before worker streaming starts so UI attribution
+    // resolves to the worker instead of falling back to orchestrator.
+    await db.query(
+      `
+UPDATE conversation_turns
+SET selected_agent_id = $2,
+    selection_status = $3
+WHERE id = $1
+`,
+      [turnId, selectedWorker.id, selectionStatus],
+    );
+
+    await insertThreadEvent({
       id: `evt_${randomUUID().slice(0, 12)}`,
       threadId: input.threadId,
       turnId,
@@ -367,18 +455,20 @@ WHERE id = $1
       },
     });
 
-    await db.query(
-      `
+    if (!shouldSkipOrchestrator) {
+      await db.query(
+        `
 UPDATE jobs
 SET assigned_to = $2,
     status = 'running'
 WHERE id = $1
 `,
-      [input.jobId, selectedWorker.id],
-    );
-    await notifyJobStatus("running", "execute_runner");
+        [input.jobId, selectedWorker.id],
+      );
+      await notifyJobStatus("running", "execute_runner");
+    }
 
-    await insertEvent(db, {
+    await insertThreadEvent({
       id: `evt_${randomUUID().slice(0, 12)}`,
       threadId: input.threadId,
       turnId,
@@ -398,6 +488,7 @@ WHERE id = $1
       workerAgentFile: selectedWorker.agent_file ?? "",
       reasoningEffort,
       salmonCliCommand: options.salmonCliCommand,
+      preferredCodePath,
     });
 
     let workerText = "";
@@ -427,19 +518,20 @@ WHERE id = $1
 
         if (event.type === "assistant_text") {
           workerText = appendText(workerText, event.delta);
-          await insertEvent(db, {
+          await insertThreadEvent({
             id: `evt_${randomUUID().slice(0, 12)}`,
             threadId: input.threadId,
             turnId,
             eventName: "worker_text",
             payload: {
               delta: event.delta,
+              worker_agent_id: selectedWorker.id,
             },
           });
           return;
         }
 
-        await insertEvent(db, {
+        await insertThreadEvent({
           id: `evt_${randomUUID().slice(0, 12)}`,
           threadId: input.threadId,
           turnId,
@@ -461,7 +553,7 @@ WHERE id = $1
       selectionStatus,
     });
 
-    await insertMessage(db, {
+    await insertThreadMessage({
       id: assistantMessageId,
       threadId: input.threadId,
       turnId,
@@ -469,7 +561,7 @@ WHERE id = $1
       content: finalWorkerText,
     });
 
-    await insertEvent(db, {
+    await insertThreadEvent({
       id: `evt_${randomUUID().slice(0, 12)}`,
       threadId: input.threadId,
       turnId,
@@ -516,17 +608,17 @@ WHERE id = $1
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
 
-    await failTurn(db, turnId, message).catch(() => undefined);
+    await failTurn(db, turnId, message);
 
-    await insertEvent(db, {
+    await insertThreadEvent({
       id: `evt_${randomUUID().slice(0, 12)}`,
       threadId: input.threadId,
       turnId,
       eventName: "error",
       payload: { message },
-    }).catch(() => undefined);
+    });
 
-    await closeThread(db, input.threadId).catch(() => undefined);
+    await closeThread(db, input.threadId);
 
     await db.query(
       `
@@ -535,7 +627,7 @@ SET status = 'failed'
 WHERE id = $1
 `,
       [input.jobId],
-    ).catch(() => undefined);
+    );
     await notifyJobStatus("failed", "execute_runner");
 
     await appendJsonLine(logFile, { type: "error", message });
@@ -617,6 +709,22 @@ function buildAgentRuntimeEnv(input: {
     SALMON_TURN_ID: input.turnId,
     SALMON_AGENT_ID: input.agentId,
   };
+}
+
+function resolvePreferredCodePath(gitState: JobGitState): string | null {
+  const codeRepos = gitState.repos
+    .map((repo) => repo.relative_path)
+    .filter((path) => path.startsWith("code/"));
+  if (codeRepos.length === 0) {
+    return null;
+  }
+
+  const nonDefaultRepos = codeRepos.filter((path) => path !== "code/default");
+  if (nonDefaultRepos.length === 0 && codeRepos.includes("code/default")) {
+    return "code/default";
+  }
+
+  return null;
 }
 
 function isWaitingForHumanResponseStatus(status: JobStatus | null): boolean {

@@ -12,6 +12,10 @@ export function buildPrompt(
   message: string,
   reasoningEffort: ReasoningEffort = "medium",
   salmonCliCommand = "salmon",
+  options: {
+    planCandidates?: WorkerCandidate[];
+    workspaceIsEmpty?: boolean;
+  } = {},
 ): string {
   const cleanMessage = message.trim();
   const reasoningLine = formatReasoningInstruction(reasoningEffort);
@@ -20,6 +24,7 @@ export function buildPrompt(
   if (mode === "chat") {
     return [
       "You are a pragmatic software engineering assistant.",
+      "Use exploratory probing when useful to understand existing code, context, and constraints before acting.",
       "Answer clearly and concisely.",
       reasoningLine,
       "User message:",
@@ -28,17 +33,35 @@ export function buildPrompt(
   }
 
   if (mode === "plan") {
+    const planRecipientCommand = `${cli} job plan-select-recipient --agent-id "<candidate_id>" --reason "<one sentence reason>"`;
     const planSummaryCommand = `${cli} job plan-summary --title "<short title>" --summary "<1-2 sentence summary>" --step "<step 1>" --step "<step 2>"`;
+    const listAgentsCommand = `${cli} list-agents`;
+    const candidates = Array.isArray(options.planCandidates) ? options.planCandidates : [];
+    const candidateLines = candidates.map((candidate, index) => {
+      return `${index + 1}. id=${candidate.id}; name=${candidate.name}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
+    });
+    const workspaceInstruction = options.workspaceIsEmpty
+      ? "Workspace appears empty. Skip exploratory probing and immediately produce recipient selection + plan summary CLI submissions."
+      : "Use tools for read-only inspection and exploratory context gathering before finalizing the plan.";
+
     return [
       "You are planning work for an implementation agent.",
       "Plan mode is planning-only.",
-      "You may use tools for read-only inspection and context gathering.",
+      workspaceInstruction,
       "Do not execute implementation work and do not modify files.",
       "Return a concrete, decision-complete plan in plain language.",
       `Use this Salmon CLI command prefix: ${cli}`,
+      "If you need to inspect available agents, run:",
+      listAgentsCommand,
+      "Available worker candidates (use one of these ids for `--agent-id`):",
+      candidateLines.length > 0 ? candidateLines.join("\n") : "(none available)",
+      "First, persist the selected implementation recipient by calling exactly one CLI command:",
+      planRecipientCommand,
       "Then persist structured plan data by calling exactly one CLI command:",
       planSummaryCommand,
       "Rules:",
+      "- Use exactly one recipient selection command and choose a valid worker id.",
+      "- Recipient reason must be one sentence.",
       "- Use at least one --step flag and keep steps ordered.",
       "- Title and summary must be concise and specific.",
       "- Do not emit PLAN_SUMMARY_JSON tags.",
@@ -50,6 +73,7 @@ export function buildPrompt(
 
   return [
     "You are executing a software task end-to-end.",
+    "Begin with exploratory probing as needed so you understand existing structure, context, and constraints.",
     "Use tools as needed and provide a concise final result.",
     reasoningLine,
     "Task:",
@@ -102,20 +126,26 @@ export function buildWorkerPrompt(input: {
   workerAgentFile: string;
   reasoningEffort?: ReasoningEffort;
   salmonCliCommand?: string;
+  preferredCodePath?: string | null;
 }): string {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
   const cli = input.salmonCliCommand?.trim() || "salmon";
+  const preferredCodePath = input.preferredCodePath?.trim() || "";
   const askQuestionCommand = `${cli} job ask-question --question "<question>" [--details "<optional context>"]`;
   const requestHelpCommand = `${cli} job request-help --summary "<short summary>" [--details "<optional context>"]`;
+  const codePathPolicyLine = preferredCodePath
+    ? `- Put code/source changes under \`${preferredCodePath}/\` unless the task explicitly targets another repo.`
+    : "- Put code/source changes under `code/`.";
 
   return [
     `You are ${input.workerName}.`,
     "Follow your agent instructions exactly, then execute the task.",
+    "Use exploratory probing as needed to gather context before making changes.",
     `Use this Salmon CLI command prefix: ${cli}`,
     "Path policy:",
-    "- Put code/source changes under `code/`.",
+    codePathPolicyLine,
     "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$SALMON_JOB_ID/`.",
     "- Do not place source code files at workspace root.",
     "If you need clarification from the human, run:",

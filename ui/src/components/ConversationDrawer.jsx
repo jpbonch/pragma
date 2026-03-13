@@ -1,7 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, X } from 'lucide-react'
+import { ArrowUp, X, Sparkles, User, Wrench, Info } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { OutputPanel } from './OutputPanel'
+
+const HEADER_STATUS_LABELS = {
+  pending_review: 'Review',
+  waiting_for_recipient: 'Recipient Needed',
+  waiting_for_question_response: 'Answer Needed',
+  waiting_for_help_response: 'Help Needed',
+  orchestrating: 'Executing',
+  running: 'Executing',
+  queued: 'Queued',
+  needs_fix: 'Needs Fix',
+  completed: 'Completed',
+  failed: 'Failed',
+}
+
+function toTitleCaseStatus(value) {
+  const parts = value.split('_').filter(Boolean)
+  if (parts.length === 0) {
+    return 'Ready'
+  }
+  return parts.map((part) => part[0].toUpperCase() + part.slice(1)).join(' ')
+}
+
+function getHeaderStatusLabel({ jobStatus, mode, loading }) {
+  const normalizedStatus = typeof jobStatus === 'string' ? jobStatus.trim().toLowerCase() : ''
+  if (normalizedStatus) {
+    return HEADER_STATUS_LABELS[normalizedStatus] || toTitleCaseStatus(normalizedStatus)
+  }
+  if (loading) {
+    return mode === 'plan' ? 'Planning' : 'Executing'
+  }
+  if (mode === 'plan') {
+    return 'Plan Ready'
+  }
+  return 'Ready'
+}
 
 export function ConversationDrawer({
   open,
@@ -16,8 +51,10 @@ export function ConversationDrawer({
   selectedRecipientAgentId = '',
   onSelectRecipientAgentId,
   onPromptSubmit,
-  jobId = '',
-  jobStatus = '',
+  jobId,
+  jobStatus,
+  headerAgentName = '',
+  headerAgentEmoji = '',
   onReviewAction,
 }) {
   const bodyRef = useRef(null)
@@ -26,12 +63,18 @@ export function ConversationDrawer({
   const [approveError, setApproveError] = useState('')
   const showOutputPanel = Boolean(jobId) && mode === 'chat'
   const canApprove = showOutputPanel && jobStatus === 'pending_review'
-
-  const title = useMemo(() => {
-    if (mode === 'plan') return 'Plan Conversation'
-    if (mode === 'chat') return 'Chat Conversation'
-    return 'Conversation'
-  }, [mode])
+  const canReopenCompleted = showOutputPanel && jobStatus === 'completed'
+  const isCompletedJob = showOutputPanel && jobStatus === 'completed'
+  const headerStatusLabel = useMemo(
+    () => getHeaderStatusLabel({ jobStatus, mode, loading }),
+    [jobStatus, mode, loading],
+  )
+  const displayHeaderAgentName =
+    typeof headerAgentName === 'string' ? headerAgentName.trim() : ''
+  const displayHeaderAgentEmoji =
+    typeof headerAgentEmoji === 'string' && headerAgentEmoji.trim()
+      ? headerAgentEmoji.trim()
+      : '🤖'
 
   useEffect(() => {
     if (!bodyRef.current) {
@@ -60,14 +103,14 @@ export function ConversationDrawer({
     setPrompt('')
   }
 
-  async function submitApprove() {
+  async function submitReviewAction(action) {
     if (!jobId || !onReviewAction || approveLoading) {
       return
     }
     setApproveError('')
     setApproveLoading(true)
     try {
-      await onReviewAction(jobId, 'approve')
+      await onReviewAction(jobId, action)
     } catch (error) {
       setApproveError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -79,167 +122,178 @@ export function ConversationDrawer({
     return null
   }
 
-  return (
-    <div className="conversation-drawer-backdrop">
-      <div className="conversation-drawer">
-        <div className="conversation-drawer-header">
-          <div className="conversation-drawer-title">{title}</div>
-          {mode === 'chat' && (
-            <button className="conversation-close-btn" onClick={onClose} aria-label="Close chat">
-              <X size={14} />
-            </button>
+  function renderEntry(entry) {
+    if (entry.type === 'tool') {
+      return (
+        <div key={entry.id} className="conv-tool">
+          <Wrench size={12} strokeWidth={2} className="conv-tool-icon" />
+          <span className="conv-tool-label">{entry.label || entry.name || 'Tool'}</span>
+          {entry.summary ? (
+            <span className="conv-tool-summary">{entry.summary}</span>
+          ) : null}
+        </div>
+      )
+    }
+
+    if (entry.type === 'status') {
+      return (
+        <div key={entry.id} className="conv-status">
+          <Info size={12} strokeWidth={2} />
+          <span>{entry.content}</span>
+        </div>
+      )
+    }
+
+    const isUser = entry.type === 'user'
+    const assistantName =
+      typeof entry.agentName === 'string' && entry.agentName.trim()
+        ? entry.agentName.trim()
+        : 'Assistant'
+    const assistantEmoji =
+      typeof entry.agentEmoji === 'string' && entry.agentEmoji.trim()
+        ? entry.agentEmoji.trim()
+        : ''
+
+    return (
+      <div key={entry.id} className={`conv-msg ${isUser ? 'conv-msg-user' : 'conv-msg-assistant'}`}>
+        <div className="conv-msg-avatar">
+          {isUser ? (
+            <User size={14} strokeWidth={2} />
+          ) : assistantEmoji ? (
+            <span className="conv-msg-avatar-emoji">{assistantEmoji}</span>
+          ) : (
+            <Sparkles size={14} strokeWidth={2} />
           )}
         </div>
+        <div className="conv-msg-body">
+          <div className="conv-msg-role">{isUser ? 'You' : assistantName}</div>
+          {isUser ? (
+            <div className="conv-msg-text">{entry.content}</div>
+          ) : (
+            <div className="conv-msg-markdown">
+              <ReactMarkdown>{entry.content || ''}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
-        <div className={`conversation-drawer-body ${showOutputPanel ? 'with-output' : ''}`}>
+  return (
+    <div className="conversation-drawer-backdrop">
+      <div className="conv-drawer">
+        {/* Header */}
+        <div className="conv-header">
+          <div className="conv-header-left">
+            <div className={`conv-mode-indicator ${mode}`} />
+            <span className="conv-header-title">{headerStatusLabel}</span>
+            {loading && <span className="conv-streaming-dot" />}
+          </div>
+          <div className="conv-header-right">
+            {displayHeaderAgentName && (
+              <div className="conv-header-agent" title={displayHeaderAgentName}>
+                <span className="conv-header-agent-avatar">{displayHeaderAgentEmoji}</span>
+                <span className="conv-header-agent-name">{displayHeaderAgentName}</span>
+              </div>
+            )}
+            {(mode === 'chat' || mode === 'plan') && (
+              <button className="conv-close" onClick={onClose} aria-label="Close">
+                <X size={15} strokeWidth={2} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className={`conv-body ${showOutputPanel ? 'conv-body-split' : ''}`}>
           {showOutputPanel ? (
             <>
-              <div className="conversation-chat-pane">
-                <div className="conversation-history-pane" ref={bodyRef}>
-                  {entries.length === 0 && <div className="muted">No messages yet.</div>}
-
-                  {entries.map((entry) => {
-                    if (entry.type === 'tool') {
-                      return (
-                        <div key={entry.id} className="conversation-tool-row">
-                          <div className="conversation-tool-name">{entry.label || entry.name || 'Tool'}</div>
-                          {entry.summary ? (
-                            <div className="conversation-tool-summary">{entry.summary}</div>
-                          ) : null}
-                        </div>
-                      )
-                    }
-
-                    if (entry.type === 'status') {
-                      return (
-                        <div key={entry.id} className="conversation-status-row">
-                          {entry.content}
-                        </div>
-                      )
-                    }
-
-                    return (
-                      <div
-                        key={entry.id}
-                        className={`conversation-message ${entry.type === 'user' ? 'from-user' : 'from-assistant'}`}
-                      >
-                        <div className="conversation-role">{entry.type === 'user' ? 'You' : 'Assistant'}</div>
-                        {entry.type === 'assistant' ? (
-                          <div className="conversation-markdown">
-                            <ReactMarkdown>{entry.content || ''}</ReactMarkdown>
-                          </div>
-                        ) : (
-                          <div className="conversation-content">{entry.content}</div>
-                        )}
-                      </div>
-                    )
-                  })}
-
-                  {loading && <div className="conversation-status">Streaming...</div>}
-                  {error && <div className="error">Error: {error}</div>}
+              <div className="conv-chat-side">
+                <div className="conv-messages" ref={bodyRef}>
+                  {entries.length === 0 && <div className="muted" style={{ padding: '8px 0' }}>No messages yet.</div>}
+                  {entries.map(renderEntry)}
+                  {loading && <div className="conv-status"><span className="conv-streaming-label">Thinking...</span></div>}
+                  {error && <div className="error" style={{ padding: '4px 0' }}>Error: {error}</div>}
                 </div>
-                <div className="conversation-drawer-prompt-row">
+                <div className="conv-prompt-row">
                   <input
-                    className="conversation-drawer-prompt-input"
+                    className="conv-prompt-input"
                     value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    placeholder="Continue this conversation..."
-                    disabled={loading}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder={
+                      isCompletedJob
+                        ? 'Task is completed. Mark it as not completed to continue.'
+                        : 'Continue this conversation...'
+                    }
+                    disabled={loading || isCompletedJob}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
                         submitPrompt()
                       }
                     }}
                   />
                   <button
-                    className="conversation-drawer-prompt-send"
+                    className="conv-prompt-send"
                     onClick={submitPrompt}
-                    disabled={loading || !prompt.trim()}
-                    title="Send"
+                    disabled={loading || isCompletedJob || !prompt.trim()}
                     aria-label="Send"
                   >
-                    <ArrowUp size={16} strokeWidth={2.5} />
+                    <ArrowUp size={15} strokeWidth={2.5} />
                   </button>
                 </div>
               </div>
-              <div className="conversation-output-pane">
+              <div className="conv-output-side">
                 <OutputPanel jobId={jobId} jobStatus={jobStatus} />
               </div>
             </>
           ) : (
-            <div className="conversation-history-pane" ref={bodyRef}>
-              {entries.length === 0 && <div className="muted">No messages yet.</div>}
-
-              {entries.map((entry) => {
-                if (entry.type === 'tool') {
-                  return (
-                    <div key={entry.id} className="conversation-tool-row">
-                      <div className="conversation-tool-name">{entry.label || entry.name || 'Tool'}</div>
-                      {entry.summary ? (
-                        <div className="conversation-tool-summary">{entry.summary}</div>
-                      ) : null}
-                    </div>
-                  )
-                }
-
-                if (entry.type === 'status') {
-                  return (
-                    <div key={entry.id} className="conversation-status-row">
-                      {entry.content}
-                    </div>
-                  )
-                }
-
-                return (
-                  <div
-                    key={entry.id}
-                    className={`conversation-message ${entry.type === 'user' ? 'from-user' : 'from-assistant'}`}
-                  >
-                    <div className="conversation-role">{entry.type === 'user' ? 'You' : 'Assistant'}</div>
-                    {entry.type === 'assistant' ? (
-                      <div className="conversation-markdown">
-                        <ReactMarkdown>{entry.content || ''}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <div className="conversation-content">{entry.content}</div>
-                    )}
-                  </div>
-                )
-              })}
-
-              {loading && <div className="conversation-status">Streaming...</div>}
-              {error && <div className="error">Error: {error}</div>}
+            <div className="conv-messages" ref={bodyRef}>
+              {entries.length === 0 && <div className="muted" style={{ padding: '8px 0' }}>No messages yet.</div>}
+              {entries.map(renderEntry)}
+              {loading && <div className="conv-status"><span className="conv-streaming-label">Thinking...</span></div>}
+              {error && <div className="error" style={{ padding: '4px 0' }}>Error: {error}</div>}
             </div>
           )}
         </div>
 
+        {/* Footer */}
         {showOutputPanel ? (
-          <div className="conversation-drawer-footer-stack conversation-drawer-review-footer">
-            {approveError && <div className="error">Error: {approveError}</div>}
-            <div className="conversation-drawer-footer conversation-drawer-footer-end">
-              <button
-                className="conversation-approve-btn"
-                onClick={() => {
-                  void submitApprove()
-                }}
-                disabled={!canApprove || approveLoading}
-                title={canApprove ? 'Approve' : 'Job must be pending review to approve'}
-              >
-                {approveLoading ? 'Approving...' : 'Approve'}
-              </button>
+          <div className="conv-footer">
+            {approveError && <div className="error" style={{ padding: '0 4px 4px' }}>Error: {approveError}</div>}
+            <div className="conv-footer-row conv-footer-end">
+              {canApprove && (
+                <button
+                  className="conv-approve-btn"
+                  onClick={() => { void submitReviewAction('approve') }}
+                  disabled={approveLoading}
+                  title="Approve"
+                >
+                  {approveLoading ? 'Approving...' : 'Approve ✓'}
+                </button>
+              )}
+              {canReopenCompleted && (
+                <button
+                  className="conv-reopen-btn"
+                  onClick={() => { void submitReviewAction('reopen') }}
+                  disabled={approveLoading}
+                  title="Mark task as not completed"
+                >
+                  {approveLoading ? 'Reopening...' : 'Mark Not Completed'}
+                </button>
+              )}
             </div>
           </div>
         ) : (
-          <div className="conversation-drawer-footer-stack">
+          <div className="conv-footer">
             {mode === 'plan' && (
-              <div className="conversation-drawer-footer">
-                <div className="conversation-recipient-picker">
-                  <label className="conversation-recipient-label">Recipient</label>
+              <div className="conv-footer-row">
+                <div className="conv-recipient-picker">
+                  <label className="conv-recipient-label">Recipient</label>
                   <select
-                    className="conversation-recipient-select"
+                    className="conv-recipient-select"
                     value={selectedRecipientAgentId}
-                    onChange={(event) => onSelectRecipientAgentId?.(event.target.value)}
+                    onChange={(e) => onSelectRecipientAgentId?.(e.target.value)}
                     disabled={loading}
                   >
                     <option value="">Auto-select</option>
@@ -250,33 +304,32 @@ export function ConversationDrawer({
                     ))}
                   </select>
                 </div>
-                <button className="conversation-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
-                  Execute
+                <button className="conv-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
+                  Execute →
                 </button>
               </div>
             )}
-            <div className="conversation-drawer-prompt-row">
+            <div className="conv-prompt-row">
               <input
-                className="conversation-drawer-prompt-input"
+                className="conv-prompt-input"
                 value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
+                onChange={(e) => setPrompt(e.target.value)}
                 placeholder={mode === 'plan' ? 'Refine this plan...' : 'Continue this conversation...'}
                 disabled={loading}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
                     submitPrompt()
                   }
                 }}
               />
               <button
-                className="conversation-drawer-prompt-send"
+                className="conv-prompt-send"
                 onClick={submitPrompt}
                 disabled={loading || !prompt.trim()}
-                title="Send"
                 aria-label="Send"
               >
-                <ArrowUp size={16} strokeWidth={2.5} />
+                <ArrowUp size={15} strokeWidth={2.5} />
               </button>
             </div>
           </div>

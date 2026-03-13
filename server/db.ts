@@ -28,6 +28,7 @@ Your job is to:
 - \`salmon create-job <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`jobs\` table. Default status is \`queued\`.
 - \`salmon list-jobs [--status <status>] [--limit <n>]\`: Calls the API to list jobs from newest to oldest.
 - \`salmon job select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
+- \`salmon job plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
 - \`salmon job ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
 - \`salmon job request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
 - \`salmon server [--port <n>]\`: Starts the Salmon API server.
@@ -391,35 +392,13 @@ export function validateWorkspaceName(name: string): void {
   }
 }
 
-function isPGliteAbortError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("Aborted(). Build with -sASSERTIONS");
-}
-
 async function createWorkspaceDatabase(dbDir: string): Promise<PGlite> {
-  try {
-    const db = new PGlite(dbDir);
-    await db.waitReady;
-    await ensureRequiredSchema(db);
-    await ensureDefaultAgents(db);
-    await ensureConversationSchema(db);
-    return patchDatabaseClose(db);
-  } catch (error: unknown) {
-    if (!isPGliteAbortError(error)) {
-      throw error;
-    }
-
-    // Hard self-heal path: this workspace DB is corrupted. Reset and rebuild schema.
-    await rm(dbDir, { recursive: true, force: true });
-    await mkdir(dbDir, { recursive: true });
-
-    const db = new PGlite(dbDir);
-    await db.waitReady;
-    await ensureRequiredSchema(db);
-    await ensureDefaultAgents(db);
-    await ensureConversationSchema(db);
-    return patchDatabaseClose(db);
-  }
+  const db = new PGlite(dbDir);
+  await db.waitReady;
+  await ensureRequiredSchema(db);
+  await ensureDefaultAgents(db);
+  await ensureConversationSchema(db);
+  return patchDatabaseClose(db);
 }
 
 function patchDatabaseClose(db: PGlite): PGlite {

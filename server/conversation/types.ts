@@ -52,6 +52,15 @@ export type ChatThreadListItem = {
   chat_last_message_at: string | null;
 };
 
+export type OpenPlanThreadListItem = {
+  id: string;
+  status: ConversationStatus;
+  created_at: string;
+  updated_at: string;
+  latest_plan_summary: string | null;
+  first_user_message: string | null;
+};
+
 export type ConversationTurn = {
   id: string;
   thread_id: string;

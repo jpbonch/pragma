@@ -7,6 +7,7 @@ import type {
   ConversationThread,
   ConversationTurn,
   HarnessId,
+  OpenPlanThreadListItem,
   ReasoningEffort,
 } from "./types";
 
@@ -173,6 +174,60 @@ LIMIT $1
 `;
 
   const result = await db.query<ChatThreadListItem>(query, params);
+  return result.rows;
+}
+
+export async function listOpenPlanThreads(
+  db: PGlite,
+  input?: { limit?: number; cursor?: string | null },
+): Promise<OpenPlanThreadListItem[]> {
+  const requested = input?.limit ?? 20;
+  const limit = Math.max(1, Math.min(requested, 20));
+  const cursor = input?.cursor?.trim() || null;
+
+  const params: Array<string | number> = [limit];
+  let query = `
+SELECT thread.id,
+       thread.status,
+       thread.created_at,
+       thread.updated_at,
+       latest_plan_turn.plan_summary AS latest_plan_summary,
+       first_plan_turn.user_message AS first_user_message
+FROM conversation_threads AS thread
+LEFT JOIN LATERAL (
+  SELECT plan_summary
+  FROM conversation_turns
+  WHERE thread_id = thread.id
+    AND mode = 'plan'
+    AND status = 'completed'
+    AND plan_summary IS NOT NULL
+    AND plan_summary <> ''
+  ORDER BY created_at DESC
+  LIMIT 1
+) AS latest_plan_turn ON TRUE
+LEFT JOIN LATERAL (
+  SELECT user_message
+  FROM conversation_turns
+  WHERE thread_id = thread.id
+    AND mode = 'plan'
+  ORDER BY created_at ASC
+  LIMIT 1
+) AS first_plan_turn ON TRUE
+WHERE thread.mode = 'plan'
+  AND thread.status = 'open'
+`;
+
+  if (cursor) {
+    params.push(cursor);
+    query += "  AND thread.updated_at < $2::timestamptz\n";
+  }
+
+  query += `
+ORDER BY thread.updated_at DESC
+LIMIT $1
+`;
+
+  const result = await db.query<OpenPlanThreadListItem>(query, params);
   return result.rows;
 }
 
