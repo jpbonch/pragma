@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { access } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Command } from "commander";
 import open from "open";
 import type { ExecaChildProcess } from "execa";
@@ -468,12 +468,13 @@ async function runAll(): Promise<void> {
 
 async function startUi(options: { port: number; apiUrl: string }): Promise<void> {
   const uiDir = await resolveUiDir();
+  const projectRoot = dirname(uiDir);
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
   const child = spawnCommand({
     command: npmCommand,
-    args: ["run", "dev", "--", "--host", "127.0.0.1", "--port", String(options.port)],
-    cwd: uiDir,
+    args: ["run", "ui:dev", "--", "--host", "127.0.0.1", "--port", String(options.port)],
+    cwd: projectRoot,
     stdio: "inherit",
     env: {
       ...process.env,
