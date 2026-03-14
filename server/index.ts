@@ -19,6 +19,7 @@ import {
   openDatabase,
   setActiveWorkspaceName,
   setupPragma,
+  updateTaskTitle,
 } from "./db";
 import { getConversationAdapter } from "./conversation/adapters";
 import { generateTitle } from "./conversation/titleGenerator";
@@ -2150,6 +2151,16 @@ WHERE id = $1
 `,
         [turnId, JSON.stringify(normalized)],
       );
+
+      // Update the task title with the orchestrator-generated title
+      const threadResult = await db.query<{ task_id: string | null }>(
+        `SELECT task_id FROM conversation_threads WHERE id = $1 LIMIT 1`,
+        [threadId],
+      );
+      const taskId = threadResult.rows[0]?.task_id;
+      if (taskId && normalized.title) {
+        await updateTaskTitle(db, taskId, normalized.title);
+      }
 
       await insertEvent(db, {
         id: `evt_${randomUUID().slice(0, 12)}`,
