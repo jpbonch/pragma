@@ -15,6 +15,18 @@ const REASONING_EFFORTS = [
   { id: 'extra_high', label: 'Extra High' },
 ]
 
+const STORAGE_KEY_MODE = 'pragma.inputbar.mode'
+const STORAGE_KEY_REASONING = 'pragma.inputbar.reasoningEffort'
+
+function loadStored(key, validValues, fallback) {
+  try {
+    const value = localStorage.getItem(key)
+    if (value && validValues.includes(value)) return value
+  } catch {}
+  return fallback
+}
+
+
 export function InputBar({
   onSubmit,
   onOpenOrchestratorConfig,
@@ -31,8 +43,28 @@ export function InputBar({
   const isControlled = value !== undefined
   const input = isControlled ? value : localInput
   const setInput = isControlled ? onValueChange : setLocalInput
-  const [mode, setMode] = useState('execute')
-  const [reasoningEffort, setReasoningEffort] = useState('medium')
+  const [mode, setModeRaw] = useState(() =>
+    loadStored(STORAGE_KEY_MODE, MODE_CYCLE_ORDER, 'execute'),
+  )
+  const [reasoningEffort, setReasoningEffortRaw] = useState(() =>
+    loadStored(
+      STORAGE_KEY_REASONING,
+      REASONING_EFFORTS.map((r) => r.id),
+      'medium',
+    ),
+  )
+
+  function setMode(value) {
+    const next = typeof value === 'function' ? value(mode) : value
+    setModeRaw(next)
+    try { localStorage.setItem(STORAGE_KEY_MODE, next) } catch {}
+  }
+
+  function setReasoningEffort(value) {
+    const next = typeof value === 'function' ? value(reasoningEffort) : value
+    setReasoningEffortRaw(next)
+    try { localStorage.setItem(STORAGE_KEY_REASONING, next) } catch {}
+  }
   const [openMenu, setOpenMenu] = useState(null)
 
   const toolsRef = useRef(null)
@@ -60,7 +92,7 @@ export function InputBar({
     if (!nextMode || !MODES.some((item) => item.id === nextMode)) {
       return
     }
-    setMode((current) => (current === nextMode ? current : nextMode))
+    setModeRaw((current) => (current === nextMode ? current : nextMode))
   }, [preferredMode, lockedMode, isModeLocked])
 
   useEffect(() => {
