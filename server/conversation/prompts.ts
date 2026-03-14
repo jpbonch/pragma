@@ -161,6 +161,7 @@ export function buildWorkerPrompt(input: {
     codePathPolicyLine,
     "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$PRAGMA_TASK_ID/`.",
     "- Do not place source code files at workspace root.",
+    "Before making changes, check if the project has uninstalled dependencies (e.g. missing node_modules/, .venv/, vendor/, etc.) and install them using the appropriate package manager.",
     "If you need clarification from the human, run:",
     askQuestionCommand,
     "If you are blocked and need human help, run:",
