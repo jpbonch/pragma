@@ -506,29 +506,35 @@ CREATE TABLE IF NOT EXISTS humans (
 }
 
 async function ensureJobStatusEnumType(db: PGlite): Promise<void> {
+  const statusType = await db.query<{ exists: boolean }>(
+    `
+SELECT EXISTS (
+  SELECT 1
+  FROM pg_type t
+  JOIN pg_namespace n ON n.oid = t.typnamespace
+  WHERE t.typname = 'job_status'
+    AND n.nspname = 'public'
+) AS exists
+`,
+  );
+  if (statusType.rows[0]?.exists) {
+    return;
+  }
+
   await db.exec(`
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_type
-    WHERE typname = 'job_status'
-  ) THEN
-    CREATE TYPE job_status AS ENUM (
-      'queued',
-      'orchestrating',
-      'running',
-      'waiting_for_recipient',
-      'waiting_for_question_response',
-      'waiting_for_help_response',
-      'pending_review',
-      'needs_fix',
-      'completed',
-      'failed'
-    );
-  END IF;
-END
-$$;
+CREATE TYPE job_status AS ENUM (
+  'queued',
+  'orchestrating',
+  'running',
+  'waiting_for_recipient',
+  'waiting_for_question_response',
+  'waiting_for_help_response',
+  'pending_review',
+  'needs_fix',
+  'completed',
+  'failed',
+  'cancelled'
+);
 `);
 }
 

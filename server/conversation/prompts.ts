@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { ReasoningEffort } from "./types";
 
 type WorkerCandidate = {
@@ -127,18 +128,27 @@ export function buildWorkerPrompt(input: {
   reasoningEffort?: ReasoningEffort;
   salmonCliCommand?: string;
   preferredCodePath?: string | null;
+  jobWorkspaceDir?: string;
 }): string {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
   const cli = input.salmonCliCommand?.trim() || "salmon";
   const preferredCodePath = input.preferredCodePath?.trim() || "";
+  const jobWorkspaceDir = input.jobWorkspaceDir?.trim() || "";
   const askQuestionCommand = `${cli} job ask-question --question "<question>" [--details "<optional context>"]`;
   const requestHelpCommand = `${cli} job request-help --summary "<short summary>" [--details "<optional context>"]`;
   const submitTestsCommand = `${cli} job submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]`;
   const codePathPolicyLine = preferredCodePath
-    ? `- Put code/source changes under \`${preferredCodePath}/\` unless the task explicitly targets another repo.`
-    : "- Put code/source changes under `code/`.";
+    ? jobWorkspaceDir
+      ? `- Put code/source changes under \`${join(jobWorkspaceDir, preferredCodePath)}/\` (relative: \`${preferredCodePath}/\`) unless the task explicitly targets another repo inside this job workspace.`
+      : `- Put code/source changes under \`${preferredCodePath}/\` unless the task explicitly targets another repo.`
+    : jobWorkspaceDir
+      ? `- Put code/source changes under \`${join(jobWorkspaceDir, "code")}/\`.`
+      : "- Put code/source changes under `code/`.";
+  const workspaceBoundaryLine = jobWorkspaceDir
+    ? `- Active job workspace root (write boundary): \`${jobWorkspaceDir}/\`.`
+    : "- Active job workspace root (write boundary): current working directory.";
 
   return [
     `You are ${input.workerName}.`,
@@ -146,6 +156,8 @@ export function buildWorkerPrompt(input: {
     "Use exploratory probing as needed to gather context before making changes.",
     `Use this Salmon CLI command prefix: ${cli}`,
     "Path policy:",
+    workspaceBoundaryLine,
+    "- Never write outside the active job workspace root; runtime guard blocks writes outside the job worktree.",
     codePathPolicyLine,
     "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$SALMON_JOB_ID/`.",
     "- Do not place source code files at workspace root.",

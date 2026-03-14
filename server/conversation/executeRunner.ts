@@ -313,6 +313,7 @@ WHERE id = $1
           salmonCliCommand: options.salmonCliCommand,
           codeDir: join(jobWorkspaceDir, "code"),
           outputDir,
+          jobWorkspaceDir,
           workspaceName: input.workspaceName,
           jobId: input.jobId,
           threadId: input.threadId,
@@ -490,6 +491,7 @@ WHERE id = $1
       reasoningEffort,
       salmonCliCommand: options.salmonCliCommand,
       preferredCodePath,
+      jobWorkspaceDir,
     });
 
     let workerText = "";
@@ -503,6 +505,7 @@ WHERE id = $1
         salmonCliCommand: options.salmonCliCommand,
         codeDir: join(jobWorkspaceDir, "code"),
         outputDir,
+        jobWorkspaceDir,
         workspaceName: input.workspaceName,
         jobId: input.jobId,
         threadId: input.threadId,
@@ -693,6 +696,7 @@ function buildAgentRuntimeEnv(input: {
   salmonCliCommand: string;
   codeDir: string;
   outputDir: string;
+  jobWorkspaceDir: string;
   workspaceName: string;
   jobId: string;
   threadId: string;
@@ -704,6 +708,7 @@ function buildAgentRuntimeEnv(input: {
     SALMON_CLI_COMMAND: input.salmonCliCommand,
     SALMON_CODE_DIR: input.codeDir,
     SALMON_OUTPUT_DIR: input.outputDir,
+    SALMON_JOB_WORKSPACE: input.jobWorkspaceDir,
     SALMON_WORKSPACE_NAME: input.workspaceName,
     SALMON_JOB_ID: input.jobId,
     SALMON_THREAD_ID: input.threadId,

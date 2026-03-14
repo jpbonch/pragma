@@ -5,6 +5,7 @@ import type {
   HarnessId,
 } from "./types";
 import { spawnCommand } from "../process/runCommand";
+import { resolve } from "node:path";
 
 export function getConversationAdapter(harness: HarnessId): ConversationAdapter {
   if (harness === "codex") {
@@ -15,7 +16,8 @@ export function getConversationAdapter(harness: HarnessId): ConversationAdapter 
 
 const codexAdapter: ConversationAdapter = {
   async sendTurn(input: AdapterSendTurnInput): Promise<AdapterSendTurnResult> {
-    const args = buildCodexArgs(input);
+    const sandboxRoot = resolveSandboxRoot(input);
+    const args = buildCodexArgs(input, sandboxRoot);
     return runAdapterCommand({
       command: "codex",
       args,
@@ -67,7 +69,8 @@ const codexAdapter: ConversationAdapter = {
 
 const claudeAdapter: ConversationAdapter = {
   async sendTurn(input: AdapterSendTurnInput): Promise<AdapterSendTurnResult> {
-    const args = buildClaudeArgs(input);
+    const sandboxRoot = resolveSandboxRoot(input);
+    const args = buildClaudeArgs(input, sandboxRoot);
     return runAdapterCommand({
       command: "claude",
       args,
@@ -239,15 +242,24 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
   };
 }
 
-function buildCodexArgs(input: AdapterSendTurnInput): string[] {
+function buildCodexArgs(input: AdapterSendTurnInput, sandboxRoot: string): string[] {
   const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
+  const globalSandboxArgs = [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-C",
+    sandboxRoot,
+  ];
+
   if (input.sessionId) {
     return [
+      ...globalSandboxArgs,
       "exec",
       "resume",
       "--json",
       "--skip-git-repo-check",
-      "--dangerously-bypass-approvals-and-sandbox",
       "--model",
       input.modelId,
       input.sessionId,
@@ -256,17 +268,17 @@ function buildCodexArgs(input: AdapterSendTurnInput): string[] {
   }
 
   return [
+    ...globalSandboxArgs,
     "exec",
     "--json",
     "--skip-git-repo-check",
-    "--dangerously-bypass-approvals-and-sandbox",
     "--model",
     input.modelId,
     prompt,
   ];
 }
 
-function buildClaudeArgs(input: AdapterSendTurnInput): string[] {
+function buildClaudeArgs(input: AdapterSendTurnInput, sandboxRoot: string): string[] {
   const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
   const args = [
     "-p",
@@ -277,6 +289,8 @@ function buildClaudeArgs(input: AdapterSendTurnInput): string[] {
     "--dangerously-skip-permissions",
     "--permission-mode",
     "bypassPermissions",
+    "--add-dir",
+    sandboxRoot,
     "--model",
     input.modelId,
   ];
@@ -287,6 +301,28 @@ function buildClaudeArgs(input: AdapterSendTurnInput): string[] {
 
   args.push(prompt);
   return args;
+}
+
+function resolveSandboxRoot(input: AdapterSendTurnInput): string {
+  const resolvedCwd = resolve(input.cwd);
+  if (input.mode !== "execute") {
+    return resolvedCwd;
+  }
+
+  const rawJobWorkspace = input.env?.SALMON_JOB_WORKSPACE;
+  const jobWorkspace = typeof rawJobWorkspace === "string" ? rawJobWorkspace.trim() : "";
+  if (!jobWorkspace) {
+    throw new Error("Execute mode requires SALMON_JOB_WORKSPACE.");
+  }
+
+  const resolvedJobWorkspace = resolve(jobWorkspace);
+  if (resolvedCwd !== resolvedJobWorkspace) {
+    throw new Error(
+      `Execute mode must run inside the active job worktree. cwd=${resolvedCwd}; job_workspace=${resolvedJobWorkspace}`,
+    );
+  }
+
+  return resolvedJobWorkspace;
 }
 
 function withReasoningEffort(
