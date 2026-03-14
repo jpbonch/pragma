@@ -629,7 +629,8 @@ WHERE id = $1
     await db.query(
       `
 UPDATE tasks
-SET status = 'failed'
+SET status = 'failed',
+    completed_at = CURRENT_TIMESTAMP
 WHERE id = $1
 `,
       [input.taskId],

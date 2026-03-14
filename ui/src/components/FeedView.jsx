@@ -293,6 +293,12 @@ export function FeedView({
       }
     }
 
+    done.sort((a, b) => {
+      const aTime = a.completed_at ? new Date(a.completed_at).getTime() : 0
+      const bTime = b.completed_at ? new Date(b.completed_at).getTime() : 0
+      return bTime - aTime
+    })
+
     return { needsYou, active, done }
   }, [tasks])
 

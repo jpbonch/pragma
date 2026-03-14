@@ -726,6 +726,7 @@ SELECT j.id,
        j.output_dir,
        j.session_id,
        j.created_at,
+       j.completed_at,
        (
          SELECT ct.id
          FROM conversation_threads ct
@@ -751,6 +752,7 @@ FROM tasks j
         output_dir: string | null;
         session_id: string | null;
         created_at: string;
+        completed_at: string | null;
         thread_id: string | null;
       }>(query, params);
 
@@ -1308,7 +1310,8 @@ LIMIT 1
           `
 UPDATE tasks
 SET status = 'queued',
-    merge_retry_count = 0
+    merge_retry_count = 0,
+    completed_at = NULL
 WHERE id = $1
 `,
           [taskId],
@@ -1376,7 +1379,8 @@ WHERE id = $1
           `
 UPDATE tasks
 SET status = $2,
-    output_dir = $3
+    output_dir = $3,
+    completed_at = CURRENT_TIMESTAMP
 WHERE id = $1
 `,
           [taskId, nextStatus, mergedOutputDir],
@@ -1498,7 +1502,8 @@ LIMIT 1
       await db.query(
         `
 UPDATE tasks
-SET status = 'cancelled'
+SET status = 'cancelled',
+    completed_at = CURRENT_TIMESTAMP
 WHERE id = $1
 `,
         [taskId],

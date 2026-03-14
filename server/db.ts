@@ -443,6 +443,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   test_commands_json TEXT,
   merge_retry_count INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMPTZ,
   FOREIGN KEY (assigned_to) REFERENCES agents(id)
 );
 `);
@@ -494,6 +495,11 @@ ADD COLUMN IF NOT EXISTS test_commands_json TEXT
   await db.exec(`
 ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS merge_retry_count INTEGER NOT NULL DEFAULT 0
+`);
+
+  await db.exec(`
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ
 `);
 
   await db.exec(`
