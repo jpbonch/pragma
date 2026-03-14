@@ -1666,6 +1666,9 @@ export default function App() {
           onEvent: ({ event, data }) => {
             setConversation((prev) => {
               if (event === 'thread_started') {
+                if (mode === 'chat') {
+                  void loadChats()
+                }
                 if (mode === 'plan') {
                   void loadPlans()
                 }
