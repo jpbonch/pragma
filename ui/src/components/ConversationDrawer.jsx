@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, X, Sparkles, User, Wrench, Info } from 'lucide-react'
+import { ArrowUp, X, Sparkles, User, Wrench, Info, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { OutputPanel } from './OutputPanel'
 import { fetchTaskTestCommands, runTaskTestCommand, updateTaskTestCommands } from '../api'
@@ -64,6 +64,7 @@ export function ConversationDrawer({
   runtimeServiceError = '',
   onStopRuntimeService,
   onServiceStarted,
+  onStop,
 }) {
   const bodyRef = useRef(null)
   const [prompt, setPrompt] = useState('')
@@ -366,14 +367,24 @@ export function ConversationDrawer({
                       }
                     }}
                   />
-                  <button
-                    className="conv-prompt-send"
-                    onClick={submitPrompt}
-                    disabled={loading || isCompletedTask || !prompt.trim()}
-                    aria-label="Send"
-                  >
-                    <ArrowUp size={15} strokeWidth={2.5} />
-                  </button>
+                  {loading ? (
+                    <button
+                      className="conv-prompt-send conv-prompt-send-stop"
+                      onClick={() => onStop?.()}
+                      aria-label="Stop"
+                    >
+                      <Square size={12} fill="#fff" strokeWidth={0} />
+                    </button>
+                  ) : (
+                    <button
+                      className="conv-prompt-send"
+                      onClick={submitPrompt}
+                      disabled={isCompletedTask || !prompt.trim()}
+                      aria-label="Send"
+                    >
+                      <ArrowUp size={15} strokeWidth={2.5} />
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="conv-output-side">
@@ -498,14 +509,24 @@ export function ConversationDrawer({
                   }
                 }}
               />
-              <button
-                className="conv-prompt-send"
-                onClick={submitPrompt}
-                disabled={loading || !prompt.trim()}
-                aria-label="Send"
-              >
-                <ArrowUp size={15} strokeWidth={2.5} />
-              </button>
+              {loading ? (
+                <button
+                  className="conv-prompt-send conv-prompt-send-stop"
+                  onClick={() => onStop?.()}
+                  aria-label="Stop"
+                >
+                  <Square size={12} fill="#fff" strokeWidth={0} />
+                </button>
+              ) : (
+                <button
+                  className="conv-prompt-send"
+                  onClick={submitPrompt}
+                  disabled={!prompt.trim()}
+                  aria-label="Send"
+                >
+                  <ArrowUp size={15} strokeWidth={2.5} />
+                </button>
+              )}
             </div>
           </div>
         )}

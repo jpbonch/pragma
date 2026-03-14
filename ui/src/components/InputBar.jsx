@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, ChevronDown, MessageSquare, Play, Plus, Route, Settings } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, MessageSquare, Play, Plus, Route, Settings, Square } from 'lucide-react'
 
 const MODES = [
   { id: 'plan', icon: Route, label: 'Plan', desc: 'Break work into steps' },
@@ -19,6 +19,8 @@ export function InputBar({
   onSubmit,
   onOpenOrchestratorConfig,
   disabled = false,
+  loading = false,
+  onStop,
   preferredMode = '',
   embedded = false,
   lockedMode = '',
@@ -225,15 +227,25 @@ export function InputBar({
             >
               <Settings size={16} strokeWidth={2.1} />
             </button>
-            <button
-              className="send-btn"
-              style={{ background: mode === 'chat' ? '#4B83D6' : '#2383e2' }}
-              onClick={() => submitInput()}
-              disabled={disabled || !input.trim()}
-              title="Send"
-            >
-              <ArrowUp size={18} strokeWidth={2.6} />
-            </button>
+            {loading ? (
+              <button
+                className="send-btn send-btn-stop"
+                onClick={() => onStop?.()}
+                title="Stop"
+              >
+                <Square size={14} fill="#fff" strokeWidth={0} />
+              </button>
+            ) : (
+              <button
+                className="send-btn"
+                style={{ background: mode === 'chat' ? '#4B83D6' : '#2383e2' }}
+                onClick={() => submitInput()}
+                disabled={disabled || !input.trim()}
+                title="Send"
+              >
+                <ArrowUp size={18} strokeWidth={2.6} />
+              </button>
+            )}
           </div>
         </div>
       </div>

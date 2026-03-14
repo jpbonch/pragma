@@ -1461,6 +1461,15 @@ export default function App() {
     }
   }
 
+  function handleStopStream() {
+    streamAbortRef.current?.abort()
+    streamAbortRef.current = null
+    setConversation((prev) => ({
+      ...prev,
+      loading: false,
+    }))
+  }
+
   function closeConversationDrawer() {
     streamAbortRef.current?.abort()
     streamAbortRef.current = null
@@ -2068,6 +2077,7 @@ export default function App() {
               onPickTaskRecipient={(taskId, recipientAgentId) => {
                 void handleSetTaskRecipient(taskId, recipientAgentId)
               }}
+              onCancelTask={(taskId) => handleDeleteTask(taskId)}
             />
             <ConversationDrawer
               open={conversation.open && (conversation.mode === 'chat' || conversation.mode === 'plan')}
@@ -2103,6 +2113,7 @@ export default function App() {
                 void handleExecuteFromPlan()
               }}
               executeDisabled={!conversation.threadId}
+              onStop={handleStopStream}
             />
             {!(conversation.open && (conversation.mode === 'chat' || conversation.mode === 'plan')) && (
               <InputBar
@@ -2112,6 +2123,8 @@ export default function App() {
                   agentsLoading ||
                   !activeWorkspaceName
                 }
+                loading={conversation.loading}
+                onStop={handleStopStream}
                 onOpenOrchestratorConfig={handleOpenOrchestratorConfig}
                 preferredMode={conversation.open ? conversation.mode : ''}
                 onSubmit={(payload) => {

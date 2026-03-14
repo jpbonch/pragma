@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Square } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
 function normalizeTaskTitle(title) {
@@ -178,9 +179,10 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
   )
 }
 
-function ActiveTaskRow({ task, onClick }) {
+function ActiveTaskRow({ task, onClick, onCancelTask }) {
   const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
+  const canStop = status === 'running' || status === 'orchestrating'
 
   return (
     <div className="task-row" onClick={() => onClick?.(task)}>
@@ -199,6 +201,19 @@ function ActiveTaskRow({ task, onClick }) {
           <span style={{ fontSize: 11, color: '#C4C3BF' }}>{task.assigned_to}</span>
         )}
         <span className="task-time">{getTimeAgo(task.created_at)}</span>
+        {canStop && onCancelTask && (
+          <button
+            className="task-row-stop"
+            onClick={(e) => {
+              e.stopPropagation()
+              onCancelTask(task.id)
+            }}
+            title="Cancel task"
+            aria-label="Cancel task"
+          >
+            <Square size={10} fill="currentColor" strokeWidth={0} />
+          </button>
+        )}
       </div>
     </div>
   )
@@ -230,6 +245,7 @@ export function FeedView({
   recipientAgents = [],
   onOpenTaskConversation,
   onPickTaskRecipient,
+  onCancelTask,
 }) {
   const [pickerTaskId, setPickerTaskId] = useState('')
 
@@ -298,6 +314,7 @@ export function FeedView({
                     key={task.id}
                     task={task}
                     onClick={onOpenTaskConversation}
+                    onCancelTask={onCancelTask}
                   />
                 ))}
               </div>
