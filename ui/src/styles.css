@@ -2192,19 +2192,97 @@ select { cursor: pointer; }
 }
 
 .diff-viewer {
-  border: 1px solid #ecebe8;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.diff-summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5f5d58;
+  padding: 6px 0 8px;
+}
+
+.diff-file {
+  border: 1px solid #d8d6d2;
   border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.diff-file-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  background: #f7f7f5;
+  border: none;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #37352f;
+  text-align: left;
+}
+
+.diff-file-header:hover {
+  background: #eeede9;
+}
+
+.diff-file-chevron {
+  display: flex;
+  align-items: center;
+  color: #9b9a97;
+  flex-shrink: 0;
+}
+
+.diff-file-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-file-stats {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.diff-stat-add {
+  color: #1a7f37;
+}
+
+.diff-stat-remove {
+  color: #cf222e;
+}
+
+.diff-file-body {
+  border-top: 1px solid #d8d6d2;
   background: #ffffff;
   font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
   line-height: 1.45;
-  overflow: auto;
-  max-height: 520px;
+  overflow-x: auto;
 }
 
 .diff-line {
-  padding: 0 8px;
+  padding: 0 10px;
   white-space: pre;
+}
+
+.diff-line.meta {
+  background: #f7f7f5;
+  color: #9b9a97;
+  font-size: 11px;
 }
 
 .diff-line.header {
@@ -2213,18 +2291,20 @@ select { cursor: pointer; }
 }
 
 .diff-line.hunk {
-  background: #f7f7f5;
-  color: #6f6e69;
+  background: #f0f3f6;
+  color: #656d76;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .diff-line.add {
-  background: #f0fbf2;
-  color: #205e32;
+  background: #dafbe1;
+  color: #1a4730;
 }
 
 .diff-line.remove {
-  background: #fff4f2;
-  color: #8b2f1f;
+  background: #ffebe9;
+  color: #82071e;
 }
 
 /* Legacy footer classes kept for compatibility */

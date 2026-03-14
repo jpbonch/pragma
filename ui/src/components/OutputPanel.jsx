@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FileCode2, FileImage, FileSpreadsheet, FileText, FileType2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileCode2, FileImage, FileSpreadsheet, FileText, FileType2 } from 'lucide-react'
 import Papa from 'papaparse'
 import ReactMarkdown from 'react-markdown'
 import {
@@ -63,32 +63,106 @@ function parseCsv(text) {
   return parsed.data.map((row) => (Array.isArray(row) ? row : [String(row)]))
 }
 
+function parseDiffIntoFiles(diff) {
+  if (!diff || !diff.trim()) return []
+
+  const lines = diff.split('\n')
+  const files = []
+  let current = null
+
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      const match = line.match(/^diff --git a\/.+ b\/(.+)$/)
+      current = {
+        path: match ? match[1] : 'unknown file',
+        additions: 0,
+        deletions: 0,
+        lines: [],
+      }
+      files.push(current)
+      current.lines.push(line)
+    } else if (current) {
+      current.lines.push(line)
+      if (line.startsWith('+') && !line.startsWith('+++')) {
+        current.additions++
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        current.deletions++
+      }
+    }
+  }
+
+  // Fallback: if the diff has content but no `diff --git` markers, treat as one file
+  if (files.length === 0 && diff.trim()) {
+    let additions = 0
+    let deletions = 0
+    for (const line of lines) {
+      if (line.startsWith('+') && !line.startsWith('+++')) additions++
+      else if (line.startsWith('-') && !line.startsWith('---')) deletions++
+    }
+    files.push({ path: 'changes', additions, deletions, lines })
+  }
+
+  return files
+}
+
+function FileDiff({ file, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div className="diff-file">
+      <button className="diff-file-header" onClick={() => setOpen((v) => !v)}>
+        <span className="diff-file-chevron">
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+        <span className="diff-file-path">{file.path}</span>
+        <span className="diff-file-stats">
+          {file.additions > 0 && <span className="diff-stat-add">+{file.additions}</span>}
+          {file.deletions > 0 && <span className="diff-stat-remove">-{file.deletions}</span>}
+        </span>
+      </button>
+      {open && (
+        <div className="diff-file-body">
+          {file.lines.map((line, index) => {
+            let className = 'diff-line'
+            if (line.startsWith('diff --git')) {
+              className += ' meta'
+            } else if (line.startsWith('+++') || line.startsWith('---')) {
+              className += ' header'
+            } else if (line.startsWith('@@')) {
+              className += ' hunk'
+            } else if (line.startsWith('+')) {
+              className += ' add'
+            } else if (line.startsWith('-')) {
+              className += ' remove'
+            }
+
+            return (
+              <div key={`line-${index}`} className={className}>
+                {line || ' '}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DiffViewer({ diff }) {
-  if (!diff || !diff.trim()) {
+  const files = useMemo(() => parseDiffIntoFiles(diff), [diff])
+
+  if (files.length === 0) {
     return <div className="muted">No changes detected.</div>
   }
 
-  const lines = diff.split('\n')
   return (
     <div className="diff-viewer">
-      {lines.map((line, index) => {
-        let className = 'diff-line'
-        if (line.startsWith('+++') || line.startsWith('---')) {
-          className += ' header'
-        } else if (line.startsWith('@@')) {
-          className += ' hunk'
-        } else if (line.startsWith('+')) {
-          className += ' add'
-        } else if (line.startsWith('-')) {
-          className += ' remove'
-        }
-
-        return (
-          <div key={`diff-${index}`} className={className}>
-            {line || ' '}
-          </div>
-        )
-      })}
+      <div className="diff-summary">
+        {files.length} {files.length === 1 ? 'file' : 'files'} changed
+      </div>
+      {files.map((file, index) => (
+        <FileDiff key={`${file.path}-${index}`} file={file} defaultOpen={files.length <= 5} />
+      ))}
     </div>
   )
 }
