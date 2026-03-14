@@ -148,7 +148,7 @@ export const planSummarySchema = z
 
 export const reviewTaskSchema = z
   .object({
-    action: z.enum(["approve", "reopen"]),
+    action: z.enum(["approve", "approve_and_push", "reopen"]),
   })
   .strict();
 

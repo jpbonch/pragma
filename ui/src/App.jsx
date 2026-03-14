@@ -2006,7 +2006,7 @@ export default function App() {
   }
 
   async function handleReviewTask(taskId, action) {
-    if (!taskId || (action !== 'approve' && action !== 'reopen')) {
+    if (!taskId || (action !== 'approve' && action !== 'approve_and_push' && action !== 'reopen')) {
       return
     }
 
@@ -2015,7 +2015,8 @@ export default function App() {
     const mergeState = reviewResult.merge_state
 
     await loadTasks()
-    if (action === 'approve' && mergeState === 'merged' && nextStatus === 'completed') {
+    const isApprove = action === 'approve' || action === 'approve_and_push'
+    if (isApprove && (mergeState === 'merged' || mergeState === 'merged_and_pushed') && nextStatus === 'completed') {
       closeConversationDrawer()
       return
     }

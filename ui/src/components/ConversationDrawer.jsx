@@ -458,6 +458,16 @@ export function ConversationDrawer({
                     {approveLoading ? 'Approving...' : 'Approve ✓'}
                   </button>
                 )}
+                {canApprove && (
+                  <button
+                    className="conv-approve-btn"
+                    onClick={() => { void submitReviewAction('approve_and_push') }}
+                    disabled={approveLoading}
+                    title="Approve and push to origin"
+                  >
+                    {approveLoading ? 'Approving...' : 'Approve & Push'}
+                  </button>
+                )}
                 {canReopenCompleted && (
                   <button
                     className="conv-reopen-btn"

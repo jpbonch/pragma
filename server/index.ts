@@ -1316,6 +1316,8 @@ LIMIT 1
         throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
+      const pushAfterMerge = body.action === "approve_and_push";
+
       if (body.action === "reopen") {
         if (task.status !== "completed") {
           throw new PragmaError(
@@ -1421,10 +1423,25 @@ WHERE id = $1
         );
         emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
         await deleteTaskWorktree({ workspacePaths, taskId });
+
+        if (pushAfterMerge) {
+          for (const repo of gitState.repos) {
+            const repoPath = repo.relative_path === "."
+              ? workspacePaths.workspaceDir
+              : join(workspacePaths.workspaceDir, repo.relative_path);
+            await runCommand({
+              command: "git",
+              args: ["push", "origin", repo.base_branch],
+              cwd: repoPath,
+              env: process.env,
+            });
+          }
+        }
+
         return c.json({
           ok: true,
           status: nextStatus,
-          merge_state: "merged",
+          merge_state: pushAfterMerge ? "merged_and_pushed" : "merged",
           conflicts: [],
         });
       }
