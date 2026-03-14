@@ -384,10 +384,6 @@ export function OutputPanel({
 
       {tab === 'changes' && (
         <div className="output-tab-body">
-          <div className="output-toolbar">
-            <div className="output-status">Status: {taskStatus}</div>
-          </div>
-
           {changesLoading && <div className="muted">Loading diff...</div>}
           {changesError && <div className="error">Error: {changesError}</div>}
           {!changesLoading && !changesError && <DiffViewer diff={changes} />}
@@ -396,9 +392,9 @@ export function OutputPanel({
 
       {tab === 'outputs' && (
         <div className="output-tab-body output-outputs-layout">
-          <div className="output-run-card">
-            {testCommandsLoading && <div className="muted">Loading test commands...</div>}
-            {!testCommandsLoading && testCommands.length > 0 && (
+          {testCommandsLoading && <div className="muted">Loading test commands...</div>}
+          {!testCommandsLoading && testCommands.length > 0 && (
+            <div className="output-run-card">
               <div className="output-run-list">
                 {testCommands.map((item, index) => {
                   const command = typeof item?.command === 'string' ? item.command : ''
@@ -490,9 +486,9 @@ export function OutputPanel({
                   )
                 })}
               </div>
-            )}
-            {testCommandsError && <div className="error">Error: {testCommandsError}</div>}
-          </div>
+            </div>
+          )}
+          {testCommandsError && <div className="error">Error: {testCommandsError}</div>}
 
           {runtimeService && runtimeService.task_id === taskId && (
             <div className="output-runtime-card">
@@ -521,92 +517,92 @@ export function OutputPanel({
 
           {filesLoading && <div className="muted">Loading files...</div>}
           {filesError && <div className="error">Error: {filesError}</div>}
-          {!filesLoading && !filesError && files.length === 0 && (
-            <div className="muted">No output files found.</div>
-          )}
 
           {!filesLoading && !filesError && files.length > 0 && (
-            <div className="output-file-grid">
-              {files.map((file) => {
-                const Icon = outputIcon(file.path)
-                return (
-                  <button
-                    key={file.path}
-                    className={`output-file-tile ${selectedPath === file.path ? 'active' : ''}`}
-                    onClick={() => setSelectedPath(file.path)}
-                    title={file.path}
-                  >
-                    <span className="output-file-tile-icon">
-                      <Icon size={24} strokeWidth={1.9} />
-                    </span>
-                    <span className="output-file-tile-name">{fileName(file.path)}</span>
-                    <span className="output-file-tile-size">{formatBytes(file.size)}</span>
-                  </button>
-                )
-              })}
-            </div>
+            <>
+              <div className="output-file-grid">
+                {files.map((file) => {
+                  const Icon = outputIcon(file.path)
+                  return (
+                    <button
+                      key={file.path}
+                      className={`output-file-tile ${selectedPath === file.path ? 'active' : ''}`}
+                      onClick={() => setSelectedPath(file.path)}
+                      title={file.path}
+                    >
+                      <span className="output-file-tile-icon">
+                        <Icon size={24} strokeWidth={1.9} />
+                      </span>
+                      <span className="output-file-tile-name">{fileName(file.path)}</span>
+                      <span className="output-file-tile-size">{formatBytes(file.size)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {selectedFile && (
+                <div className="output-preview-card">
+                  <div className="output-preview-header">
+                    <div className="output-preview-path">{selectedFile.path}</div>
+                    <div className="output-preview-actions">
+                      <a className="output-download-btn" href={outputDownloadUrl}>
+                        Save to Downloads
+                      </a>
+                    </div>
+                  </div>
+
+                  {previewLoading && <div className="muted">Loading preview...</div>}
+                  {previewError && <div className="error">Error: {previewError}</div>}
+
+                  {!previewLoading && !previewError && selectedKind === 'markdown' && (
+                    <div className="output-markdown-preview">
+                      <ReactMarkdown>{previewText}</ReactMarkdown>
+                    </div>
+                  )}
+
+                  {!previewLoading && !previewError && selectedKind === 'html' && (
+                    <iframe className="output-html-preview" src={outputContentUrl} title={selectedFile.path} />
+                  )}
+
+                  {!previewLoading && !previewError && selectedKind === 'image' && (
+                    <div className="output-image-wrap">
+                      <img src={outputContentUrl} alt={selectedFile.path} className="output-image-preview" />
+                    </div>
+                  )}
+
+                  {!previewLoading && !previewError && selectedKind === 'csv' && (
+                    <div className="output-csv-wrap">
+                      <table className="output-csv-table">
+                        <tbody>
+                          {parseCsv(previewText).map((row, rowIndex) => (
+                            <tr key={`row-${rowIndex}`}>
+                              {row.map((cell, cellIndex) => (
+                                <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {!previewLoading && !previewError && selectedKind === 'download' && (
+                    <div className="output-fallback-preview">
+                      <div className="muted">Preview is not supported for this file type.</div>
+                      <a className="output-download-btn" href={outputDownloadUrl}>
+                        Save to Downloads
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
 
-          <div className="output-preview-section">
-            {!selectedFile && <div className="muted">Select a file to preview.</div>}
-
-            {selectedFile && (
-              <div className="output-preview-card">
-                <div className="output-preview-header">
-                  <div className="output-preview-path">{selectedFile.path}</div>
-                  <div className="output-preview-actions">
-                    <a className="output-download-btn" href={outputDownloadUrl}>
-                      Save to Downloads
-                    </a>
-                  </div>
-                </div>
-
-                {previewLoading && <div className="muted">Loading preview...</div>}
-                {previewError && <div className="error">Error: {previewError}</div>}
-
-                {!previewLoading && !previewError && selectedKind === 'markdown' && (
-                  <div className="output-markdown-preview">
-                    <ReactMarkdown>{previewText}</ReactMarkdown>
-                  </div>
-                )}
-
-                {!previewLoading && !previewError && selectedKind === 'html' && (
-                  <iframe className="output-html-preview" src={outputContentUrl} title={selectedFile.path} />
-                )}
-
-                {!previewLoading && !previewError && selectedKind === 'image' && (
-                  <div className="output-image-wrap">
-                    <img src={outputContentUrl} alt={selectedFile.path} className="output-image-preview" />
-                  </div>
-                )}
-
-                {!previewLoading && !previewError && selectedKind === 'csv' && (
-                  <div className="output-csv-wrap">
-                    <table className="output-csv-table">
-                      <tbody>
-                        {parseCsv(previewText).map((row, rowIndex) => (
-                          <tr key={`row-${rowIndex}`}>
-                            {row.map((cell, cellIndex) => (
-                              <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {!previewLoading && !previewError && selectedKind === 'download' && (
-                  <div className="output-fallback-preview">
-                    <div className="muted">Preview is not supported for this file type.</div>
-                    <a className="output-download-btn" href={outputDownloadUrl}>
-                      Save to Downloads
-                    </a>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {!testCommandsLoading && testCommands.length === 0 && !filesLoading && files.length === 0 &&
+            !(runtimeService && runtimeService.task_id === taskId) && (
+            <div className="muted">No outputs yet.</div>
+          )}
         </div>
       )}
     </div>
