@@ -2112,6 +2112,7 @@ export default function App() {
         workspacesLoading={workspacesLoading}
         chats={visibleSidebarChats}
         chatsLoading={sidebarChatsLoading}
+        activeChatId={conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''}
         services={visibleRuntimeServices}
         activeServiceId={selectedServiceId}
         onOpenChat={(threadId) => {

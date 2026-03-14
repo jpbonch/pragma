@@ -32,6 +32,7 @@ export function Sidebar({
   workspacesLoading,
   chats = [],
   chatsLoading = false,
+  activeChatId = '',
   onOpenChat,
   onHideChat,
   services = [],
@@ -191,7 +192,7 @@ export function Sidebar({
             chats.map((chat) => (
               <div key={chat.id} className="sidebar-chat-row">
                 <button
-                  className="sidebar-chat-item"
+                  className={`sidebar-chat-item ${activeChatId === chat.id ? 'active' : ''}`}
                   onClick={() => onOpenChat?.(chat.id)}
                   title={chat.chat_title || 'New chat'}
                 >

@@ -367,6 +367,14 @@ select { cursor: pointer; }
   background: rgba(0, 0, 0, 0.04);
 }
 
+.sidebar-chat-item.active {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.sidebar-chat-item.active .sidebar-chat-item-title {
+  color: #37352F;
+}
+
 .sidebar-chat-item-title {
   font-size: 13px;
   font-weight: 500;
