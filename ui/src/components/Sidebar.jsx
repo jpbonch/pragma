@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 
 const ITEMS = [
-  { id: 'feed', icon: Zap, label: 'Feed' },
+  { id: 'feed', icon: Zap, label: 'Tasks' },
   { id: 'code', icon: Code2, label: 'Code' },
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'context', icon: BookOpen, label: 'Context' },

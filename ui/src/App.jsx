@@ -2041,7 +2041,7 @@ export default function App() {
         {activeTab === 'feed' && (
           <div className="feed-page">
             <div className="main-topbar">
-              <h1>Feed</h1>
+              <h1>Tasks</h1>
             </div>
             <FeedView
               jobs={jobs}
