@@ -64,6 +64,11 @@ function isWaitingForHumanResponse(status) {
   return status === 'waiting_for_question_response' || status === 'waiting_for_help_response'
 }
 
+function isTaskActivelyRunning(status) {
+  const normalized = typeof status === 'string' ? status.trim().toLowerCase() : ''
+  return normalized === 'running' || normalized === 'orchestrating' || normalized === 'queued'
+}
+
 function errorText(error) {
   return error instanceof Error ? error.message : String(error)
 }
@@ -851,9 +856,11 @@ export default function App() {
             if (prev.taskId !== taskId || prev.taskStatus === status) {
               return prev
             }
+            const nextLoading = isTaskActivelyRunning(status)
             return {
               ...prev,
               taskStatus: status,
+              loading: nextLoading,
             }
           })
         }
@@ -983,6 +990,7 @@ export default function App() {
       const updates = {}
       if (nextStatus && prev.taskStatus !== nextStatus) {
         updates.taskStatus = nextStatus
+        updates.loading = isTaskActivelyRunning(nextStatus)
       }
       if (!prev.threadId && nextThreadId) {
         updates.threadId = nextThreadId
@@ -1673,7 +1681,7 @@ export default function App() {
       }
       setConversation((prev) => ({
         ...prev,
-        loading: false,
+        loading: prev.taskId ? isTaskActivelyRunning(prev.taskStatus) : false,
       }))
       if (mode === 'chat') {
         await loadChats()
@@ -1845,7 +1853,7 @@ export default function App() {
             content: `Opened output review for ${title}.`,
           },
         ],
-        loading: false,
+        loading: isTaskActivelyRunning(status),
         error: '',
       })
       setActiveTab('feed')
@@ -1878,7 +1886,7 @@ export default function App() {
               content: `Opened output review for ${title}. Conversation history is unavailable.`,
             },
           ],
-          loading: false,
+          loading: isTaskActivelyRunning(status),
           error: '',
         })
         setActiveTab('feed')
@@ -1900,7 +1908,7 @@ export default function App() {
         reasoningEffort: 'medium',
         recipientAgentId: '',
         entries,
-        loading: false,
+        loading: isTaskActivelyRunning(status),
         error: '',
       })
 
