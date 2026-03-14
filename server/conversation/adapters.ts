@@ -302,7 +302,7 @@ function buildClaudeArgs(input: AdapterSendTurnInput, sandboxRoot: string): stri
   ];
 
   if (input.mode === "chat") {
-    args.push("--disallowedTools", ...CHAT_DISALLOWED_TOOLS);
+    args.push("--disallowedTools", CHAT_DISALLOWED_TOOLS.join(","));
   }
 
   if (input.sessionId) {
