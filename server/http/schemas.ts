@@ -6,6 +6,13 @@ const reasoningEffortSchema = z.enum(["low", "medium", "high", "extra_high"]);
 const jobStatusSchema = z.enum(JOB_STATUS_VALUES);
 
 const nonEmptyString = z.string().trim().min(1);
+const testCommandItemSchema = z
+  .object({
+    label: nonEmptyString,
+    command: nonEmptyString,
+    cwd: nonEmptyString,
+  })
+  .strict();
 
 const positiveIntegerString = z
   .string()
@@ -112,19 +119,16 @@ export const agentRequestHelpSchema = z
 
 export const agentSubmitTestCommandsSchema = z
   .object({
-    commands: z
-      .array(
-        z
-          .object({
-            label: nonEmptyString,
-            command: nonEmptyString,
-            cwd: nonEmptyString,
-          })
-          .strict(),
-      )
-      .min(1),
+    commands: z.array(testCommandItemSchema).min(1),
     turn_id: nonEmptyString.optional(),
     agent_id: nonEmptyString.optional(),
+    replace: z.boolean().optional(),
+  })
+  .strict();
+
+export const updateJobTestCommandsSchema = z
+  .object({
+    commands: z.array(testCommandItemSchema).min(1),
   })
   .strict();
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, X, Sparkles, User, Wrench, Info } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { OutputPanel } from './OutputPanel'
-import { fetchJobTestCommands, runJobTestCommand } from '../api'
+import { fetchJobTestCommands, runJobTestCommand, updateJobTestCommands } from '../api'
 
 const HEADER_STATUS_LABELS = {
   pending_review: 'Review',
@@ -188,6 +188,50 @@ export function ConversationDrawer({
     }
   }
 
+  async function handleUpdateTestCommand(index, nextCommand) {
+    if (!jobId || !Number.isInteger(index) || index < 0) {
+      return
+    }
+    const trimmed = typeof nextCommand === 'string' ? nextCommand.trim() : ''
+    if (!trimmed) {
+      return
+    }
+
+    const existing = Array.isArray(testCommands) ? testCommands[index] : null
+    if (!existing || typeof existing !== 'object') {
+      return
+    }
+    const currentCommand = typeof existing.command === 'string' ? existing.command : ''
+    if (currentCommand === trimmed) {
+      return
+    }
+
+    const nextCommands = testCommands
+      .map((item, itemIndex) => {
+        const command =
+          itemIndex === index
+            ? trimmed
+            : (typeof item?.command === 'string' ? item.command.trim() : '')
+        const cwd = typeof item?.cwd === 'string' ? item.cwd.trim() : ''
+        const label = typeof item?.label === 'string' ? item.label.trim() : command
+        return { label, command, cwd }
+      })
+      .filter((item) => item.command && item.cwd)
+
+    if (nextCommands.length === 0) {
+      return
+    }
+
+    setTestCommandsError('')
+    try {
+      const data = await updateJobTestCommands(jobId, nextCommands)
+      const updated = Array.isArray(data?.commands) ? data.commands : nextCommands
+      setTestCommands(updated)
+    } catch (error) {
+      setTestCommandsError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   if (!open) {
     return null
   }
@@ -322,6 +366,7 @@ export function ConversationDrawer({
                   testCommandsError={testCommandsError}
                   runningTestCommand={runningTestCommand}
                   onRunTestCommand={handleRunTestCommand}
+                  onUpdateTestCommand={handleUpdateTestCommand}
                   runtimeService={runtimeService}
                   runtimeServiceLogs={runtimeServiceLogs}
                   runtimeServiceError={runtimeServiceError}

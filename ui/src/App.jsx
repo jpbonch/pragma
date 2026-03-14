@@ -1112,7 +1112,11 @@ export default function App() {
         setSelectedServiceId('')
         return
       }
-      setWorkspaceError((prev) => prev || errorText(error))
+      if (error instanceof ApiError && error.code === 'REQUEST_TIMEOUT') {
+        // Background polling can occasionally stall; skip noisy global errors and retry on next tick.
+        return
+      }
+      // Keep prior services list; avoid blocking the app on transient background polling failures.
     }
   }
 
@@ -1197,6 +1201,9 @@ export default function App() {
         setSidebarPlans([])
         return
       }
+      if (error instanceof ApiError && error.code === 'REQUEST_TIMEOUT') {
+        return
+      }
       // Keep existing list if fetch fails and surface in workspace error area.
       setWorkspaceError((prev) => prev || errorText(error))
     } finally {
@@ -1228,6 +1235,9 @@ export default function App() {
     } catch (error) {
       if (error instanceof ApiError && error.code === 'NO_ACTIVE_WORKSPACE') {
         setSidebarChats([])
+        return
+      }
+      if (error instanceof ApiError && error.code === 'REQUEST_TIMEOUT') {
         return
       }
       // Keep existing list if fetch fails and surface in workspace error area.

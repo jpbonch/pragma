@@ -47,7 +47,7 @@ export class ApiError extends Error {
   }
 }
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 10000
+const DEFAULT_REQUEST_TIMEOUT_MS = 30000
 const REVIEW_REQUEST_TIMEOUT_MS = 120000
 const CONVERSATION_REQUEST_TIMEOUT_MS = 30000
 const JOB_RESPONSE_REQUEST_TIMEOUT_MS = 30000
@@ -276,6 +276,14 @@ export async function openJobOutputFolder(jobId, path = '') {
 
 export async function fetchJobTestCommands(jobId) {
   return fetchJson(`/jobs/${encodeURIComponent(jobId)}/test-commands`)
+}
+
+export async function updateJobTestCommands(jobId, commands) {
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/test-commands`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ commands }),
+  }, 60 * 1000)
 }
 
 export async function runJobTestCommand(jobId, command, cwd) {

@@ -80,6 +80,7 @@ import {
   planSummarySchema,
   reviewJobSchema,
   runJobTestCommandSchema,
+  updateJobTestCommandsSchema,
   setActiveWorkspaceSchema,
   setJobRecipientSchema,
   updateAgentSchema,
@@ -1132,6 +1133,58 @@ LIMIT 1
     }
   });
 
+  app.put(
+    "/jobs/:jobId/test-commands",
+    validateJson(updateJobTestCommandsSchema),
+    async (c) => {
+      const workspaceName = await requireActiveWorkspaceName();
+      const jobId = c.req.param("jobId");
+      const body = c.req.valid("json");
+      const db = await openDatabase(workspaceName);
+
+      try {
+        const jobResult = await db.query<{ id: string }>(
+          `
+SELECT id
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+          [jobId],
+        );
+        const job = jobResult.rows[0];
+        if (!job) {
+          throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+        }
+
+        const normalizedCommands = normalizeJobTestCommands(body.commands);
+        if (normalizedCommands.length === 0) {
+          throw new SalmonError(
+            "INVALID_TEST_COMMANDS",
+            400,
+            "No valid test commands were provided.",
+          );
+        }
+
+        await db.query(
+          `
+UPDATE jobs
+SET test_commands_json = $2
+WHERE id = $1
+`,
+          [jobId, JSON.stringify(normalizedCommands)],
+        );
+
+        return c.json({
+          ok: true,
+          commands: normalizedCommands,
+        });
+      } finally {
+        await db.close();
+      }
+    },
+  );
+
   app.post("/jobs/:jobId/test-commands/run", validateJson(runJobTestCommandSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const jobId = c.req.param("jobId");
@@ -1705,9 +1758,14 @@ WHERE id = $1
       const db = await openDatabase(workspaceName);
       try {
         await ensureConversationSchema(db);
-        const jobResult = await db.query<{ id: string; status: JobStatus; assigned_to: string | null }>(
+        const jobResult = await db.query<{
+          id: string;
+          status: JobStatus;
+          assigned_to: string | null;
+          test_commands_json: string | null;
+        }>(
           `
-SELECT id, status, assigned_to
+SELECT id, status, assigned_to, test_commands_json
 FROM jobs
 WHERE id = $1
 LIMIT 1
@@ -1727,13 +1785,40 @@ LIMIT 1
         }
 
         const normalizedCommands = normalizeJobTestCommands(body.commands);
+        if (normalizedCommands.length === 0) {
+          throw new SalmonError(
+            "INVALID_TEST_COMMANDS",
+            400,
+            "No valid test commands were provided.",
+          );
+        }
+
+        const disallowed = normalizedCommands.find((entry) =>
+          isDisallowedHumanOnlyTestCommand(entry.command),
+        );
+        if (disallowed) {
+          throw new SalmonError(
+            "INVALID_TEST_COMMAND_POLICY",
+            400,
+            `Disallowed command for task window: ${disallowed.command}`,
+          );
+        }
+
+        const existingCommands = parseJobTestCommands(job.test_commands_json);
+        const combinedCommands = body.replace
+          ? normalizedCommands
+          : normalizeJobTestCommands(
+              [...existingCommands, ...normalizedCommands],
+              Number.MAX_SAFE_INTEGER,
+            ).slice(-8);
+
         await db.query(
           `
 UPDATE jobs
 SET test_commands_json = $2
 WHERE id = $1
 `,
-          [jobId, JSON.stringify(normalizedCommands)],
+          [jobId, JSON.stringify(combinedCommands)],
         );
 
         const thread = await getThreadByJobId(db, jobId);
@@ -1745,7 +1830,8 @@ WHERE id = $1
             turnId: body.turn_id || latestExecuteTurn?.id || null,
             eventName: "worker_test_commands_submitted",
             payload: {
-              commands: normalizedCommands,
+              commands: combinedCommands,
+              replace: Boolean(body.replace),
               agent_id: body.agent_id ?? job.assigned_to ?? null,
             },
           });
@@ -1754,7 +1840,7 @@ WHERE id = $1
 
         return c.json({
           ok: true,
-          commands: normalizedCommands,
+          commands: combinedCommands,
         });
       } finally {
         await db.close();
@@ -3602,7 +3688,7 @@ function parseJobTestCommands(value: string | null | undefined): JobTestCommand[
   }
 }
 
-function normalizeJobTestCommands(input: unknown): JobTestCommand[] {
+function normalizeJobTestCommands(input: unknown, limit = 8): JobTestCommand[] {
   if (!Array.isArray(input)) {
     return [];
   }
@@ -3633,12 +3719,42 @@ function normalizeJobTestCommands(input: unknown): JobTestCommand[] {
       command,
       cwd,
     });
-    if (commands.length >= 8) {
+    if (commands.length >= limit) {
       break;
     }
   }
 
   return commands;
+}
+
+function isDisallowedHumanOnlyTestCommand(command: string): boolean {
+  const normalized = command.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+
+  const disallowedPatterns: RegExp[] = [
+    /\blint\b/,
+    /\beslint\b/,
+    /\bprettier\b/,
+    /\bformat\b/,
+    /\bfmt\b/,
+    /\btypecheck\b/,
+    /\btsc\b/,
+    /\bbuild\b/,
+    /\bcompile\b/,
+    /\btest\b/,
+    /\bjest\b/,
+    /\bvitest\b/,
+    /\bmocha\b/,
+    /\bava\b/,
+    /\bpytest\b/,
+    /\brspec\b/,
+    /\bcargo\s+test\b/,
+    /\bgo\s+test\b/,
+  ];
+
+  return disallowedPatterns.some((pattern) => pattern.test(normalized));
 }
 
 async function resolveJobExecutionRoot(

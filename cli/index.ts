@@ -268,7 +268,7 @@ jobCommand
 
 jobCommand
   .command("submit-test-commands")
-  .description("Submit runnable test commands for the current job")
+  .description("Submit runnable test commands for the current job (appends by default)")
   .requiredOption(
     "--command <text>",
     "Test command (repeat for multiple commands)",
@@ -289,6 +289,7 @@ jobCommand
   )
   .option("--job-id <id>", "Job id")
   .option("--turn-id <id>", "Turn id")
+  .option("--replace", "Replace existing commands instead of appending")
   .option("--api-url <url>", "Salmon API base URL")
   .action(
     async (options: {
@@ -297,6 +298,7 @@ jobCommand
       name: string[];
       jobId?: string;
       turnId?: string;
+      replace?: boolean;
       apiUrl?: string;
     }) => {
       const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
@@ -327,6 +329,7 @@ jobCommand
             commands,
             turn_id: turnId,
             agent_id: normalizeOptionalString(process.env.SALMON_AGENT_ID),
+            replace: Boolean(options.replace),
           }),
         },
       );

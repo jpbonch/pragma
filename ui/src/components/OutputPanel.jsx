@@ -110,6 +110,7 @@ export function OutputPanel({
   testCommandsError = '',
   runningTestCommand = '',
   onRunTestCommand,
+  onUpdateTestCommand,
   runtimeService = null,
   runtimeServiceLogs = [],
   runtimeServiceError = '',
@@ -117,6 +118,9 @@ export function OutputPanel({
 }) {
   const [tab, setTab] = useState('outputs')
   const runtimeLogRef = useRef(null)
+  const [commandDrafts, setCommandDrafts] = useState({})
+  const [savingCommandIndex, setSavingCommandIndex] = useState(-1)
+  const [editingCommandIndex, setEditingCommandIndex] = useState(-1)
 
   const [changes, setChanges] = useState('')
   const [changesLoading, setChangesLoading] = useState(false)
@@ -251,6 +255,42 @@ export function OutputPanel({
     runtimeLogRef.current.scrollTop = runtimeLogRef.current.scrollHeight
   }, [runtimeLogText])
 
+  useEffect(() => {
+    const next = {}
+    testCommands.forEach((item, index) => {
+      next[index] = typeof item?.command === 'string' ? item.command : ''
+    })
+    setCommandDrafts(next)
+  }, [testCommands])
+
+  function commandDraft(index, fallback) {
+    const value = commandDrafts[index]
+    if (typeof value === 'string') {
+      return value
+    }
+    return fallback
+  }
+
+  async function commitCommandEdit(index, fallbackCommand) {
+    const current = typeof fallbackCommand === 'string' ? fallbackCommand.trim() : ''
+    const nextValue = commandDraft(index, fallbackCommand).trim()
+    if (!nextValue || nextValue === current) {
+      setCommandDrafts((prev) => ({
+        ...prev,
+        [index]: current,
+      }))
+      return
+    }
+
+    setSavingCommandIndex(index)
+    try {
+      await onUpdateTestCommand?.(index, nextValue)
+      setEditingCommandIndex((current) => (current === index ? -1 : current))
+    } finally {
+      setSavingCommandIndex(-1)
+    }
+  }
+
   return (
     <div className="output-panel">
       <div className="output-tabs">
@@ -297,15 +337,82 @@ export function OutputPanel({
                     return null
                   }
                   return (
-                    <button
-                      key={`${runKey}-${index}`}
-                      className="output-run-btn"
-                      title={`${command}\nCWD: ${cwd}`}
-                      onClick={() => { void onRunTestCommand?.(item) }}
-                      disabled={Boolean(runningTestCommand)}
-                    >
-                      {runningTestCommand === runKey ? `Running: ${label}...` : `Run: ${label}`}
-                    </button>
+                    <div key={`${runKey}-${index}`} className="output-run-item">
+                      <button
+                        className="output-run-btn"
+                        title={`${command}\nCWD: ${cwd}`}
+                        onClick={() => {
+                          void onRunTestCommand?.({
+                            ...item,
+                            command,
+                          })
+                        }}
+                        disabled={
+                          Boolean(runningTestCommand) ||
+                          savingCommandIndex === index ||
+                          editingCommandIndex === index
+                        }
+                      >
+                        {runningTestCommand === runKey ? `Running: ${label}...` : `Run: ${label}`}
+                      </button>
+                      {editingCommandIndex === index ? (
+                        <>
+                          <input
+                            className="output-run-command-input"
+                            value={commandDraft(index, command)}
+                            title={`${command}\nCWD: ${cwd}`}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setCommandDrafts((prev) => ({
+                                ...prev,
+                                [index]: value,
+                              }))
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Escape') {
+                                event.preventDefault()
+                                setCommandDrafts((prev) => ({
+                                  ...prev,
+                                  [index]: command,
+                                }))
+                                setEditingCommandIndex(-1)
+                              }
+                            }}
+                            disabled={Boolean(runningTestCommand) || savingCommandIndex === index}
+                          />
+                          <button
+                            className="output-run-save-btn"
+                            onClick={() => {
+                              void commitCommandEdit(index, command)
+                            }}
+                            disabled={Boolean(runningTestCommand) || savingCommandIndex === index}
+                            title="Save command"
+                          >
+                            ✓
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="output-run-command" title={`${command}\nCWD: ${cwd}`}>
+                            {command}
+                          </span>
+                          <button
+                            className="output-run-edit-btn"
+                            onClick={() => {
+                              setCommandDrafts((prev) => ({
+                                ...prev,
+                                [index]: command,
+                              }))
+                              setEditingCommandIndex(index)
+                            }}
+                            disabled={Boolean(runningTestCommand) || savingCommandIndex === index}
+                            title="Edit command"
+                          >
+                            Edit
+                          </button>
+                        </>
+                      )}
+                    </div>
                   )
                 })}
               </div>

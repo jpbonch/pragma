@@ -1700,8 +1700,15 @@ select { cursor: pointer; }
 
 .output-run-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
+}
+
+.output-run-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .output-run-btn {
@@ -1721,6 +1728,61 @@ select { cursor: pointer; }
 }
 
 .output-run-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.output-run-command,
+.output-run-command-input {
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: #6f6d68;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.output-run-command-input {
+  border: 1px solid #d9d8d2;
+  background: #fff;
+  border-radius: 7px;
+  padding: 6px 8px;
+}
+
+.output-run-command-input:focus {
+  outline: none;
+  border-color: #2383e2;
+  box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.12);
+}
+
+.output-run-command-input:disabled {
+  background: #f5f4f1;
+  color: #8d8b87;
+}
+
+.output-run-edit-btn,
+.output-run-save-btn {
+  border: 1px solid #d9d8d2;
+  background: #fff;
+  color: #5f5d58;
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.output-run-edit-btn:hover,
+.output-run-save-btn:hover {
+  background: #f3f2ef;
+}
+
+.output-run-edit-btn:disabled,
+.output-run-save-btn:disabled {
   opacity: 0.6;
   cursor: default;
 }
