@@ -1606,7 +1606,7 @@ export default function App() {
     }
 
     setConversation({
-      open: true,
+      open: mode !== 'plan',
       mode,
       threadId: nextThreadId || '',
       taskId: '',
@@ -1639,10 +1639,6 @@ export default function App() {
           signal: controller.signal,
           onEvent: ({ event, data }) => {
             setConversation((prev) => {
-              if (!prev.open) {
-                return prev
-              }
-
               if (event === 'thread_started') {
                 if (mode === 'plan') {
                   void loadPlans()
