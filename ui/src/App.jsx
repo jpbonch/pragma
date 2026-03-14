@@ -2054,9 +2054,6 @@ export default function App() {
               onPickJobRecipient={(jobId, recipientAgentId) => {
                 void handleSetJobRecipient(jobId, recipientAgentId)
               }}
-              onDeleteJob={(jobId) => {
-                void handleDeleteJob(jobId)
-              }}
             />
             <ConversationDrawer
               open={conversation.open && (conversation.mode === 'chat' || conversation.mode === 'plan')}
@@ -2069,6 +2066,7 @@ export default function App() {
               headerAgentName={conversationHeaderAgent.name}
               headerAgentEmoji={conversationHeaderAgent.emoji}
               onReviewAction={(jobId, action) => handleReviewJob(jobId, action)}
+              onDeleteJob={(jobId) => handleDeleteJob(jobId)}
               runtimeService={conversationRuntimeService}
               runtimeServiceLogs={conversationRuntimeService ? selectedRuntimeServiceLogs : []}
               runtimeServiceError={

@@ -57,6 +57,7 @@ export function ConversationDrawer({
   headerAgentName = '',
   headerAgentEmoji = '',
   onReviewAction,
+  onDeleteJob,
   runtimeService = null,
   runtimeServiceLogs = [],
   runtimeServiceError = '',
@@ -71,6 +72,8 @@ export function ConversationDrawer({
   const [testCommandsLoading, setTestCommandsLoading] = useState(false)
   const [testCommandsError, setTestCommandsError] = useState('')
   const [runningTestCommand, setRunningTestCommand] = useState('')
+  const [deleteConfirming, setDeleteConfirming] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const showOutputPanel = Boolean(jobId) && mode === 'chat'
   const canApprove = showOutputPanel && jobStatus === 'pending_review'
   const canReopenCompleted = showOutputPanel && jobStatus === 'completed'
@@ -102,6 +105,8 @@ export function ConversationDrawer({
       setTestCommandsLoading(false)
       setTestCommandsError('')
       setRunningTestCommand('')
+      setDeleteConfirming(false)
+      setDeleteLoading(false)
     }
   }, [open])
 
@@ -163,6 +168,19 @@ export function ConversationDrawer({
       setApproveError(error instanceof Error ? error.message : String(error))
     } finally {
       setApproveLoading(false)
+    }
+  }
+
+  async function handleDeleteJob() {
+    if (!jobId || !onDeleteJob || deleteLoading) {
+      return
+    }
+    setDeleteLoading(true)
+    try {
+      await onDeleteJob(jobId)
+    } catch {
+      setDeleteLoading(false)
+      setDeleteConfirming(false)
     }
   }
 
@@ -388,27 +406,56 @@ export function ConversationDrawer({
         {showOutputPanel ? (
           <div className="conv-footer">
             {approveError && <div className="error" style={{ padding: '0 4px 4px' }}>Error: {approveError}</div>}
-            <div className="conv-footer-row conv-footer-end">
-              {canApprove && (
-                <button
-                  className="conv-approve-btn"
-                  onClick={() => { void submitReviewAction('approve') }}
-                  disabled={approveLoading}
-                  title="Approve"
-                >
-                  {approveLoading ? 'Approving...' : 'Approve ✓'}
-                </button>
-              )}
-              {canReopenCompleted && (
-                <button
-                  className="conv-reopen-btn"
-                  onClick={() => { void submitReviewAction('reopen') }}
-                  disabled={approveLoading}
-                  title="Mark task as not completed"
-                >
-                  {approveLoading ? 'Reopening...' : 'Mark Not Completed'}
-                </button>
-              )}
+            <div className="conv-footer-row">
+              <div>
+                {deleteConfirming ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      className="conv-delete-btn"
+                      onClick={() => { void handleDeleteJob() }}
+                      disabled={deleteLoading}
+                    >
+                      {deleteLoading ? 'Deleting...' : 'Confirm Delete'}
+                    </button>
+                    <button
+                      className="conv-delete-cancel-btn"
+                      onClick={() => setDeleteConfirming(false)}
+                      disabled={deleteLoading}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="conv-delete-btn"
+                    onClick={() => setDeleteConfirming(true)}
+                  >
+                    Delete Job
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {canApprove && (
+                  <button
+                    className="conv-approve-btn"
+                    onClick={() => { void submitReviewAction('approve') }}
+                    disabled={approveLoading}
+                    title="Approve"
+                  >
+                    {approveLoading ? 'Approving...' : 'Approve ✓'}
+                  </button>
+                )}
+                {canReopenCompleted && (
+                  <button
+                    className="conv-reopen-btn"
+                    onClick={() => { void submitReviewAction('reopen') }}
+                    disabled={approveLoading}
+                    title="Mark task as not completed"
+                  >
+                    {approveLoading ? 'Reopening...' : 'Mark Not Completed'}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ) : (

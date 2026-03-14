@@ -100,50 +100,7 @@ function SectionLabel({ children, count, badge }) {
   )
 }
 
-function DeleteButton({ jobId, onDelete }) {
-  const [confirming, setConfirming] = useState(false)
-
-  if (confirming) {
-    return (
-      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-        <button
-          className="job-delete-btn job-delete-confirm"
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete?.(jobId)
-            setConfirming(false)
-          }}
-        >
-          Delete
-        </button>
-        <button
-          className="job-delete-btn job-delete-cancel"
-          onClick={(e) => {
-            e.stopPropagation()
-            setConfirming(false)
-          }}
-        >
-          Cancel
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <button
-      className="job-delete-btn"
-      title="Delete job"
-      onClick={(e) => {
-        e.stopPropagation()
-        setConfirming(true)
-      }}
-    >
-      &#x2715;
-    </button>
-  )
-}
-
-function NeedsYouCard({ job, onClick, onDeleteJob, onPickJobRecipient, recipientAgents, pickerJobId, setPickerJobId }) {
+function NeedsYouCard({ job, onClick, onPickJobRecipient, recipientAgents, pickerJobId, setPickerJobId }) {
   const status = String(job.status).toLowerCase()
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
@@ -216,13 +173,12 @@ function NeedsYouCard({ job, onClick, onDeleteJob, onPickJobRecipient, recipient
             {NEEDS_YOU_ACTIONS[status]}
           </button>
         )}
-        <DeleteButton jobId={job.id} onDelete={onDeleteJob} />
       </div>
     </div>
   )
 }
 
-function ActiveTaskRow({ job, onClick, onDeleteJob }) {
+function ActiveTaskRow({ job, onClick }) {
   const status = String(job.status).toLowerCase()
   const color = getStatusColor(status)
 
@@ -243,13 +199,12 @@ function ActiveTaskRow({ job, onClick, onDeleteJob }) {
           <span style={{ fontSize: 11, color: '#C4C3BF' }}>{job.assigned_to}</span>
         )}
         <span className="task-time">{getTimeAgo(job.created_at)}</span>
-        <DeleteButton jobId={job.id} onDelete={onDeleteJob} />
       </div>
     </div>
   )
 }
 
-function DoneTaskRow({ job, onClick, onDeleteJob }) {
+function DoneTaskRow({ job, onClick }) {
   const status = String(job.status).toLowerCase()
   const color = status === 'failed' ? '#EB5757' : status === 'cancelled' ? '#9B9A97' : '#2FA67E'
   const icon = status === 'failed' ? '✕' : status === 'cancelled' ? '—' : '✓'
@@ -264,7 +219,6 @@ function DoneTaskRow({ job, onClick, onDeleteJob }) {
         {normalizeJobTitle(job.title)}
       </span>
       <span className="task-time">{getTimeAgo(job.created_at)}</span>
-      <DeleteButton jobId={job.id} onDelete={onDeleteJob} />
     </div>
   )
 }
@@ -276,7 +230,6 @@ export function FeedView({
   recipientAgents = [],
   onOpenJobConversation,
   onPickJobRecipient,
-  onDeleteJob,
 }) {
   const [pickerJobId, setPickerJobId] = useState('')
 
@@ -326,7 +279,6 @@ export function FeedView({
                     key={job.id}
                     job={job}
                     onClick={onOpenJobConversation}
-                    onDeleteJob={onDeleteJob}
                     onPickJobRecipient={onPickJobRecipient}
                     recipientAgents={recipients}
                     pickerJobId={pickerJobId}
@@ -346,7 +298,6 @@ export function FeedView({
                     key={job.id}
                     job={job}
                     onClick={onOpenJobConversation}
-                    onDeleteJob={onDeleteJob}
                   />
                 ))}
               </div>
@@ -362,7 +313,6 @@ export function FeedView({
                     key={job.id}
                     job={job}
                     onClick={onOpenJobConversation}
-                    onDeleteJob={onDeleteJob}
                   />
                 ))}
               </div>
