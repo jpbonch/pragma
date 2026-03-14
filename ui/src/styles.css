@@ -3271,19 +3271,18 @@ select { cursor: pointer; }
 }
 
 .task-row {
-  border: 1px solid #ecebe8;
+  border: none;
   border-radius: 10px;
   background: #fff;
   display: flex;
   align-items: stretch;
   justify-content: space-between;
   gap: 14px;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  transition: box-shadow 0.12s ease, background 0.12s ease;
   position: relative;
 }
 
 .task-row:hover {
-  border-color: #dddcd8;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
   background: #fcfcfb;
 }
