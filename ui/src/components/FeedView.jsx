@@ -23,7 +23,7 @@ function getTimeAgo(dateStr) {
 }
 
 const STATUS_COLORS = {
-  pending_review: '#E09B3D',
+  pending_review: '#2FA67E',
   waiting_for_recipient: '#9B6DD7',
   waiting_for_question_response: '#4B83D6',
   waiting_for_help_response: '#E06B5E',
