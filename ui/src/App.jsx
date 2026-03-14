@@ -630,6 +630,7 @@ export default function App() {
   })
 
   const streamAbortRef = useRef(null)
+  const threadIdRef = useRef(conversation.threadId)
   const tasksRefreshTimerRef = useRef(null)
   const conversationSyncInFlightRef = useRef(false)
   const conversationSyncPendingRef = useRef(false)
@@ -705,6 +706,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    threadIdRef.current = conversation.threadId
+  }, [conversation.threadId])
+
+  useEffect(() => {
     return () => {
       streamAbortRef.current?.abort()
       if (tasksRefreshTimerRef.current) {
@@ -761,14 +766,18 @@ export default function App() {
       try {
         conversationSyncPendingRef.current = false
 
-        const data = await fetchConversationThread(conversation.threadId)
+        const currentThreadId = threadIdRef.current
+        if (!currentThreadId || cancelled) {
+          return
+        }
+        const data = await fetchConversationThread(currentThreadId)
         if (!data?.thread || cancelled) {
           return
         }
 
         const nextEntries = buildEntriesFromThreadData(data, agentById)
         setConversation((prev) => {
-          if (!prev.open || prev.threadId !== conversation.threadId || cancelled) {
+          if (!prev.open || prev.threadId !== threadIdRef.current || cancelled) {
             return prev
           }
           return {
@@ -864,6 +873,8 @@ export default function App() {
             }),
           )
           setConversation((prev) => {
+            // Guard: taskId mismatch prevents cross-task status/threadId
+            // assignment when multiple agents run concurrently.
             if (prev.taskId !== taskId || prev.taskStatus === status) {
               return prev
             }
@@ -1651,6 +1662,10 @@ export default function App() {
     streamAbortRef.current?.abort()
     streamAbortRef.current = controller
 
+    // Track the threadId for this streaming turn so late-arriving events
+    // do not leak into a conversation that the user has since navigated away from.
+    let streamThreadId = nextThreadId || ''
+
     try {
       await streamConversationTurn(
         {
@@ -1666,6 +1681,7 @@ export default function App() {
           onEvent: ({ event, data }) => {
             setConversation((prev) => {
               if (event === 'thread_started') {
+                streamThreadId = data.thread_id
                 if (mode === 'chat') {
                   void loadChats()
                 }
@@ -1676,6 +1692,11 @@ export default function App() {
                   ...prev,
                   threadId: data.thread_id,
                 }
+              }
+
+              // Guard: drop events targeting a thread the user is no longer viewing.
+              if (streamThreadId && prev.threadId && prev.threadId !== streamThreadId) {
+                return prev
               }
 
               if (event === 'assistant_text') {
@@ -1730,11 +1751,18 @@ export default function App() {
       if (streamAbortRef.current === controller) {
         streamAbortRef.current = null
       }
-      setConversation((prev) => ({
-        ...prev,
-        loading: prev.taskId ? isTaskActivelyRunning(prev.taskStatus) : false,
-        planReady: mode === 'plan' ? true : prev.planReady,
-      }))
+      setConversation((prev) => {
+        // Only update loading/planReady if the conversation still matches the
+        // thread that was being streamed; otherwise leave state unchanged.
+        if (streamThreadId && prev.threadId && prev.threadId !== streamThreadId) {
+          return prev
+        }
+        return {
+          ...prev,
+          loading: prev.taskId ? isTaskActivelyRunning(prev.taskStatus) : false,
+          planReady: mode === 'plan' ? true : prev.planReady,
+        }
+      })
       if (mode === 'chat') {
         await loadChats()
       }
