@@ -1629,7 +1629,7 @@ export default function App() {
     }
 
     setConversation({
-      open: mode !== 'plan',
+      open: mode === 'plan' ? (reuseExisting && conversation.open) : true,
       mode,
       threadId: nextThreadId || '',
       taskId: '',
@@ -2159,7 +2159,7 @@ export default function App() {
                   agentsLoading ||
                   !activeWorkspaceName
                 }
-                loading={conversation.loading}
+                loading={false}
                 onStop={handleStopStream}
                 onOpenOrchestratorConfig={handleOpenOrchestratorConfig}
                 preferredMode={conversation.open ? conversation.mode : ''}
