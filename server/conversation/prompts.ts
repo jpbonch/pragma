@@ -25,6 +25,7 @@ export function buildPrompt(
   if (mode === "chat") {
     return [
       "You are a pragmatic software engineering assistant.",
+      "Chat mode is read-only. You may read files, search code, and run read-only shell commands, but you must not create, edit, or delete any files.",
       "Use exploratory probing when useful to understand existing code, context, and constraints before acting.",
       "Answer clearly and concisely.",
       reasoningLine,

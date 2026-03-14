@@ -244,11 +244,12 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
 
 function buildCodexArgs(input: AdapterSendTurnInput, sandboxRoot: string): string[] {
   const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
+  const sandboxLevel = input.mode === "chat" ? "workspace-read" : "workspace-write";
   const globalSandboxArgs = [
     "-a",
     "never",
     "-s",
-    "workspace-write",
+    sandboxLevel,
     "-C",
     sandboxRoot,
   ];
@@ -278,6 +279,11 @@ function buildCodexArgs(input: AdapterSendTurnInput, sandboxRoot: string): strin
   ];
 }
 
+/**
+ * Tools that mutate files. Blocked in chat mode so the agent can only read.
+ */
+const CHAT_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"];
+
 function buildClaudeArgs(input: AdapterSendTurnInput, sandboxRoot: string): string[] {
   const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
   const args = [
@@ -294,6 +300,10 @@ function buildClaudeArgs(input: AdapterSendTurnInput, sandboxRoot: string): stri
     "--model",
     input.modelId,
   ];
+
+  if (input.mode === "chat") {
+    args.push("--disallowedTools", ...CHAT_DISALLOWED_TOOLS);
+  }
 
   if (input.sessionId) {
     args.push("--resume", input.sessionId);
