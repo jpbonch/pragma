@@ -1615,13 +1615,6 @@ VALUES ($1, $2, $3, $4, $5, $6)
     try {
       await ensureConversationSchema(db);
 
-      let title = fallbackTitle;
-      try {
-        title = await generateTitle(db, prompt, "");
-      } catch {
-        // keep fallbackTitle
-      }
-
       const orchestrator = await getAgentRow(db, DEFAULT_AGENT_ID);
       if (!orchestrator) {
         throw new PragmaError(
@@ -1653,7 +1646,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
 INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
 VALUES ($1, $2, 'queued', NULL, NULL, NULL)
 `,
-        [taskId, title],
+        [taskId, fallbackTitle],
       );
       emitTaskStatus(workspaceName, taskId, "queued", "execute_created");
 
