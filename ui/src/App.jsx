@@ -563,6 +563,7 @@ function OnboardingModal({ open, canClose, onClose, onSubmit, loading, error }) 
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('feed')
+  const [inputBarText, setInputBarText] = useState('')
 
   const [jobs, setJobs] = useState([])
   const [jobsLoading, setJobsLoading] = useState(false)
@@ -2108,6 +2109,8 @@ export default function App() {
                 onSubmit={(payload) => {
                   void handleInputSubmit(payload)
                 }}
+                value={inputBarText}
+                onValueChange={setInputBarText}
               />
             )}
           </div>

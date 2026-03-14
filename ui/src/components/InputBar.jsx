@@ -22,8 +22,13 @@ export function InputBar({
   preferredMode = '',
   embedded = false,
   lockedMode = '',
+  value,
+  onValueChange,
 }) {
-  const [input, setInput] = useState('')
+  const [localInput, setLocalInput] = useState('')
+  const isControlled = value !== undefined
+  const input = isControlled ? value : localInput
+  const setInput = isControlled ? onValueChange : setLocalInput
   const [mode, setMode] = useState('execute')
   const [reasoningEffort, setReasoningEffort] = useState('medium')
   const [openMenu, setOpenMenu] = useState(null)
