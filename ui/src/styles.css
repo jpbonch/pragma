@@ -654,6 +654,13 @@ select { cursor: pointer; }
   border-radius: 50%;
   background: #9B6DD7;
 }
+.plan-row-dot-inner.planning {
+  animation: plan-pulse 1.2s ease-in-out infinite;
+}
+@keyframes plan-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
 .plan-row-title {
   font-size: 13px;
   font-weight: 500;

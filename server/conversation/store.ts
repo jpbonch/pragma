@@ -192,7 +192,9 @@ SELECT thread.id,
        thread.created_at,
        thread.updated_at,
        latest_plan_turn.plan_summary AS latest_plan_summary,
-       first_plan_turn.user_message AS first_user_message
+       first_plan_turn.user_message AS first_user_message,
+       (latest_plan_turn.plan_summary IS NOT NULL) AS has_completed_plan_turn,
+       newest_turn.status AS latest_turn_status
 FROM conversation_threads AS thread
 LEFT JOIN LATERAL (
   SELECT plan_summary
@@ -213,6 +215,14 @@ LEFT JOIN LATERAL (
   ORDER BY created_at ASC
   LIMIT 1
 ) AS first_plan_turn ON TRUE
+LEFT JOIN LATERAL (
+  SELECT status
+  FROM conversation_turns
+  WHERE thread_id = thread.id
+    AND mode = 'plan'
+  ORDER BY created_at DESC
+  LIMIT 1
+) AS newest_turn ON TRUE
 WHERE thread.mode = 'plan'
   AND thread.status = 'open'
 `;

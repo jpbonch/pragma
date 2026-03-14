@@ -25,7 +25,7 @@ function toTitleCaseStatus(value) {
   return parts.map((part) => part[0].toUpperCase() + part.slice(1)).join(' ')
 }
 
-function getHeaderStatusLabel({ taskStatus, mode, loading }) {
+function getHeaderStatusLabel({ taskStatus, mode, loading, planReady }) {
   const normalizedStatus = typeof taskStatus === 'string' ? taskStatus.trim().toLowerCase() : ''
   if (normalizedStatus) {
     return HEADER_STATUS_LABELS[normalizedStatus] || toTitleCaseStatus(normalizedStatus)
@@ -34,7 +34,7 @@ function getHeaderStatusLabel({ taskStatus, mode, loading }) {
     return mode === 'plan' ? 'Planning' : 'Executing'
   }
   if (mode === 'plan') {
-    return 'Plan Ready'
+    return planReady ? 'Plan Ready' : 'Planning'
   }
   return 'Ready'
 }
@@ -44,6 +44,7 @@ export function ConversationDrawer({
   mode,
   entries,
   loading,
+  planReady,
   error,
   onClose,
   onExecute,
@@ -81,8 +82,8 @@ export function ConversationDrawer({
   const canReopenCompleted = showOutputPanel && taskStatus === 'completed'
   const isCompletedTask = showOutputPanel && taskStatus === 'completed'
   const headerStatusLabel = useMemo(
-    () => getHeaderStatusLabel({ taskStatus, mode, loading }),
-    [taskStatus, mode, loading],
+    () => getHeaderStatusLabel({ taskStatus, mode, loading, planReady }),
+    [taskStatus, mode, loading, planReady],
   )
   const displayHeaderAgentName =
     typeof headerAgentName === 'string' ? headerAgentName.trim() : ''

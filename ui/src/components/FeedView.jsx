@@ -239,18 +239,21 @@ function DoneTaskRow({ task, onClick }) {
 }
 
 function PlanRow({ plan, isActive, onClick }) {
+  const isPlanning = plan.latest_turn_status === 'running'
   return (
     <div
       className={`plan-row ${isActive ? 'active' : ''}`}
       onClick={() => onClick?.(plan.id)}
     >
       <div className="plan-row-dot">
-        <div className="plan-row-dot-inner" />
+        <div className={`plan-row-dot-inner${isPlanning ? ' planning' : ''}`} />
       </div>
       <span className="plan-row-title">{plan.plan_title || 'New plan'}</span>
-      {plan.plan_preview && (
+      {isPlanning ? (
+        <span className="plan-row-preview" style={{ color: '#9B6DD7' }}>Planning…</span>
+      ) : plan.plan_preview ? (
         <span className="plan-row-preview">{plan.plan_preview}</span>
-      )}
+      ) : null}
     </div>
   )
 }

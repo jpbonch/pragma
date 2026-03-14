@@ -626,6 +626,7 @@ export default function App() {
     entries: [],
     loading: false,
     error: '',
+    planReady: false,
   })
 
   const streamAbortRef = useRef(null)
@@ -1511,6 +1512,7 @@ export default function App() {
       entries: [],
       loading: false,
       error: '',
+      planReady: false,
     })
   }
 
@@ -1642,6 +1644,7 @@ export default function App() {
       entries: nextEntries,
       loading: true,
       error: '',
+      planReady: mode === 'plan' ? false : undefined,
     })
 
     const controller = new AbortController()
@@ -1727,6 +1730,7 @@ export default function App() {
       setConversation((prev) => ({
         ...prev,
         loading: prev.taskId ? isTaskActivelyRunning(prev.taskStatus) : false,
+        planReady: mode === 'plan' ? true : prev.planReady,
       }))
       if (mode === 'chat') {
         await loadChats()
@@ -1822,17 +1826,23 @@ export default function App() {
       const entries = buildEntriesFromThreadData(data, agentById)
       const turns = Array.isArray(data.turns) ? data.turns : []
       let selectedRecipientAgentId = ''
+      let hasCompletedPlanTurn = false
 
       for (let index = turns.length - 1; index >= 0; index -= 1) {
         const turn = turns[index]
         if (!turn || turn.mode !== 'plan' || turn.status !== 'completed') {
           continue
         }
+        hasCompletedPlanTurn = true
         if (typeof turn.selected_agent_id === 'string' && turn.selected_agent_id) {
           selectedRecipientAgentId = turn.selected_agent_id
           break
         }
       }
+
+      const latestTurn = turns.filter((t) => t && t.mode === 'plan').at(-1)
+      const latestTurnStillRunning = latestTurn?.status === 'running'
+      const planReady = hasCompletedPlanTurn && !latestTurnStillRunning
 
       setConversation({
         open: true,
@@ -1845,8 +1855,9 @@ export default function App() {
         reasoningEffort: 'medium',
         recipientAgentId: selectedRecipientAgentId,
         entries,
-        loading: false,
+        loading: latestTurnStillRunning,
         error: '',
+        planReady,
       })
 
       setActiveTab('feed')
@@ -2120,6 +2131,7 @@ export default function App() {
               mode={conversation.mode}
               entries={conversation.entries}
               loading={conversation.loading}
+              planReady={conversation.planReady}
               error={conversation.error}
               taskId={conversation.taskId}
               taskStatus={conversation.taskStatus}
@@ -2148,7 +2160,7 @@ export default function App() {
               onExecute={() => {
                 void handleExecuteFromPlan()
               }}
-              executeDisabled={!conversation.threadId}
+              executeDisabled={!conversation.threadId || !conversation.planReady}
               onStop={handleStopStream}
             />
             {!(conversation.open && (conversation.mode === 'chat' || conversation.mode === 'plan')) && (

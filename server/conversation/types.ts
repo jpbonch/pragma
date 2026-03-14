@@ -60,6 +60,8 @@ export type OpenPlanThreadListItem = {
   updated_at: string;
   latest_plan_summary: string | null;
   first_user_message: string | null;
+  has_completed_plan_turn: boolean;
+  latest_turn_status: "running" | "completed" | "failed" | null;
 };
 
 export type ConversationTurn = {

@@ -2349,6 +2349,8 @@ WHERE id = $1
           status: plan.status,
           created_at: plan.created_at,
           updated_at: plan.updated_at,
+          has_completed_plan_turn: Boolean(plan.has_completed_plan_turn),
+          latest_turn_status: plan.latest_turn_status ?? null,
         };
       });
       return c.json({ plans });
