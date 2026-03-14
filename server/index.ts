@@ -2025,6 +2025,8 @@ WHERE id = $1
       prompt: string;
       recipientAgentId: string;
       reasoningEffort: ReasoningEffort;
+      resumeWorkerSessionId: string | null;
+      followUpMessage: string;
     } | null = null;
 
     try {
@@ -2118,6 +2120,8 @@ WHERE id = $1
           latestExecuteTurn.reasoning_effort,
           `latest execute turn for task ${taskId}`,
         ),
+        resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
+        followUpMessage: body.message,
       };
     } finally {
       await db.close();
@@ -2131,6 +2135,8 @@ WHERE id = $1
         prompt: requeue.prompt,
         requestedRecipientAgentId: requeue.recipientAgentId,
         reasoningEffort: requeue.reasoningEffort,
+        resumeWorkerSessionId: requeue.resumeWorkerSessionId,
+        followUpMessage: requeue.followUpMessage,
       });
     }
 

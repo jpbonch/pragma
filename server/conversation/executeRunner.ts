@@ -18,6 +18,7 @@ import {
   failTurn,
   insertEvent,
   insertMessage,
+  reopenThread,
   updateThreadSession,
 } from "./store";
 import type { HarnessId, TaskStatus, ReasoningEffort } from "./types";
@@ -30,6 +31,8 @@ type EnqueueExecuteInput = {
   requestedRecipientAgentId?: string | null;
   reasoningEffort: ReasoningEffort;
   skipOrchestratorSelection?: boolean;
+  resumeWorkerSessionId?: string | null;
+  followUpMessage?: string | null;
 };
 
 type AgentRow = {
@@ -127,9 +130,10 @@ LIMIT 1
 
   const turnId = `turn_${randomUUID().slice(0, 12)}`;
   const userMessageId = `msg_${randomUUID().slice(0, 12)}`;
-  const task = input.prompt.trim();
+  const isResume = !!input.resumeWorkerSessionId;
+  const task = (isResume && input.followUpMessage ? input.followUpMessage : input.prompt).trim();
   const reasoningEffort = input.reasoningEffort;
-  const shouldSkipOrchestrator = input.skipOrchestratorSelection === true;
+  const shouldSkipOrchestrator = input.skipOrchestratorSelection === true || isResume;
   const notifyTaskStatus = async (status: TaskStatus, source: string): Promise<void> => {
     await options.onTaskStatusChanged?.({
       workspaceName: input.workspaceName,
@@ -166,6 +170,11 @@ LIMIT 1
     await insertEvent(db, payload);
     await notifyThreadUpdated(payload.eventName);
   };
+
+  if (isResume) {
+    await reopenThread(db, input.threadId);
+    await notifyThreadUpdated("thread_reopened");
+  }
 
   if (shouldSkipOrchestrator) {
     await db.query(
@@ -500,7 +509,7 @@ WHERE id = $1
     const workerResult = await workerAdapter.sendTurn({
       prompt: workerPrompt,
       modelId: selectedWorker.model_id,
-      sessionId: null,
+      sessionId: input.resumeWorkerSessionId ?? null,
       cwd: taskWorkspaceDir,
       env: buildAgentRuntimeEnv({
         apiUrl: options.apiUrl,
