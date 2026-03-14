@@ -652,6 +652,50 @@ select { cursor: pointer; }
   border-radius: 4px;
 }
 
+.job-delete-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: #C4C3BF;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: inherit;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+.task-row:hover .job-delete-btn,
+.needs-you-card:hover .job-delete-btn {
+  opacity: 1;
+}
+.job-delete-btn:hover {
+  color: #EB5757;
+  border-color: #EB575733;
+}
+.job-delete-confirm {
+  opacity: 1;
+  color: #fff;
+  background: #EB5757;
+  border-color: #EB5757;
+  font-weight: 600;
+}
+.job-delete-confirm:hover {
+  color: #fff;
+  background: #d94444;
+  border-color: #d94444;
+}
+.job-delete-cancel {
+  opacity: 1;
+  color: #9B9A97;
+  border-color: #E3E2DF;
+}
+.job-delete-cancel:hover {
+  color: #37352F;
+  border-color: #C4C3BF;
+}
+
 .progress-bar {
   width: 40px;
   height: 4px;

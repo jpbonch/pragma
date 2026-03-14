@@ -27,6 +27,7 @@ import {
   fetchWorkspaces,
   respondToJob,
   reviewJob,
+  deleteJob,
   stopRuntimeService as stopRuntimeServiceApi,
   setJobRecipient,
   setActiveWorkspace,
@@ -1932,6 +1933,25 @@ export default function App() {
     }
   }
 
+  async function handleDeleteJob(jobId) {
+    if (!jobId) {
+      return
+    }
+
+    try {
+      await deleteJob(jobId)
+      await loadJobs()
+      setConversation((prev) => {
+        if (prev.open && prev.jobId === jobId) {
+          return { ...prev, open: false }
+        }
+        return prev
+      })
+    } catch (error) {
+      setWorkspaceError(errorText(error))
+    }
+  }
+
   function handleHideChat(threadId) {
     if (!threadId || !activeWorkspaceName) {
       return
@@ -2023,6 +2043,9 @@ export default function App() {
               }}
               onPickJobRecipient={(jobId, recipientAgentId) => {
                 void handleSetJobRecipient(jobId, recipientAgentId)
+              }}
+              onDeleteJob={(jobId) => {
+                void handleDeleteJob(jobId)
               }}
             />
             <ConversationDrawer

@@ -33,6 +33,7 @@ const STATUS_COLORS = {
   needs_fix: '#D9534F',
   completed: '#2FA67E',
   failed: '#EB5757',
+  cancelled: '#9B9A97',
 }
 
 const STATUS_LABELS = {
@@ -46,6 +47,7 @@ const STATUS_LABELS = {
   needs_fix: 'Needs Fix',
   completed: 'Completed',
   failed: 'Failed',
+  cancelled: 'Cancelled',
 }
 
 const NEEDS_YOU_ACTIONS = {
@@ -84,7 +86,7 @@ function isActive(status) {
 }
 
 function isDone(status) {
-  return status === 'completed' || status === 'failed'
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
 }
 
 function SectionLabel({ children, count, badge }) {
@@ -98,7 +100,50 @@ function SectionLabel({ children, count, badge }) {
   )
 }
 
-function NeedsYouCard({ job, onClick, onPickJobRecipient, recipientAgents, pickerJobId, setPickerJobId }) {
+function DeleteButton({ jobId, onDelete }) {
+  const [confirming, setConfirming] = useState(false)
+
+  if (confirming) {
+    return (
+      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        <button
+          className="job-delete-btn job-delete-confirm"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete?.(jobId)
+            setConfirming(false)
+          }}
+        >
+          Delete
+        </button>
+        <button
+          className="job-delete-btn job-delete-cancel"
+          onClick={(e) => {
+            e.stopPropagation()
+            setConfirming(false)
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      className="job-delete-btn"
+      title="Delete job"
+      onClick={(e) => {
+        e.stopPropagation()
+        setConfirming(true)
+      }}
+    >
+      &#x2715;
+    </button>
+  )
+}
+
+function NeedsYouCard({ job, onClick, onDeleteJob, onPickJobRecipient, recipientAgents, pickerJobId, setPickerJobId }) {
   const status = String(job.status).toLowerCase()
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
@@ -171,12 +216,13 @@ function NeedsYouCard({ job, onClick, onPickJobRecipient, recipientAgents, picke
             {NEEDS_YOU_ACTIONS[status]}
           </button>
         )}
+        <DeleteButton jobId={job.id} onDelete={onDeleteJob} />
       </div>
     </div>
   )
 }
 
-function ActiveTaskRow({ job, onClick }) {
+function ActiveTaskRow({ job, onClick, onDeleteJob }) {
   const status = String(job.status).toLowerCase()
   const color = getStatusColor(status)
 
@@ -197,25 +243,28 @@ function ActiveTaskRow({ job, onClick }) {
           <span style={{ fontSize: 11, color: '#C4C3BF' }}>{job.assigned_to}</span>
         )}
         <span className="task-time">{getTimeAgo(job.created_at)}</span>
+        <DeleteButton jobId={job.id} onDelete={onDeleteJob} />
       </div>
     </div>
   )
 }
 
-function DoneTaskRow({ job, onClick }) {
+function DoneTaskRow({ job, onClick, onDeleteJob }) {
   const status = String(job.status).toLowerCase()
-  const color = status === 'failed' ? '#EB5757' : '#2FA67E'
-  const icon = status === 'failed' ? '✕' : '✓'
+  const color = status === 'failed' ? '#EB5757' : status === 'cancelled' ? '#9B9A97' : '#2FA67E'
+  const icon = status === 'failed' ? '✕' : status === 'cancelled' ? '—' : '✓'
+  const titleClass = status === 'failed' ? 'failed' : status === 'cancelled' ? 'done' : 'done'
 
   return (
     <div className="task-row" onClick={() => onClick?.(job)}>
       <div className="task-done-check" style={{ background: `${color}15`, color }}>
         {icon}
       </div>
-      <span className={`task-title ${status === 'failed' ? 'failed' : 'done'}`}>
+      <span className={`task-title ${titleClass}`}>
         {normalizeJobTitle(job.title)}
       </span>
       <span className="task-time">{getTimeAgo(job.created_at)}</span>
+      <DeleteButton jobId={job.id} onDelete={onDeleteJob} />
     </div>
   )
 }
@@ -227,6 +276,7 @@ export function FeedView({
   recipientAgents = [],
   onOpenJobConversation,
   onPickJobRecipient,
+  onDeleteJob,
 }) {
   const [pickerJobId, setPickerJobId] = useState('')
 
@@ -276,6 +326,7 @@ export function FeedView({
                     key={job.id}
                     job={job}
                     onClick={onOpenJobConversation}
+                    onDeleteJob={onDeleteJob}
                     onPickJobRecipient={onPickJobRecipient}
                     recipientAgents={recipients}
                     pickerJobId={pickerJobId}
@@ -295,6 +346,7 @@ export function FeedView({
                     key={job.id}
                     job={job}
                     onClick={onOpenJobConversation}
+                    onDeleteJob={onDeleteJob}
                   />
                 ))}
               </div>
@@ -310,6 +362,7 @@ export function FeedView({
                     key={job.id}
                     job={job}
                     onClick={onOpenJobConversation}
+                    onDeleteJob={onDeleteJob}
                   />
                 ))}
               </div>

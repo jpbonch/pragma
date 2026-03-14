@@ -1411,6 +1411,51 @@ WHERE id = $1
     }
   });
 
+  app.delete("/jobs/:jobId", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const jobId = c.req.param("jobId");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      await ensureConversationSchema(db);
+
+      const jobResult = await db.query<{
+        id: string;
+        status: JobStatus;
+      }>(
+        `
+SELECT id, status
+FROM jobs
+WHERE id = $1
+LIMIT 1
+`,
+        [jobId],
+      );
+      const job = jobResult.rows[0];
+      if (!job) {
+        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      }
+
+      const workspacePaths = getWorkspacePaths(workspaceName);
+
+      await db.query(
+        `
+UPDATE jobs
+SET status = 'cancelled'
+WHERE id = $1
+`,
+        [jobId],
+      );
+      emitJobStatus(workspaceName, jobId, "cancelled", "job_deleted");
+
+      await deleteJobWorktree({ workspacePaths, jobId });
+
+      return c.json({ ok: true, status: "cancelled" });
+    } finally {
+      await db.close();
+    }
+  });
+
   app.post("/jobs", validateJson(createJobSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const body = c.req.valid("json");

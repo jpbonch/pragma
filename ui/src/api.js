@@ -334,6 +334,12 @@ export async function reviewJob(jobId, action) {
   }, REVIEW_REQUEST_TIMEOUT_MS)
 }
 
+export async function deleteJob(jobId) {
+  return fetchJson(`/jobs/${encodeURIComponent(jobId)}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function fetchAgents() {
   const data = asObject(await fetchJson('/agents'), 'Invalid agents response.')
   if (!Array.isArray(data.agents)) {
