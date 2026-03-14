@@ -97,6 +97,7 @@ type StartServerOptions = {
 
 type TaskStatusStreamEvent = {
   task_id: string;
+  thread_id?: string;
   status: TaskStatus;
   changed_at: string;
   source: string;
@@ -443,6 +444,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     onTaskStatusChanged: (input) => {
       publishTaskStatus(input.workspaceName, {
         task_id: input.taskId,
+        thread_id: input.threadId || undefined,
         status: input.status,
         changed_at: new Date().toISOString(),
         source: input.source,

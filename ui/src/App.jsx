@@ -847,21 +847,33 @@ export default function App() {
       onTaskStatusChanged: (event) => {
         const taskId = typeof event?.task_id === 'string' ? event.task_id : ''
         const status = typeof event?.status === 'string' ? event.status : ''
+        const threadId = typeof event?.thread_id === 'string' ? event.thread_id : ''
 
         if (taskId && status) {
           setTasks((prev) =>
-            prev.map((task) => (task.id === taskId ? { ...task, status } : task)),
+            prev.map((task) => {
+              if (task.id !== taskId) return task
+              const updates = { ...task, status }
+              if (threadId && !task.thread_id) {
+                updates.thread_id = threadId
+              }
+              return updates
+            }),
           )
           setConversation((prev) => {
             if (prev.taskId !== taskId || prev.taskStatus === status) {
               return prev
             }
             const nextLoading = isTaskActivelyRunning(status)
-            return {
+            const updates = {
               ...prev,
               taskStatus: status,
               loading: nextLoading,
             }
+            if (!prev.threadId && threadId) {
+              updates.threadId = threadId
+            }
+            return updates
           })
         }
 
@@ -972,7 +984,8 @@ export default function App() {
       return
     }
 
-    const match = tasks.find((task) => task.id === conversation.taskId)
+    const currentTaskId = conversation.taskId
+    const match = tasks.find((task) => task.id === currentTaskId)
     const nextStatus = typeof match?.status === 'string' ? match.status : ''
     const nextThreadId = typeof match?.thread_id === 'string' ? match.thread_id : ''
     if (
@@ -983,7 +996,7 @@ export default function App() {
     }
 
     setConversation((prev) => {
-      if (prev.taskId !== conversation.taskId) {
+      if (prev.taskId !== currentTaskId) {
         return prev
       }
 
@@ -994,6 +1007,10 @@ export default function App() {
       }
       if (!prev.threadId && nextThreadId) {
         updates.threadId = nextThreadId
+      } else if (prev.threadId && nextThreadId && prev.threadId !== nextThreadId) {
+        // Do NOT overwrite an existing threadId with a different one.
+        // This prevents a race where a task list refresh brings in a
+        // thread_id from a different task's status change timing.
       }
       if (Object.keys(updates).length === 0) {
         return prev

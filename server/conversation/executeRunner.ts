@@ -44,6 +44,7 @@ type AgentRow = {
 type TaskStatusChangedInput = {
   workspaceName: string;
   taskId: string;
+  threadId: string;
   status: TaskStatus;
   source: string;
 };
@@ -133,6 +134,7 @@ LIMIT 1
     await options.onTaskStatusChanged?.({
       workspaceName: input.workspaceName,
       taskId: input.taskId,
+      threadId: input.threadId,
       status,
       source,
     });
