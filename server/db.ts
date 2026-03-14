@@ -605,6 +605,14 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+export async function updateTaskTitle(
+  db: PGlite,
+  taskId: string,
+  title: string,
+): Promise<void> {
+  await db.query(`UPDATE tasks SET title = $2 WHERE id = $1`, [taskId, title]);
+}
+
 async function clearActiveWorkspaceName(): Promise<void> {
   try {
     await unlink(ACTIVE_WORKSPACE_FILE);

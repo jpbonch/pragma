@@ -21,6 +21,7 @@ import {
   setupPragma,
 } from "./db";
 import { getConversationAdapter } from "./conversation/adapters";
+import { generateTitle } from "./conversation/titleGenerator";
 import { ExecuteRunner } from "./conversation/executeRunner";
 import {
   buildRepoDiffEntries,
@@ -1547,13 +1548,21 @@ VALUES ($1, $2, $3, $4, $5, $6)
     const body = c.req.valid("json");
     const prompt = body.prompt;
     const reasoningEffort = body.reasoning_effort;
-    const title = prompt.length > 100 ? `${prompt.slice(0, 97)}...` : prompt;
+    const fallbackTitle = prompt.length > 100 ? `${prompt.slice(0, 97)}...` : prompt;
     const taskId =`task_${randomUUID().slice(0, 8)}`;
     const threadId = `thread_${randomUUID().slice(0, 12)}`;
 
     const db = await openDatabase(workspaceName);
     try {
       await ensureConversationSchema(db);
+
+      let title = fallbackTitle;
+      try {
+        title = await generateTitle(db, prompt, "");
+      } catch {
+        // keep fallbackTitle
+      }
+
       const orchestrator = await getAgentRow(db, DEFAULT_AGENT_ID);
       if (!orchestrator) {
         throw new PragmaError(
@@ -2556,6 +2565,17 @@ WHERE id = $1
             preview: truncateChatText(previewSource, 140),
             lastMessageAt: new Date().toISOString(),
           });
+
+          // Fire-and-forget: overwrite with AI-generated title
+          generateTitle(db, message, finalAssistantText).then((aiTitle) => {
+            updateChatThreadMetadata(db, {
+              threadId,
+              title: aiTitle,
+              preview: truncateChatText(previewSource, 140),
+              lastMessageAt: new Date().toISOString(),
+              force: true,
+            }).catch(() => {});
+          }).catch(() => {});
         }
 
         await updateThreadSession(db, {

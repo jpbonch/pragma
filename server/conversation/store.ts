@@ -238,16 +238,25 @@ export async function updateChatThreadMetadata(
     title?: string | null;
     preview: string | null;
     lastMessageAt?: string | null;
+    force?: boolean;
   },
 ): Promise<void> {
+  const titleSql = input.force
+    ? `chat_title = CASE
+                      WHEN $2::text IS NOT NULL AND $2::text <> ''
+                        THEN $2::text
+                      ELSE chat_title
+                    END`
+    : `chat_title = CASE
+                      WHEN (chat_title IS NULL OR chat_title = '') AND $2::text IS NOT NULL AND $2::text <> ''
+                        THEN $2::text
+                      ELSE chat_title
+                    END`;
+
   await db.query(
     `
 UPDATE conversation_threads
-SET chat_title = CASE
-                    WHEN (chat_title IS NULL OR chat_title = '') AND $2::text IS NOT NULL AND $2::text <> ''
-                      THEN $2::text
-                    ELSE chat_title
-                 END,
+SET ${titleSql},
     chat_preview = $3::text,
     chat_last_message_at = COALESCE($4::timestamptz, CURRENT_TIMESTAMP),
     updated_at = CURRENT_TIMESTAMP
