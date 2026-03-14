@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import data from '@emoji-mart/data'
 import Picker from '@emoji-mart/react'
@@ -276,6 +276,14 @@ export function RightPanel({
 
   const [editingHuman, setEditingHuman] = useState(null)
 
+  const sortedAgents = useMemo(() => {
+    return [...agents].sort((a, b) => {
+      const aIsOrch = a.name?.toLowerCase() === 'orchestrator' ? 0 : 1
+      const bIsOrch = b.name?.toLowerCase() === 'orchestrator' ? 0 : 1
+      return aIsOrch - bIsOrch
+    })
+  }, [agents])
+
   useEffect(() => {
     if (
       !openOrchestratorConfigRequest ||
@@ -289,7 +297,7 @@ export function RightPanel({
     }
 
     lastOpenOrchestratorRequestRef.current = openOrchestratorConfigRequest
-    const orchestrator = agents.find((agent) => agent?.id === 'salmon-orchestrator')
+    const orchestrator = agents.find((agent) => agent?.name?.toLowerCase() === 'orchestrator')
     if (!orchestrator) {
       return
     }
@@ -415,7 +423,7 @@ export function RightPanel({
 
       {!loading &&
         !error &&
-        agents.map((agent, i) => {
+        sortedAgents.map((agent, i) => {
           const color = getAgentColor(i)
           return (
             <div
