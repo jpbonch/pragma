@@ -2930,6 +2930,35 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     return c.json({ ok: true, folder: { name: folderName }, folders }, 201);
   });
 
+  app.post("/code/folders/:name/push", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const paths = getWorkspacePaths(workspaceName);
+    const folderName = c.req.param("name");
+    const folderPath = join(paths.codeDir, folderName);
+
+    if (!(await pathExists(folderPath))) {
+      throw new PragmaError("CODE_FOLDER_NOT_FOUND", 404, `Code folder not found: ${folderName}`);
+    }
+
+    if (!(await hasGitMarkerInFolder(folderPath))) {
+      throw new PragmaError("NOT_A_GIT_REPO", 400, `Folder is not a git repository: ${folderName}`);
+    }
+
+    try {
+      await runCommand({
+        command: "git",
+        args: ["push", "origin", "main"],
+        cwd: folderPath,
+        env: process.env,
+      });
+    } catch (error: unknown) {
+      throw new PragmaError("GIT_PUSH_FAILED", 400, errorMessage(error));
+    }
+
+    const folders = await listCodeFolders(paths.codeDir);
+    return c.json({ ok: true, folders });
+  });
+
   app.get("/context", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const paths = getWorkspacePaths(workspaceName);
@@ -3841,6 +3870,7 @@ type CodeFolderSummary = {
   git_last_commit_hash: string | null;
   git_last_commit_message: string | null;
   git_last_commit_at: string | null;
+  git_unpushed_count: number | null;
 };
 
 async function listCodeFolders(codeDir: string): Promise<CodeFolderSummary[]> {
@@ -3869,6 +3899,7 @@ async function buildCodeFolderSummary(
     git_last_commit_hash: null,
     git_last_commit_message: null,
     git_last_commit_at: null,
+    git_unpushed_count: null,
   };
 
   if (!(await hasGitMarkerInFolder(folderPath))) {
@@ -3898,6 +3929,18 @@ async function buildCodeFolderSummary(
     .split("\u001f")
     .map((value) => value.trim());
 
+  let unpushedCount: number | null = null;
+  if (remote) {
+    const unpushedRaw = await runGitCaptureOptional(folderPath, [
+      "rev-list",
+      "--count",
+      "@{upstream}..HEAD",
+    ]);
+    if (unpushedRaw !== null && /^\d+$/.test(unpushedRaw.trim())) {
+      unpushedCount = parseInt(unpushedRaw.trim(), 10);
+    }
+  }
+
   return {
     ...base,
     is_git_repo: true,
@@ -3908,6 +3951,7 @@ async function buildCodeFolderSummary(
     git_last_commit_hash: normalizeOptionalGitValue(lastCommitHash),
     git_last_commit_message: normalizeOptionalGitValue(lastCommitMessage),
     git_last_commit_at: normalizeOptionalGitValue(lastCommitAt),
+    git_unpushed_count: unpushedCount,
   };
 }
 

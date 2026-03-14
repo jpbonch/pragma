@@ -22,6 +22,7 @@ import {
   fetchTasks,
   openRuntimeServiceStream,
   pickLocalCodeFolder,
+  pushCodeFolder,
   openConversationThreadStream,
   openTasksStream,
   fetchWorkspaces,
@@ -1388,6 +1389,11 @@ export default function App() {
     return typeof result.path === 'string' ? result.path : ''
   }
 
+  async function handlePushCodeFolder(folderName) {
+    await pushCodeFolder(folderName)
+    await loadCode()
+  }
+
   async function refreshWorkspaces() {
     const next = await fetchWorkspaces()
     setWorkspaces(next)
@@ -2158,6 +2164,7 @@ export default function App() {
             onCloneRepo={handleCloneCodeRepo}
             onCopyLocalFolder={handleCopyCodeFolderFromLocal}
             onPickLocalFolder={handlePickLocalCodeFolder}
+            onPushFolder={handlePushCodeFolder}
           />
         )}
         {activeTab === 'files' && <EmptyPane title="Files" />}

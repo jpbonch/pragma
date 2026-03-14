@@ -416,6 +416,12 @@ export async function pickLocalCodeFolder() {
   })
 }
 
+export async function pushCodeFolder(folderName) {
+  return fetchJson(`/code/folders/${encodeURIComponent(folderName)}/push`, {
+    method: 'POST',
+  }, 60000)
+}
+
 export async function updateContextFile(path, content) {
   return fetchJson('/context/file', {
     method: 'PUT',

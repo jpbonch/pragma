@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react'
+import { GitBranch, GitCommit, ArrowUpCircle, FolderGit2, Globe, Copy, FolderOpen, Upload, AlertCircle, Check } from 'lucide-react'
 
-function formatCommitTimestamp(value) {
-  if (typeof value !== 'string' || !value.trim()) {
-    return ''
-  }
+function timeAgo(value) {
+  if (typeof value !== 'string' || !value.trim()) return ''
   const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) {
-    return value
-  }
-  return parsed.toLocaleString()
+  if (Number.isNaN(parsed.getTime())) return value
+  const seconds = Math.floor((Date.now() - parsed.getTime()) / 1000)
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  if (seconds < 2592000) return `${Math.floor(seconds / 86400)}d ago`
+  return parsed.toLocaleDateString()
 }
 
 export function CodeView({
@@ -18,6 +20,7 @@ export function CodeView({
   onCloneRepo,
   onCopyLocalFolder,
   onPickLocalFolder,
+  onPushFolder,
 }) {
   const [gitUrl, setGitUrl] = useState('')
   const [cloneLoading, setCloneLoading] = useState(false)
@@ -26,22 +29,17 @@ export function CodeView({
   const [copyLoading, setCopyLoading] = useState(false)
   const [copyError, setCopyError] = useState('')
   const [pickLoading, setPickLoading] = useState(false)
+  const [pushingFolder, setPushingFolder] = useState(null)
+  const [pushError, setPushError] = useState('')
+  const [pushSuccess, setPushSuccess] = useState('')
 
   const folderItems = useMemo(() => {
-    if (!Array.isArray(folders)) {
-      return []
-    }
+    if (!Array.isArray(folders)) return []
     return folders
       .map((folder) => {
-        if (!folder || typeof folder !== 'object') {
-          return null
-        }
-
+        if (!folder || typeof folder !== 'object') return null
         const name = typeof folder.name === 'string' ? folder.name : ''
-        if (!name) {
-          return null
-        }
-
+        if (!name) return null
         const path = typeof folder.path === 'string' && folder.path ? folder.path : `code/${name}`
         return {
           name,
@@ -52,9 +50,9 @@ export function CodeView({
           remote: typeof folder.git_remote === 'string' ? folder.git_remote : '',
           dirty: typeof folder.git_dirty === 'boolean' ? folder.git_dirty : null,
           lastCommitHash: typeof folder.git_last_commit_hash === 'string' ? folder.git_last_commit_hash : '',
-          lastCommitMessage:
-            typeof folder.git_last_commit_message === 'string' ? folder.git_last_commit_message : '',
+          lastCommitMessage: typeof folder.git_last_commit_message === 'string' ? folder.git_last_commit_message : '',
           lastCommitAt: typeof folder.git_last_commit_at === 'string' ? folder.git_last_commit_at : '',
+          unpushedCount: typeof folder.git_unpushed_count === 'number' ? folder.git_unpushed_count : null,
         }
       })
       .filter(Boolean)
@@ -63,10 +61,7 @@ export function CodeView({
   async function handleCloneSubmit(event) {
     event.preventDefault()
     const nextUrl = gitUrl.trim()
-    if (!nextUrl || cloneLoading) {
-      return
-    }
-
+    if (!nextUrl || cloneLoading) return
     setCloneLoading(true)
     setCloneError('')
     try {
@@ -82,10 +77,7 @@ export function CodeView({
   async function handleCopySubmit(event) {
     event.preventDefault()
     const nextPath = localPath.trim()
-    if (copyLoading || !nextPath) {
-      return
-    }
-
+    if (copyLoading || !nextPath) return
     setCopyLoading(true)
     setCopyError('')
     try {
@@ -99,10 +91,7 @@ export function CodeView({
   }
 
   async function handlePickFolder() {
-    if (copyLoading || pickLoading) {
-      return
-    }
-
+    if (copyLoading || pickLoading) return
     setPickLoading(true)
     setCopyError('')
     try {
@@ -117,107 +106,213 @@ export function CodeView({
     }
   }
 
+  async function handlePush(folderName) {
+    if (pushingFolder) return
+    setPushingFolder(folderName)
+    setPushError('')
+    setPushSuccess('')
+    try {
+      await onPushFolder(folderName)
+      setPushSuccess(folderName)
+      setTimeout(() => setPushSuccess(''), 3000)
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPushingFolder(null)
+    }
+  }
+
   return (
-    <section className="code-view">
-      <div className="code-view-header">
-        <h1>Code</h1>
+    <section className="cv">
+      <div className="cv-header">
+        <div className="cv-header-inner">
+          <h1 className="cv-title">Code</h1>
+          <span className="cv-subtitle">{folderItems.length} {folderItems.length === 1 ? 'repository' : 'repositories'}</span>
+        </div>
       </div>
 
-      <div className="code-view-body">
-        <aside className="code-view-folders">
-          <div className="code-section-title">Folders</div>
-          {loading && <div className="muted">Loading...</div>}
-          {error && <div className="error">Error: {error}</div>}
+      <div className="cv-content">
+        {loading && (
+          <div className="cv-loading">
+            <div className="cv-spinner" />
+            <span>Loading repositories...</span>
+          </div>
+        )}
 
-          {!loading && !error && folderItems.length === 0 && (
-            <div className="muted">No folders in code/ yet.</div>
-          )}
+        {error && (
+          <div className="cv-error">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+        )}
 
-          {!loading && !error && folderItems.length > 0 && (
-            <ul className="code-folder-list">
-              {folderItems.map((folder) => (
-                <li key={folder.name} className="code-folder-item">
-                  <div className="code-folder-name">{folder.name}</div>
-                  <div className="code-folder-meta">{folder.path}</div>
+        {!loading && !error && (
+          <>
+            {pushError && (
+              <div className="cv-error" style={{ margin: '0 0 12px' }}>
+                <AlertCircle size={16} />
+                <span>Push failed: {pushError}</span>
+              </div>
+            )}
 
-                  {!folder.isGitRepo && (
-                    <div className="code-folder-meta">No git repository detected.</div>
-                  )}
-
-                  {folder.isGitRepo && (
-                    <>
-                      <div className="code-folder-meta">
-                        Branch: {folder.branch || 'unknown'}
-                        {folder.defaultBranch ? ` (default: ${folder.defaultBranch})` : ''}
-                        {folder.dirty === null ? '' : folder.dirty ? ' • Dirty' : ' • Clean'}
+            {folderItems.length === 0 ? (
+              <div className="cv-empty">
+                <FolderGit2 size={40} strokeWidth={1.5} />
+                <p className="cv-empty-title">No repositories yet</p>
+                <p className="cv-empty-desc">Clone a repo or copy a local folder to get started.</p>
+              </div>
+            ) : (
+              <div className="cv-repos">
+                {folderItems.map((folder) => (
+                  <div key={folder.name} className="cv-repo-card">
+                    <div className="cv-repo-header">
+                      <div className="cv-repo-name-row">
+                        <FolderGit2 size={16} className="cv-repo-icon" />
+                        <span className="cv-repo-name">{folder.name}</span>
+                        {folder.dirty === false && (
+                          <span className="cv-badge cv-badge-clean">Clean</span>
+                        )}
+                        {folder.dirty === true && (
+                          <span className="cv-badge cv-badge-dirty">Modified</span>
+                        )}
                       </div>
-                      {folder.remote && (
-                        <div className="code-folder-meta">Remote: {folder.remote}</div>
+                      {folder.isGitRepo && folder.unpushedCount > 0 && (
+                        <button
+                          className="cv-push-btn"
+                          onClick={() => handlePush(folder.name)}
+                          disabled={pushingFolder === folder.name}
+                          title="Push to origin main"
+                        >
+                          {pushingFolder === folder.name ? (
+                            <div className="cv-spinner-sm" />
+                          ) : pushSuccess === folder.name ? (
+                            <Check size={14} />
+                          ) : (
+                            <ArrowUpCircle size={14} />
+                          )}
+                          <span>
+                            {pushingFolder === folder.name
+                              ? 'Pushing...'
+                              : pushSuccess === folder.name
+                                ? 'Pushed!'
+                                : 'Push to main'}
+                          </span>
+                        </button>
                       )}
-                      {(folder.lastCommitHash || folder.lastCommitMessage) && (
-                        <div className="code-folder-meta">
-                          Last: {folder.lastCommitHash || 'unknown'}
-                          {folder.lastCommitMessage ? ` - ${folder.lastCommitMessage}` : ''}
-                          {folder.lastCommitAt
-                            ? ` • ${formatCommitTimestamp(folder.lastCommitAt)}`
-                            : ''}
+                    </div>
+
+                    {!folder.isGitRepo ? (
+                      <div className="cv-repo-nogit">Not a git repository</div>
+                    ) : (
+                      <div className="cv-repo-details">
+                        <div className="cv-repo-detail-row">
+                          <GitBranch size={13} />
+                          <span className="cv-repo-detail-label">Branch</span>
+                          <span className="cv-repo-detail-value">{folder.branch || 'unknown'}</span>
+                          {folder.defaultBranch && folder.branch !== folder.defaultBranch && (
+                            <span className="cv-repo-detail-secondary">default: {folder.defaultBranch}</span>
+                          )}
                         </div>
-                      )}
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </aside>
 
-        <div className="code-view-actions">
-          <form className="code-card" onSubmit={handleCloneSubmit}>
-            <div className="code-card-title">Clone Git Repo</div>
-            <input
-              className="code-input"
-              type="text"
-              value={gitUrl}
-              onChange={(event) => setGitUrl(event.target.value)}
-              placeholder="https://github.com/org/repo.git"
-              disabled={cloneLoading}
-            />
-            <button className="code-btn" type="submit" disabled={cloneLoading || !gitUrl.trim()}>
-              {cloneLoading ? 'Cloning...' : 'Clone'}
-            </button>
-            {cloneError && <div className="error">Error: {cloneError}</div>}
-          </form>
+                        {folder.remote && (
+                          <div className="cv-repo-detail-row">
+                            <Globe size={13} />
+                            <span className="cv-repo-detail-label">Remote</span>
+                            <span className="cv-repo-detail-value cv-repo-remote">{folder.remote}</span>
+                          </div>
+                        )}
 
-          <form className="code-card" onSubmit={handleCopySubmit}>
-            <div className="code-card-title">Copy Local Folder (On Disk)</div>
-            <div className="code-path-picker">
-              <button
-                className="code-btn code-btn-secondary"
-                type="button"
-                onClick={handlePickFolder}
-                disabled={copyLoading || pickLoading}
-              >
-                {pickLoading ? 'Selecting...' : 'Select Folder'}
-              </button>
+                        {(folder.lastCommitHash || folder.lastCommitMessage) && (
+                          <div className="cv-repo-detail-row">
+                            <GitCommit size={13} />
+                            <span className="cv-repo-detail-label">Commit</span>
+                            <code className="cv-repo-hash">{folder.lastCommitHash}</code>
+                            <span className="cv-repo-detail-value cv-repo-commit-msg">{folder.lastCommitMessage}</span>
+                            {folder.lastCommitAt && (
+                              <span className="cv-repo-detail-secondary">{timeAgo(folder.lastCommitAt)}</span>
+                            )}
+                          </div>
+                        )}
+
+                        {folder.unpushedCount !== null && (
+                          <div className="cv-repo-detail-row">
+                            <ArrowUpCircle size={13} />
+                            <span className="cv-repo-detail-label">Unpushed</span>
+                            <span className={`cv-repo-detail-value ${folder.unpushedCount > 0 ? 'cv-unpushed-highlight' : ''}`}>
+                              {folder.unpushedCount === 0 ? 'Up to date' : `${folder.unpushedCount} commit${folder.unpushedCount !== 1 ? 's' : ''}`}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="cv-actions">
+              <form className="cv-action-card" onSubmit={handleCloneSubmit}>
+                <div className="cv-action-header">
+                  <Copy size={16} />
+                  <span className="cv-action-title">Clone Repository</span>
+                </div>
+                <div className="cv-action-body">
+                  <input
+                    className="cv-input"
+                    type="text"
+                    value={gitUrl}
+                    onChange={(event) => setGitUrl(event.target.value)}
+                    placeholder="https://github.com/org/repo.git"
+                    disabled={cloneLoading}
+                  />
+                  <button className="cv-btn cv-btn-primary" type="submit" disabled={cloneLoading || !gitUrl.trim()}>
+                    {cloneLoading ? 'Cloning...' : 'Clone'}
+                  </button>
+                </div>
+                {cloneError && (
+                  <div className="cv-inline-error">
+                    <AlertCircle size={13} />
+                    <span>{cloneError}</span>
+                  </div>
+                )}
+              </form>
+
+              <form className="cv-action-card" onSubmit={handleCopySubmit}>
+                <div className="cv-action-header">
+                  <FolderOpen size={16} />
+                  <span className="cv-action-title">Add Local Folder</span>
+                </div>
+                <div className="cv-action-body">
+                  <button
+                    className="cv-btn cv-btn-secondary"
+                    type="button"
+                    onClick={handlePickFolder}
+                    disabled={copyLoading || pickLoading}
+                  >
+                    {pickLoading ? 'Selecting...' : 'Browse...'}
+                  </button>
+                  <input
+                    className="cv-input"
+                    type="text"
+                    value={localPath}
+                    onChange={(event) => setLocalPath(event.target.value)}
+                    placeholder="/path/to/local/folder"
+                    disabled={copyLoading}
+                  />
+                  <button className="cv-btn cv-btn-primary" type="submit" disabled={copyLoading || !localPath.trim()}>
+                    {copyLoading ? 'Copying...' : 'Copy'}
+                  </button>
+                </div>
+                {copyError && (
+                  <div className="cv-inline-error">
+                    <AlertCircle size={13} />
+                    <span>{copyError}</span>
+                  </div>
+                )}
+              </form>
             </div>
-            <input
-              className="code-input"
-              type="text"
-              value={localPath}
-              onChange={(event) => setLocalPath(event.target.value)}
-              placeholder="/absolute/path/to/local/folder"
-              disabled={copyLoading}
-            />
-            <button
-              className="code-btn"
-              type="submit"
-              disabled={copyLoading || !localPath.trim()}
-            >
-              {copyLoading ? 'Copying...' : 'Copy Folder'}
-            </button>
-            {copyError && <div className="error">Error: {copyError}</div>}
-          </form>
-        </div>
+          </>
+        )}
       </div>
     </section>
   )
