@@ -30,12 +30,8 @@ export function Sidebar({
   workspaces,
   activeWorkspaceName,
   workspacesLoading,
-  plans = [],
-  plansLoading = false,
   chats = [],
   chatsLoading = false,
-  activePlanThreadId = '',
-  onOpenPlan,
   onOpenChat,
   onHideChat,
   services = [],
@@ -180,28 +176,6 @@ export function Sidebar({
               </div>
             )
           })}
-        </div>
-      </section>
-
-      <section className="sidebar-plans">
-        <div className="sidebar-plans-title">Plans</div>
-        <div className="sidebar-plans-list">
-          {plansLoading && <div className="sidebar-chat-empty">Loading plans...</div>}
-          {!plansLoading && plans.length === 0 && (
-            <div className="sidebar-chat-empty">No pending plans</div>
-          )}
-
-          {!plansLoading &&
-            plans.map((plan) => (
-              <button
-                key={plan.id}
-                className={`sidebar-plan-item ${activePlanThreadId === plan.id ? 'active' : ''}`}
-                onClick={() => onOpenPlan?.(plan.id)}
-                title={plan.plan_title || 'New plan'}
-              >
-                <div className="sidebar-plan-item-title">{plan.plan_title || 'New plan'}</div>
-              </button>
-            ))}
         </div>
       </section>
 

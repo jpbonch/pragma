@@ -238,11 +238,32 @@ function DoneTaskRow({ task, onClick }) {
   )
 }
 
+function PlanRow({ plan, isActive, onClick }) {
+  return (
+    <div
+      className={`plan-row ${isActive ? 'active' : ''}`}
+      onClick={() => onClick?.(plan.id)}
+    >
+      <div className="plan-row-dot">
+        <div className="plan-row-dot-inner" />
+      </div>
+      <span className="plan-row-title">{plan.plan_title || 'New plan'}</span>
+      {plan.plan_preview && (
+        <span className="plan-row-preview">{plan.plan_preview}</span>
+      )}
+    </div>
+  )
+}
+
 export function FeedView({
   tasks,
   loading,
   error,
   recipientAgents = [],
+  plans = [],
+  plansLoading = false,
+  activePlanThreadId = '',
+  onOpenPlan,
   onOpenTaskConversation,
   onPickTaskRecipient,
   onCancelTask,
@@ -279,6 +300,22 @@ export function FeedView({
     <section className="feed">
       {loading && <div className="muted">Loading tasks...</div>}
       {error && <div className="error">Error: {error}</div>}
+
+      {!plansLoading && plans.length > 0 && (
+        <>
+          <SectionLabel count={plans.length}>Plans</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {plans.map((plan) => (
+              <PlanRow
+                key={plan.id}
+                plan={plan}
+                isActive={activePlanThreadId === plan.id}
+                onClick={onOpenPlan}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       {!loading && !error && tasks.length === 0 && (
         <div className="muted">No tasks found.</div>

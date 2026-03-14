@@ -2048,16 +2048,10 @@ export default function App() {
         workspaces={workspaces}
         activeWorkspaceName={activeWorkspaceName}
         workspacesLoading={workspacesLoading}
-        plans={sidebarPlans}
-        plansLoading={sidebarPlansLoading}
         chats={visibleSidebarChats}
         chatsLoading={sidebarChatsLoading}
         services={visibleRuntimeServices}
         activeServiceId={selectedServiceId}
-        activePlanThreadId={activePlanThreadId}
-        onOpenPlan={(threadId) => {
-          void handleOpenPlan(threadId)
-        }}
         onOpenChat={(threadId) => {
           void handleOpenChat(threadId)
         }}
@@ -2088,6 +2082,12 @@ export default function App() {
               loading={tasksLoading}
               error={tasksError}
               recipientAgents={recipientAgents}
+              plans={sidebarPlans}
+              plansLoading={sidebarPlansLoading}
+              activePlanThreadId={activePlanThreadId}
+              onOpenPlan={(threadId) => {
+                void handleOpenPlan(threadId)
+              }}
               onOpenTaskConversation={(task) => {
                 void handleOpenTaskConversation(task)
               }}

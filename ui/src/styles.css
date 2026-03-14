@@ -620,6 +620,60 @@ select { cursor: pointer; }
   animation: pulse 2.5s ease-in-out infinite;
 }
 
+/* Plan rows (feed) */
+.plan-row {
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #ecebe8;
+  border-radius: 10px;
+  transition: background 0.1s, border-color 0.1s, box-shadow 0.1s;
+}
+.plan-row:hover {
+  border-color: #dddcd8;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+.plan-row.active {
+  border-color: #d3d2ce;
+  background: rgba(0, 0, 0, 0.02);
+}
+.plan-row-dot {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.plan-row-dot-inner {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9B6DD7;
+}
+.plan-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #37352F;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.plan-row-preview {
+  font-size: 12px;
+  color: #9B9A97;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: auto;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
 .task-done-check {
   width: 16px;
   height: 16px;
