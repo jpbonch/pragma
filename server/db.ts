@@ -146,6 +146,7 @@ export function getWorkspacePaths(name: string): {
   contextDir: string;
   codeDir: string;
   outputsDir: string;
+  uploadsDir: string;
   worktreesDir: string;
   goalFile: string;
 } {
@@ -161,6 +162,7 @@ export function getWorkspacePaths(name: string): {
     contextDir,
     codeDir: join(workspaceDir, "code"),
     outputsDir: join(workspaceDir, "outputs"),
+    uploadsDir: join(workspaceDir, "uploads"),
     worktreesDir: join(rootDir, "worktrees"),
     goalFile: join(contextDir, "goal.md"),
   };
@@ -260,6 +262,7 @@ export async function createWorkspace(input: {
   await mkdir(paths.contextDir, { recursive: true });
   await mkdir(paths.codeDir, { recursive: true });
   await mkdir(paths.outputsDir, { recursive: true });
+  await mkdir(paths.uploadsDir, { recursive: true });
   await mkdir(paths.worktreesDir, { recursive: true });
 
   await initializeDatabase(name);

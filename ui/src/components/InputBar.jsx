@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, ChevronDown, MessageSquare, Play, Plus, Route, Settings, Square } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, MessageSquare, Play, Plus, Route, Settings, Square, X } from 'lucide-react'
 
 const MODES = [
   { id: 'plan', icon: Route, label: 'Plan', desc: 'Break work into steps' },
@@ -53,6 +53,7 @@ export function InputBar({
       'medium',
     ),
   )
+  const [attachments, setAttachments] = useState([])
 
   function setMode(value) {
     const next = typeof value === 'function' ? value(mode) : value
@@ -69,6 +70,7 @@ export function InputBar({
 
   const toolsRef = useRef(null)
   const textareaRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   const selectedMode = MODES.find((m) => m.id === mode) ?? MODES[0]
   const SelectedModeIcon = selectedMode.icon
@@ -115,13 +117,27 @@ export function InputBar({
     }
   }, [openMenu])
 
+  function handleFileSelect(e) {
+    const files = Array.from(e.target.files || [])
+    for (const file of files) {
+      setAttachments((prev) => [...prev, { file, name: file.name }])
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  function removeAttachment(index) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index))
+  }
+
   function submitInput() {
     if (disabled) {
       return
     }
 
     const message = input.trim()
-    if (!message) {
+    if (!message && attachments.length === 0) {
       return
     }
 
@@ -129,8 +145,10 @@ export function InputBar({
       message,
       mode,
       reasoningEffort,
+      attachments: attachments.length > 0 ? [...attachments] : undefined,
     })
     setInput('')
+    setAttachments([])
     setOpenMenu(null)
 
     if (textareaRef.current) {
@@ -171,9 +189,40 @@ export function InputBar({
           }}
         />
 
+        {attachments.length > 0 && (
+          <div className="attachment-chips">
+            {attachments.map((att, i) => (
+              <span key={i} className="attachment-chip">
+                <span className="attachment-chip-name">{att.name}</span>
+                <button
+                  className="attachment-chip-remove"
+                  onClick={() => removeAttachment(i)}
+                  aria-label={`Remove ${att.name}`}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFileSelect}
+        />
+
         <div className="input-bottom-row" ref={toolsRef}>
           <div className="input-left-tools">
-            <button className="attach-btn" title="Attach files" aria-label="Attach files" disabled={disabled}>
+            <button
+              className="attach-btn"
+              title="Attach files"
+              aria-label="Attach files"
+              disabled={disabled}
+              onClick={() => fileInputRef.current?.click()}
+            >
               <Plus size={14} />
             </button>
 
@@ -272,7 +321,7 @@ export function InputBar({
                 className="send-btn"
                 style={{ background: mode === 'chat' ? '#4B83D6' : '#2383e2' }}
                 onClick={() => submitInput()}
-                disabled={disabled || !input.trim()}
+                disabled={disabled || (!input.trim() && attachments.length === 0)}
                 title="Send"
               >
                 <ArrowUp size={18} strokeWidth={2.6} />

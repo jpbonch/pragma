@@ -479,6 +479,40 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     return c.json({ ok: true });
   });
 
+  app.post("/uploads", async (c) => {
+    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+    const workspaceName = await requireActiveWorkspaceName();
+    const paths = getWorkspacePaths(workspaceName);
+
+    let formData: Awaited<ReturnType<typeof c.req.formData>>;
+    try {
+      formData = await c.req.formData();
+    } catch (error: unknown) {
+      throw new PragmaError("INVALID_UPLOAD", 400, errorMessage(error));
+    }
+
+    const fileEntry = formData.get("file");
+    if (!isUploadedFile(fileEntry)) {
+      throw new PragmaError("INVALID_UPLOAD", 400, "No file was provided.");
+    }
+
+    const buffer = Buffer.from(await fileEntry.arrayBuffer());
+    if (buffer.length > MAX_FILE_SIZE) {
+      throw new PragmaError("FILE_TOO_LARGE", 400, "File exceeds the 50MB size limit.");
+    }
+
+    const rawName = (fileEntry as { name?: string }).name || "file";
+    const sanitized = rawName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const uniqueName = `${Date.now()}-${sanitized}`;
+
+    await mkdir(paths.uploadsDir, { recursive: true });
+    const dest = join(paths.uploadsDir, uniqueName);
+    await writeFile(dest, buffer);
+
+    return c.json({ path: dest, name: rawName }, 201);
+  });
+
   app.get("/workspaces", async (c) => {
     const [names, activeName] = await Promise.all([
       listWorkspaceNames(),

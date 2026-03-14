@@ -35,6 +35,7 @@ import {
   streamConversationTurn,
   updateAgent,
   updateContextFile,
+  uploadFile,
 } from './api'
 import { CodeView } from './components/CodeView'
 import { ContextView } from './components/ContextView'
@@ -1513,13 +1514,29 @@ export default function App() {
     })
   }
 
-  async function handleInputSubmit({ message, mode, reasoningEffort }) {
+  async function handleInputSubmit({ message, mode, reasoningEffort, attachments }) {
     setWorkspaceError('')
+
+    let finalMessage = message
+    if (attachments && attachments.length > 0) {
+      try {
+        const uploaded = await Promise.all(
+          attachments.map((att) => uploadFile(att.file)),
+        )
+        const lines = uploaded.map(
+          (u) => `[Attached file: ${u.path}]`,
+        )
+        finalMessage = (message ? message + '\n\n' : '') + lines.join('\n')
+      } catch (error) {
+        setWorkspaceError(errorText(error))
+        return
+      }
+    }
 
     if (mode === 'execute') {
       try {
         await createExecuteTask({
-          prompt: message,
+          prompt: finalMessage,
           reasoning_effort: reasoningEffort,
         })
         await loadTasks()
@@ -1538,13 +1555,13 @@ export default function App() {
       isWaitingForHumanResponse(conversationStatus)
     ) {
       try {
-        await respondToTask(conversation.taskId, message)
+        await respondToTask(conversation.taskId, finalMessage)
         setConversation((prev) => ({
           ...prev,
           taskStatus: 'queued',
           entries: [
             ...prev.entries,
-            { id: nextEntryId('user'), type: 'user', content: message },
+            { id: nextEntryId('user'), type: 'user', content: finalMessage },
             {
               id: nextEntryId('status'),
               type: 'status',
@@ -1598,7 +1615,7 @@ export default function App() {
 
     const nextThreadId = reuseExisting ? conversation.threadId || undefined : undefined
     const nextEntries = reuseExisting ? [...conversation.entries] : []
-    nextEntries.push({ id: nextEntryId('user'), type: 'user', content: message })
+    nextEntries.push({ id: nextEntryId('user'), type: 'user', content: finalMessage })
     const streamAssistantAgent = runtime ?? orchestratorRuntime ?? null
     const streamAssistantIdentity = {
       agentId: streamAssistantAgent?.id || ORCHESTRATOR_AGENT_ID,
@@ -1635,7 +1652,7 @@ export default function App() {
       await streamConversationTurn(
         {
           thread_id: nextThreadId,
-          message,
+          message: finalMessage,
           mode,
           harness: effectiveHarness,
           model_label: effectiveModelLabel,

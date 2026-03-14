@@ -508,6 +508,24 @@ export async function fetchPlans(limit = 20, cursor = '') {
   return data.plans
 }
 
+export async function uploadFile(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetchWithTimeout(`${API_BASE_URL}/uploads`, {
+    method: 'POST',
+    body: form,
+  }, DEFAULT_REQUEST_TIMEOUT_MS)
+  if (!response.ok) {
+    let body = null
+    try { body = await response.json() } catch {}
+    const code = body && typeof body === 'object' && typeof body.error === 'string' ? body.error : `HTTP_${response.status}`
+    const message = body && typeof body === 'object' && typeof body.message === 'string' ? body.message : `HTTP ${response.status}`
+    throw new ApiError(message, response.status, code)
+  }
+  const data = await response.json()
+  return asObject(data, 'Invalid upload response.')
+}
+
 export async function streamConversationTurn(payload, { onEvent, signal } = {}) {
   let response
   try {
