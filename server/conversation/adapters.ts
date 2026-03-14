@@ -309,20 +309,20 @@ function resolveSandboxRoot(input: AdapterSendTurnInput): string {
     return resolvedCwd;
   }
 
-  const rawJobWorkspace = input.env?.SALMON_JOB_WORKSPACE;
-  const jobWorkspace = typeof rawJobWorkspace === "string" ? rawJobWorkspace.trim() : "";
-  if (!jobWorkspace) {
-    throw new Error("Execute mode requires SALMON_JOB_WORKSPACE.");
+  const rawTaskWorkspace = input.env?.SALMON_TASK_WORKSPACE;
+  const taskWorkspace = typeof rawTaskWorkspace === "string" ? rawTaskWorkspace.trim() : "";
+  if (!taskWorkspace) {
+    throw new Error("Execute mode requires SALMON_TASK_WORKSPACE.");
   }
 
-  const resolvedJobWorkspace = resolve(jobWorkspace);
-  if (resolvedCwd !== resolvedJobWorkspace) {
+  const resolvedTaskWorkspace = resolve(taskWorkspace);
+  if (resolvedCwd !== resolvedTaskWorkspace) {
     throw new Error(
-      `Execute mode must run inside the active job worktree. cwd=${resolvedCwd}; job_workspace=${resolvedJobWorkspace}`,
+      `Execute mode must run inside the active task worktree. cwd=${resolvedCwd}; task_workspace=${resolvedTaskWorkspace}`,
     );
   }
 
-  return resolvedJobWorkspace;
+  return resolvedTaskWorkspace;
 }
 
 function withReasoningEffort(

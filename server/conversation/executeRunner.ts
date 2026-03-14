@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
 import { getConversationAdapter } from "./adapters";
 import {
-  checkpointJobRepos,
-  parseJobGitState,
-  prepareJobWorkspace,
-  serializeJobGitState,
+  checkpointTaskRepos,
+  parseTaskGitState,
+  prepareTaskWorkspace,
+  serializeTaskGitState,
 } from "./gitWorkflow";
-import type { JobGitState } from "./gitWorkflow";
+import type { TaskGitState } from "./gitWorkflow";
 import { buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
 import {
   closeThread,
@@ -20,11 +20,11 @@ import {
   insertMessage,
   updateThreadSession,
 } from "./store";
-import type { HarnessId, JobStatus, ReasoningEffort } from "./types";
+import type { HarnessId, TaskStatus, ReasoningEffort } from "./types";
 
 type EnqueueExecuteInput = {
   workspaceName: string;
-  jobId: string;
+  taskId: string;
   threadId: string;
   prompt: string;
   requestedRecipientAgentId?: string | null;
@@ -41,10 +41,10 @@ type AgentRow = {
   model_id: string;
 };
 
-type JobStatusChangedInput = {
+type TaskStatusChangedInput = {
   workspaceName: string;
-  jobId: string;
-  status: JobStatus;
+  taskId: string;
+  status: TaskStatus;
   source: string;
 };
 
@@ -57,18 +57,18 @@ type ThreadUpdatedInput = {
 export class ExecuteRunner {
   private readonly apiUrl: string;
   private readonly salmonCliCommand: string;
-  private readonly onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+  private readonly onTaskStatusChanged?: (input: TaskStatusChangedInput) => void | Promise<void>;
   private readonly onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
 
   constructor(options: {
     apiUrl: string;
     salmonCliCommand: string;
-    onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+    onTaskStatusChanged?: (input: TaskStatusChangedInput) => void | Promise<void>;
     onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
   }) {
     this.apiUrl = options.apiUrl;
     this.salmonCliCommand = options.salmonCliCommand;
-    this.onJobStatusChanged = options.onJobStatusChanged;
+    this.onTaskStatusChanged = options.onTaskStatusChanged;
     this.onThreadUpdated = options.onThreadUpdated;
   }
 
@@ -76,7 +76,7 @@ export class ExecuteRunner {
     runExecuteTask(input, {
       apiUrl: this.apiUrl,
       salmonCliCommand: this.salmonCliCommand,
-      onJobStatusChanged: this.onJobStatusChanged,
+      onTaskStatusChanged: this.onTaskStatusChanged,
       onThreadUpdated: this.onThreadUpdated,
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -90,37 +90,37 @@ async function runExecuteTask(
   options: {
     apiUrl: string;
     salmonCliCommand: string;
-    onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
+    onTaskStatusChanged?: (input: TaskStatusChangedInput) => void | Promise<void>;
     onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
   },
 ): Promise<void> {
   const db = await openDatabase(input.workspaceName);
   const paths = getWorkspacePaths(input.workspaceName);
 
-  const jobStateResult = await db.query<{ git_state_json: string | null }>(
+  const taskStateResult = await db.query<{ git_state_json: string | null }>(
     `
 SELECT git_state_json
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-    [input.jobId],
+    [input.taskId],
   );
-  if (!jobStateResult.rows[0]) {
-    throw new Error(`Job not found: ${input.jobId}`);
+  if (!taskStateResult.rows[0]) {
+    throw new Error(`Task not found: ${input.taskId}`);
   }
 
-  const existingGitState = parseJobGitState(jobStateResult.rows[0].git_state_json);
-  const prepared = await prepareJobWorkspace({
+  const existingGitState = parseTaskGitState(taskStateResult.rows[0].git_state_json);
+  const prepared = await prepareTaskWorkspace({
     workspacePaths: paths,
-    jobId: input.jobId,
+    taskId: input.taskId,
     existingState: existingGitState,
   });
   const outputDir = prepared.outputDir;
-  const jobWorkspaceDir = prepared.jobWorkspaceDir;
+  const taskWorkspaceDir = prepared.taskWorkspaceDir;
   const gitState = prepared.gitState;
   const preferredCodePath = resolvePreferredCodePath(gitState);
-  const serializedGitState = serializeJobGitState(gitState);
+  const serializedGitState = serializeTaskGitState(gitState);
   const logFile = join(outputDir, "events.jsonl");
   await mkdir(outputDir, { recursive: true });
 
@@ -129,10 +129,10 @@ LIMIT 1
   const task = input.prompt.trim();
   const reasoningEffort = input.reasoningEffort;
   const shouldSkipOrchestrator = input.skipOrchestratorSelection === true;
-  const notifyJobStatus = async (status: JobStatus, source: string): Promise<void> => {
-    await options.onJobStatusChanged?.({
+  const notifyTaskStatus = async (status: TaskStatus, source: string): Promise<void> => {
+    await options.onTaskStatusChanged?.({
       workspaceName: input.workspaceName,
-      jobId: input.jobId,
+      taskId: input.taskId,
       status,
       source,
     });
@@ -168,7 +168,7 @@ LIMIT 1
   if (shouldSkipOrchestrator) {
     await db.query(
       `
-UPDATE jobs
+UPDATE tasks
 SET status = 'running',
     output_dir = $2,
     git_branch_name = $3,
@@ -178,18 +178,18 @@ SET status = 'running',
 WHERE id = $1
 `,
       [
-        input.jobId,
+        input.taskId,
         outputDir,
         gitState.branch_name,
         serializedGitState,
         input.requestedRecipientAgentId ?? null,
       ],
     );
-    await notifyJobStatus("running", "execute_runner");
+    await notifyTaskStatus("running", "execute_runner");
   } else {
     await db.query(
       `
-UPDATE jobs
+UPDATE tasks
 SET status = 'orchestrating',
     output_dir = $2,
     git_branch_name = $3,
@@ -198,9 +198,9 @@ SET status = 'orchestrating',
     test_commands_json = NULL
 WHERE id = $1
 `,
-      [input.jobId, outputDir, gitState.branch_name, serializedGitState],
+      [input.taskId, outputDir, gitState.branch_name, serializedGitState],
     );
-    await notifyJobStatus("orchestrating", "execute_runner");
+    await notifyTaskStatus("orchestrating", "execute_runner");
   }
 
   try {
@@ -270,7 +270,7 @@ WHERE id = $1
         turnId,
         eventName: "orchestrator_started",
         payload: {
-          job_id: input.jobId,
+          task_id: input.taskId,
           orchestrator_agent_id: orchestrator.id,
           harness: orchestrator.harness,
           model_label: orchestrator.model_label,
@@ -281,7 +281,7 @@ WHERE id = $1
 
       await appendJsonLine(logFile, {
         type: "orchestrator_started",
-        job_id: input.jobId,
+        task_id: input.taskId,
         thread_id: input.threadId,
         turn_id: turnId,
         orchestrator_agent_id: orchestrator.id,
@@ -307,15 +307,15 @@ WHERE id = $1
         prompt: orchestratorPrompt,
         modelId: orchestrator.model_id,
         sessionId: null,
-        cwd: jobWorkspaceDir,
+        cwd: taskWorkspaceDir,
         env: buildAgentRuntimeEnv({
           apiUrl: options.apiUrl,
           salmonCliCommand: options.salmonCliCommand,
-          codeDir: join(jobWorkspaceDir, "code"),
+          codeDir: join(taskWorkspaceDir, "code"),
           outputDir,
-          jobWorkspaceDir,
+          taskWorkspaceDir,
           workspaceName: input.workspaceName,
-          jobId: input.jobId,
+          taskId: input.taskId,
           threadId: input.threadId,
           turnId,
           agentId: orchestrator.id,
@@ -355,7 +355,7 @@ WHERE id = $1
         selectionStatus = "manual_selected";
         selectionReason = "Manual recipient override.";
       } else {
-        const selectedRecipientId = await getJobAssignedRecipientId(db, input.jobId);
+        const selectedRecipientId = await getTaskAssignedRecipientId(db, input.taskId);
         if (selectedRecipientId) {
           const match = workers.find((worker) => worker.id === selectedRecipientId) ?? null;
           if (!match) {
@@ -411,15 +411,15 @@ WHERE id = $1
 
         await db.query(
           `
-UPDATE jobs
+UPDATE tasks
 SET status = 'waiting_for_recipient',
     assigned_to = NULL,
     session_id = $2
 WHERE id = $1
 `,
-          [input.jobId, orchestratorResult.sessionId],
+          [input.taskId, orchestratorResult.sessionId],
         );
-        await notifyJobStatus("waiting_for_recipient", "execute_runner");
+        await notifyTaskStatus("waiting_for_recipient", "execute_runner");
 
         await appendJsonLine(logFile, {
           type: "recipient_required",
@@ -460,14 +460,14 @@ WHERE id = $1
     if (!shouldSkipOrchestrator) {
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET assigned_to = $2,
     status = 'running'
 WHERE id = $1
 `,
-        [input.jobId, selectedWorker.id],
+        [input.taskId, selectedWorker.id],
       );
-      await notifyJobStatus("running", "execute_runner");
+      await notifyTaskStatus("running", "execute_runner");
     }
 
     await insertThreadEvent({
@@ -491,7 +491,7 @@ WHERE id = $1
       reasoningEffort,
       salmonCliCommand: options.salmonCliCommand,
       preferredCodePath,
-      jobWorkspaceDir,
+      taskWorkspaceDir,
     });
 
     let workerText = "";
@@ -499,15 +499,15 @@ WHERE id = $1
       prompt: workerPrompt,
       modelId: selectedWorker.model_id,
       sessionId: null,
-      cwd: jobWorkspaceDir,
+      cwd: taskWorkspaceDir,
       env: buildAgentRuntimeEnv({
         apiUrl: options.apiUrl,
         salmonCliCommand: options.salmonCliCommand,
-        codeDir: join(jobWorkspaceDir, "code"),
+        codeDir: join(taskWorkspaceDir, "code"),
         outputDir,
-        jobWorkspaceDir,
+        taskWorkspaceDir,
         workspaceName: input.workspaceName,
-        jobId: input.jobId,
+        taskId: input.taskId,
         threadId: input.threadId,
         turnId,
         agentId: selectedWorker.id,
@@ -578,36 +578,36 @@ WHERE id = $1
       },
     });
 
-    await checkpointJobRepos({
+    await checkpointTaskRepos({
       workspacePaths: paths,
-      jobId: input.jobId,
+      taskId: input.taskId,
       gitState,
-      commitMessage: `salmon: job ${input.jobId} checkpoint`,
+      commitMessage: `salmon: task ${input.taskId} checkpoint`,
     });
 
     await closeThread(db, input.threadId);
-    const statusResult = await db.query<{ status: JobStatus }>(
+    const statusResult = await db.query<{ status: TaskStatus }>(
       `
 SELECT status
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-      [input.jobId],
+      [input.taskId],
     );
 
     const currentStatus = statusResult.rows[0]?.status ?? null;
     if (!isWaitingForHumanResponseStatus(currentStatus)) {
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET status = 'pending_review',
     session_id = $2
 WHERE id = $1
 `,
-        [input.jobId, workerResult.sessionId],
+        [input.taskId, workerResult.sessionId],
       );
-      await notifyJobStatus("pending_review", "execute_runner");
+      await notifyTaskStatus("pending_review", "execute_runner");
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -626,13 +626,13 @@ WHERE id = $1
 
     await db.query(
       `
-UPDATE jobs
+UPDATE tasks
 SET status = 'failed'
 WHERE id = $1
 `,
-      [input.jobId],
+      [input.taskId],
     );
-    await notifyJobStatus("failed", "execute_runner");
+    await notifyTaskStatus("failed", "execute_runner");
 
     await appendJsonLine(logFile, { type: "error", message });
   } finally {
@@ -674,18 +674,18 @@ ORDER BY name ASC
   return result.rows;
 }
 
-async function getJobAssignedRecipientId(
+async function getTaskAssignedRecipientId(
   db: Awaited<ReturnType<typeof openDatabase>>,
-  jobId: string,
+  taskId: string,
 ): Promise<string | null> {
   const result = await db.query<{ assigned_to: string | null }>(
     `
 SELECT assigned_to
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-    [jobId],
+    [taskId],
   );
 
   return result.rows[0]?.assigned_to ?? null;
@@ -696,9 +696,9 @@ function buildAgentRuntimeEnv(input: {
   salmonCliCommand: string;
   codeDir: string;
   outputDir: string;
-  jobWorkspaceDir: string;
+  taskWorkspaceDir: string;
   workspaceName: string;
-  jobId: string;
+  taskId: string;
   threadId: string;
   turnId: string;
   agentId: string;
@@ -708,16 +708,16 @@ function buildAgentRuntimeEnv(input: {
     SALMON_CLI_COMMAND: input.salmonCliCommand,
     SALMON_CODE_DIR: input.codeDir,
     SALMON_OUTPUT_DIR: input.outputDir,
-    SALMON_JOB_WORKSPACE: input.jobWorkspaceDir,
+    SALMON_TASK_WORKSPACE: input.taskWorkspaceDir,
     SALMON_WORKSPACE_NAME: input.workspaceName,
-    SALMON_JOB_ID: input.jobId,
+    SALMON_TASK_ID: input.taskId,
     SALMON_THREAD_ID: input.threadId,
     SALMON_TURN_ID: input.turnId,
     SALMON_AGENT_ID: input.agentId,
   };
 }
 
-function resolvePreferredCodePath(gitState: JobGitState): string | null {
+function resolvePreferredCodePath(gitState: TaskGitState): string | null {
   const codeRepos = gitState.repos
     .map((repo) => repo.relative_path)
     .filter((path) => path.startsWith("code/"));
@@ -733,7 +733,7 @@ function resolvePreferredCodePath(gitState: JobGitState): string | null {
   return null;
 }
 
-function isWaitingForHumanResponseStatus(status: JobStatus | null): boolean {
+function isWaitingForHumanResponseStatus(status: TaskStatus | null): boolean {
   return status === "waiting_for_question_response" || status === "waiting_for_help_response";
 }
 

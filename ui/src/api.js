@@ -50,7 +50,7 @@ export class ApiError extends Error {
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000
 const REVIEW_REQUEST_TIMEOUT_MS = 120000
 const CONVERSATION_REQUEST_TIMEOUT_MS = 30000
-const JOB_RESPONSE_REQUEST_TIMEOUT_MS = 30000
+const TASK_RESPONSE_REQUEST_TIMEOUT_MS = 30000
 
 function linkAbortSignals(target, source) {
   if (!source) return () => {}
@@ -167,12 +167,12 @@ export async function deleteWorkspace(name) {
   })
 }
 
-export async function fetchJobs(limit = 200) {
-  const data = asObject(await fetchJson(`/jobs?limit=${limit}`), 'Invalid jobs response.')
-  if (!Array.isArray(data.jobs)) {
-    throw invalidResponse('`jobs` must be an array.')
+export async function fetchTasks(limit = 200) {
+  const data = asObject(await fetchJson(`/tasks?limit=${limit}`), 'Invalid tasks response.')
+  if (!Array.isArray(data.tasks)) {
+    throw invalidResponse('`tasks` must be an array.')
   }
-  return data.jobs
+  return data.tasks
 }
 
 function parseEventPayload(event) {
@@ -187,20 +187,20 @@ function parseEventPayload(event) {
   }
 }
 
-export function openJobsStream({ onReady, onJobStatusChanged, onError } = {}) {
-  const stream = new EventSource(`${API_BASE_URL}/jobs/stream`)
+export function openTasksStream({ onReady, onTaskStatusChanged, onError } = {}) {
+  const stream = new EventSource(`${API_BASE_URL}/tasks/stream`)
 
   stream.addEventListener('ready', (event) => {
     const payload = parseEventPayload(event)
     onReady?.(payload)
   })
 
-  stream.addEventListener('job_status_changed', (event) => {
+  stream.addEventListener('task_status_changed', (event) => {
     const payload = parseEventPayload(event)
     if (!payload || typeof payload !== 'object') {
       return
     }
-    onJobStatusChanged?.(payload)
+    onTaskStatusChanged?.(payload)
   })
 
   stream.addEventListener('error', (event) => {
@@ -242,52 +242,52 @@ export function openConversationThreadStream(
   }
 }
 
-export async function fetchJobOutputChanges(jobId) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/output/changes`)
+export async function fetchTaskOutputChanges(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/output/changes`)
 }
 
-export async function fetchJobOutputFiles(jobId) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/output/files`)
+export async function fetchTaskOutputFiles(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/output/files`)
 }
 
-export function jobOutputContentUrl(jobId, path) {
+export function taskOutputContentUrl(taskId, path) {
   const params = new URLSearchParams()
   params.set('path', path)
-  return `${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/output/file/content?${params.toString()}`
+  return `${API_BASE_URL}/tasks/${encodeURIComponent(taskId)}/output/file/content?${params.toString()}`
 }
 
-export function jobOutputDownloadUrl(jobId, path) {
+export function taskOutputDownloadUrl(taskId, path) {
   const params = new URLSearchParams()
   params.set('path', path)
-  return `${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/output/file/download?${params.toString()}`
+  return `${API_BASE_URL}/tasks/${encodeURIComponent(taskId)}/output/file/download?${params.toString()}`
 }
 
-export async function openJobOutputFolder(jobId, path = '') {
+export async function openTaskOutputFolder(taskId, path = '') {
   const body = {}
   if (path) {
     body.path = path
   }
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/output/open-folder`, {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/output/open-folder`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
 }
 
-export async function fetchJobTestCommands(jobId) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/test-commands`)
+export async function fetchTaskTestCommands(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/test-commands`)
 }
 
-export async function updateJobTestCommands(jobId, commands) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/test-commands`, {
+export async function updateTaskTestCommands(taskId, commands) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/test-commands`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ commands }),
   }, 60 * 1000)
 }
 
-export async function runJobTestCommand(jobId, command, cwd) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/test-commands/run`, {
+export async function runTaskTestCommand(taskId, command, cwd) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/test-commands/run`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ command, cwd }),
@@ -334,16 +334,16 @@ export function openRuntimeServiceStream(serviceId, { onReady, onLog, onStatus, 
   }
 }
 
-export async function reviewJob(jobId, action) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/review`, {
+export async function reviewTask(taskId, action) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/review`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ action }),
   }, REVIEW_REQUEST_TIMEOUT_MS)
 }
 
-export async function deleteJob(jobId) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}`, {
+export async function deleteTask(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}`, {
     method: 'DELETE',
   })
 }
@@ -440,8 +440,8 @@ export async function createContextFile(name, folder) {
   })
 }
 
-export async function createExecuteJob({ prompt, recipient_agent_id, reasoning_effort }) {
-  return fetchJson('/jobs/execute', {
+export async function createExecuteTask({ prompt, recipient_agent_id, reasoning_effort }) {
+  return fetchJson('/tasks/execute', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ prompt, recipient_agent_id, reasoning_effort }),
@@ -456,20 +456,20 @@ export async function executeFromPlanThread(threadId, { recipient_agent_id, reas
   })
 }
 
-export async function setJobRecipient(jobId, recipient_agent_id) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/recipient`, {
+export async function setTaskRecipient(taskId, recipient_agent_id) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/recipient`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ recipient_agent_id }),
   })
 }
 
-export async function respondToJob(jobId, message) {
-  return fetchJson(`/jobs/${encodeURIComponent(jobId)}/respond`, {
+export async function respondToTask(taskId, message) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/respond`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ message }),
-  }, JOB_RESPONSE_REQUEST_TIMEOUT_MS)
+  }, TASK_RESPONSE_REQUEST_TIMEOUT_MS)
 }
 
 export async function fetchConversationThread(threadId) {

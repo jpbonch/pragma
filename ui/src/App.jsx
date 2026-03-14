@@ -6,7 +6,7 @@ import {
   cloneCodeRepo,
   createContextFile,
   createContextFolder,
-  createExecuteJob,
+  createExecuteTask,
   createWorkspace,
   deleteWorkspace,
   executeFromPlanThread,
@@ -19,17 +19,17 @@ import {
   fetchRuntimeServices,
   fetchContextFiles,
   fetchConversationThread,
-  fetchJobs,
+  fetchTasks,
   openRuntimeServiceStream,
   pickLocalCodeFolder,
   openConversationThreadStream,
-  openJobsStream,
+  openTasksStream,
   fetchWorkspaces,
-  respondToJob,
-  reviewJob,
-  deleteJob,
+  respondToTask,
+  reviewTask,
+  deleteTask,
   stopRuntimeService as stopRuntimeServiceApi,
-  setJobRecipient,
+  setTaskRecipient,
   setActiveWorkspace,
   streamConversationTurn,
   updateAgent,
@@ -48,9 +48,9 @@ import { iconForAgent } from './lib/agentIcon'
 
 const ORCHESTRATOR_AGENT_ID = 'salmon-orchestrator'
 
-function getPendingCount(jobs) {
-  return jobs.filter((job) => {
-    const status = String(job.status).toLowerCase()
+function getPendingCount(tasks) {
+  return tasks.filter((task) => {
+    const status = String(task.status).toLowerCase()
     return (
       status === 'pending_review' ||
       status === 'waiting_for_recipient' ||
@@ -165,7 +165,7 @@ function truncate(value, maxLength) {
   return `${value.slice(0, maxLength - 3)}...`
 }
 
-function normalizeJobTitle(value) {
+function normalizeTaskTitle(value) {
   const title = typeof value === 'string' ? value.trim() : ''
   if (!title) {
     return ''
@@ -173,16 +173,16 @@ function normalizeJobTitle(value) {
   return title.replace(/^execute:\s*/i, '')
 }
 
-function resolveConversationHeaderAgent({ conversation, jobs, agentById }) {
+function resolveConversationHeaderAgent({ conversation, tasks, agentById }) {
   const currentConversation = conversation && typeof conversation === 'object' ? conversation : null
-  const allJobs = Array.isArray(jobs) ? jobs : []
+  const allTasks = Array.isArray(tasks) ? tasks : []
   const entries = Array.isArray(currentConversation?.entries) ? currentConversation.entries : []
 
   let resolvedAgentId = ''
-  if (typeof currentConversation?.jobId === 'string' && currentConversation.jobId) {
-    const currentJob = allJobs.find((job) => job?.id === currentConversation.jobId)
-    if (currentJob && typeof currentJob.assigned_to === 'string' && currentJob.assigned_to.trim()) {
-      resolvedAgentId = currentJob.assigned_to.trim()
+  if (typeof currentConversation?.taskId === 'string' && currentConversation.taskId) {
+    const currentTask = allTasks.find((task) => task?.id === currentConversation.taskId)
+    if (currentTask && typeof currentTask.assigned_to === 'string' && currentTask.assigned_to.trim()) {
+      resolvedAgentId = currentTask.assigned_to.trim()
     }
   }
 
@@ -438,7 +438,7 @@ function summarizeStatusEvent(name, payload) {
   if (name === 'worker_completed') {
     return 'Worker completed.'
   }
-  if (name === 'job_reopened') {
+  if (name === 'task_reopened') {
     return 'Task marked as not completed. Re-running.'
   }
   return ''
@@ -565,9 +565,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('feed')
   const [inputBarText, setInputBarText] = useState('')
 
-  const [jobs, setJobs] = useState([])
-  const [jobsLoading, setJobsLoading] = useState(false)
-  const [jobsError, setJobsError] = useState('')
+  const [tasks, setTasks] = useState([])
+  const [tasksLoading, setTasksLoading] = useState(false)
+  const [tasksError, setTasksError] = useState('')
 
   const [agents, setAgents] = useState([])
   const [agentsLoading, setAgentsLoading] = useState(false)
@@ -609,9 +609,9 @@ export default function App() {
     open: false,
     mode: 'chat',
     threadId: '',
-    jobId: '',
-    jobStatus: '',
-    jobTitle: '',
+    taskId: '',
+    taskStatus: '',
+    taskTitle: '',
     harness: '',
     modelLabel: '',
     reasoningEffort: 'medium',
@@ -622,15 +622,15 @@ export default function App() {
   })
 
   const streamAbortRef = useRef(null)
-  const jobsRefreshTimerRef = useRef(null)
+  const tasksRefreshTimerRef = useRef(null)
   const conversationSyncInFlightRef = useRef(false)
   const conversationSyncPendingRef = useRef(false)
   const conversationSyncRetryTimerRef = useRef(null)
-  const jobsRefreshInFlightRef = useRef(false)
-  const jobsRefreshQueuedRef = useRef(false)
+  const tasksRefreshInFlightRef = useRef(false)
+  const tasksRefreshQueuedRef = useRef(false)
   const runtimeServicesPollTimerRef = useRef(null)
   const runtimeServiceStreamCloseRef = useRef(null)
-  const pendingCount = useMemo(() => getPendingCount(jobs), [jobs])
+  const pendingCount = useMemo(() => getPendingCount(tasks), [tasks])
   const orchestratorRuntime = useMemo(() => {
     return agents.find((agent) => agent?.id === ORCHESTRATOR_AGENT_ID) ?? null
   }, [agents])
@@ -653,10 +653,10 @@ export default function App() {
   const conversationHeaderAgent = useMemo(() => {
     return resolveConversationHeaderAgent({
       conversation,
-      jobs,
+      tasks,
       agentById,
     })
-  }, [conversation, jobs, agentById])
+  }, [conversation, tasks, agentById])
   const visibleSidebarChats = useMemo(() => {
     const hiddenIds = new Set(hiddenChatsByWorkspace[activeWorkspaceName] || [])
     if (hiddenIds.size === 0) {
@@ -679,8 +679,8 @@ export default function App() {
   }, [runtimeServiceLogsById, selectedServiceId])
   const conversationRuntimeService =
     selectedRuntimeService &&
-    conversation.jobId &&
-    selectedRuntimeService.job_id === conversation.jobId
+    conversation.taskId &&
+    selectedRuntimeService.task_id === conversation.taskId
       ? selectedRuntimeService
       : null
   const visibleRuntimeServices = useMemo(() => {
@@ -699,9 +699,9 @@ export default function App() {
   useEffect(() => {
     return () => {
       streamAbortRef.current?.abort()
-      if (jobsRefreshTimerRef.current) {
-        clearTimeout(jobsRefreshTimerRef.current)
-        jobsRefreshTimerRef.current = null
+      if (tasksRefreshTimerRef.current) {
+        clearTimeout(tasksRefreshTimerRef.current)
+        tasksRefreshTimerRef.current = null
       }
       if (conversationSyncRetryTimerRef.current) {
         clearTimeout(conversationSyncRetryTimerRef.current)
@@ -714,7 +714,7 @@ export default function App() {
       runtimeServiceStreamCloseRef.current?.()
       runtimeServiceStreamCloseRef.current = null
       conversationSyncPendingRef.current = false
-      jobsRefreshQueuedRef.current = false
+      tasksRefreshQueuedRef.current = false
     }
   }, [])
 
@@ -722,7 +722,7 @@ export default function App() {
     if (
       !conversation.open ||
       conversation.mode !== 'chat' ||
-      !conversation.jobId ||
+      !conversation.taskId ||
       !conversation.threadId
     ) {
       return
@@ -801,32 +801,32 @@ export default function App() {
       conversationSyncPendingRef.current = false
       closeStream()
     }
-  }, [conversation.open, conversation.mode, conversation.jobId, conversation.threadId, agentById])
+  }, [conversation.open, conversation.mode, conversation.taskId, conversation.threadId, agentById])
 
-  async function flushJobsRefresh() {
-    if (jobsRefreshInFlightRef.current) {
-      jobsRefreshQueuedRef.current = true
+  async function flushTasksRefresh() {
+    if (tasksRefreshInFlightRef.current) {
+      tasksRefreshQueuedRef.current = true
       return
     }
 
-    jobsRefreshInFlightRef.current = true
+    tasksRefreshInFlightRef.current = true
     try {
       do {
-        jobsRefreshQueuedRef.current = false
-        await loadJobs()
-      } while (jobsRefreshQueuedRef.current)
+        tasksRefreshQueuedRef.current = false
+        await loadTasks()
+      } while (tasksRefreshQueuedRef.current)
     } finally {
-      jobsRefreshInFlightRef.current = false
+      tasksRefreshInFlightRef.current = false
     }
   }
 
-  function scheduleJobsRefresh(delayMs = 250) {
-    if (jobsRefreshTimerRef.current) {
-      clearTimeout(jobsRefreshTimerRef.current)
+  function scheduleTasksRefresh(delayMs = 250) {
+    if (tasksRefreshTimerRef.current) {
+      clearTimeout(tasksRefreshTimerRef.current)
     }
-    jobsRefreshTimerRef.current = setTimeout(() => {
-      jobsRefreshTimerRef.current = null
-      void flushJobsRefresh()
+    tasksRefreshTimerRef.current = setTimeout(() => {
+      tasksRefreshTimerRef.current = null
+      void flushTasksRefresh()
     }, delayMs)
   }
 
@@ -835,39 +835,39 @@ export default function App() {
       return
     }
 
-    const closeStream = openJobsStream({
+    const closeStream = openTasksStream({
       onReady: () => {
-        scheduleJobsRefresh(0)
+        scheduleTasksRefresh(0)
       },
-      onJobStatusChanged: (event) => {
-        const jobId = typeof event?.job_id === 'string' ? event.job_id : ''
+      onTaskStatusChanged: (event) => {
+        const taskId = typeof event?.task_id === 'string' ? event.task_id : ''
         const status = typeof event?.status === 'string' ? event.status : ''
 
-        if (jobId && status) {
-          setJobs((prev) =>
-            prev.map((job) => (job.id === jobId ? { ...job, status } : job)),
+        if (taskId && status) {
+          setTasks((prev) =>
+            prev.map((task) => (task.id === taskId ? { ...task, status } : task)),
           )
           setConversation((prev) => {
-            if (prev.jobId !== jobId || prev.jobStatus === status) {
+            if (prev.taskId !== taskId || prev.taskStatus === status) {
               return prev
             }
             return {
               ...prev,
-              jobStatus: status,
+              taskStatus: status,
             }
           })
         }
 
-        scheduleJobsRefresh(250)
+        scheduleTasksRefresh(250)
       },
     })
 
     return () => {
-      if (jobsRefreshTimerRef.current) {
-        clearTimeout(jobsRefreshTimerRef.current)
-        jobsRefreshTimerRef.current = null
+      if (tasksRefreshTimerRef.current) {
+        clearTimeout(tasksRefreshTimerRef.current)
+        tasksRefreshTimerRef.current = null
       }
-      jobsRefreshQueuedRef.current = false
+      tasksRefreshQueuedRef.current = false
       closeStream()
     }
   }, [activeWorkspaceName])
@@ -961,28 +961,28 @@ export default function App() {
   }, [selectedServiceId])
 
   useEffect(() => {
-    if (!conversation.jobId) {
+    if (!conversation.taskId) {
       return
     }
 
-    const match = jobs.find((job) => job.id === conversation.jobId)
+    const match = tasks.find((task) => task.id === conversation.taskId)
     const nextStatus = typeof match?.status === 'string' ? match.status : ''
     const nextThreadId = typeof match?.thread_id === 'string' ? match.thread_id : ''
     if (
-      (!nextStatus || nextStatus === conversation.jobStatus) &&
+      (!nextStatus || nextStatus === conversation.taskStatus) &&
       (!nextThreadId || conversation.threadId)
     ) {
       return
     }
 
     setConversation((prev) => {
-      if (prev.jobId !== conversation.jobId) {
+      if (prev.taskId !== conversation.taskId) {
         return prev
       }
 
       const updates = {}
-      if (nextStatus && prev.jobStatus !== nextStatus) {
-        updates.jobStatus = nextStatus
+      if (nextStatus && prev.taskStatus !== nextStatus) {
+        updates.taskStatus = nextStatus
       }
       if (!prev.threadId && nextThreadId) {
         updates.threadId = nextThreadId
@@ -996,7 +996,7 @@ export default function App() {
         ...updates,
       }
     })
-  }, [jobs, conversation.jobId, conversation.jobStatus, conversation.threadId])
+  }, [tasks, conversation.taskId, conversation.taskStatus, conversation.threadId])
 
   useEffect(() => {
     saveHiddenChatsByWorkspace(hiddenChatsByWorkspace)
@@ -1060,7 +1060,7 @@ export default function App() {
   }
 
   function clearWorkspaceData() {
-    setJobs([])
+    setTasks([])
     setAgents([])
     setHumans([])
     setContextData({ folders: [], files: [] })
@@ -1070,7 +1070,7 @@ export default function App() {
     setSidebarPlansLoading(false)
     setSidebarChats([])
     setSidebarChatsLoading(false)
-    setJobsError('')
+    setTasksError('')
     setAgentsError('')
     setContextError('')
     setCodeError('')
@@ -1089,7 +1089,7 @@ export default function App() {
 
   async function loadWorkspaceData() {
     await Promise.all([
-      loadJobs(),
+      loadTasks(),
       loadAgents(),
       loadHumans(),
       loadContext(),
@@ -1166,32 +1166,32 @@ export default function App() {
     }
 
     const serviceId = typeof service.id === 'string' ? service.id : ''
-    const jobId = typeof service.job_id === 'string' ? service.job_id : ''
-    if (!serviceId || !jobId) {
+    const taskId = typeof service.task_id === 'string' ? service.task_id : ''
+    if (!serviceId || !taskId) {
       return
     }
 
     setSelectedServiceId(serviceId)
-    const existingJob = jobs.find((job) => job?.id === jobId)
-    if (existingJob) {
-      await handleOpenJobConversation(existingJob, { serviceId })
+    const existingTask = tasks.find((task) => task?.id === taskId)
+    if (existingTask) {
+      await handleOpenTaskConversation(existingTask, { serviceId })
       return
     }
 
-    let refreshedJob = null
+    let refreshedTask = null
     try {
-      const refreshedJobs = await fetchJobs(300)
-      setJobs(refreshedJobs)
-      refreshedJob = refreshedJobs.find((job) => job?.id === jobId) || null
+      const refreshedTasks = await fetchTasks(300)
+      setTasks(refreshedTasks)
+      refreshedTask = refreshedTasks.find((task) => task?.id === taskId) || null
     } catch {
-      refreshedJob = null
+      refreshedTask = null
     }
-    if (refreshedJob) {
-      await handleOpenJobConversation(refreshedJob, { serviceId })
+    if (refreshedTask) {
+      await handleOpenTaskConversation(refreshedTask, { serviceId })
       return
     }
 
-    setWorkspaceError(`Task not found for process job ${jobId}.`)
+    setWorkspaceError(`Task not found for process task ${taskId}.`)
   }
 
   async function loadPlans() {
@@ -1213,20 +1213,20 @@ export default function App() {
     }
   }
 
-  async function loadJobs() {
-    setJobsLoading(true)
-    setJobsError('')
+  async function loadTasks() {
+    setTasksLoading(true)
+    setTasksError('')
     try {
-      setJobs(await fetchJobs(300))
+      setTasks(await fetchTasks(300))
     } catch (error) {
       if (error instanceof ApiError && error.code === 'NO_ACTIVE_WORKSPACE') {
-        setJobs([])
-        setJobsError('No active workspace.')
+        setTasks([])
+        setTasksError('No active workspace.')
         return
       }
-      setJobsError(errorText(error))
+      setTasksError(errorText(error))
     } finally {
-      setJobsLoading(false)
+      setTasksLoading(false)
     }
   }
 
@@ -1460,9 +1460,9 @@ export default function App() {
       open: false,
       mode: 'chat',
       threadId: '',
-      jobId: '',
-      jobStatus: '',
-      jobTitle: '',
+      taskId: '',
+      taskStatus: '',
+      taskTitle: '',
       harness: '',
       modelLabel: '',
       reasoningEffort: 'medium',
@@ -1478,11 +1478,11 @@ export default function App() {
 
     if (mode === 'execute') {
       try {
-        await createExecuteJob({
+        await createExecuteTask({
           prompt: message,
           reasoning_effort: reasoningEffort,
         })
-        await loadJobs()
+        await loadTasks()
         setActiveTab('feed')
       } catch (error) {
         setWorkspaceError(errorText(error))
@@ -1490,29 +1490,29 @@ export default function App() {
       return
     }
 
-    const conversationStatus = String(conversation.jobStatus || '').toLowerCase()
+    const conversationStatus = String(conversation.taskStatus || '').toLowerCase()
     if (
       mode === 'chat' &&
       conversation.open &&
-      conversation.jobId &&
+      conversation.taskId &&
       isWaitingForHumanResponse(conversationStatus)
     ) {
       try {
-        await respondToJob(conversation.jobId, message)
+        await respondToTask(conversation.taskId, message)
         setConversation((prev) => ({
           ...prev,
-          jobStatus: 'queued',
+          taskStatus: 'queued',
           entries: [
             ...prev.entries,
             { id: nextEntryId('user'), type: 'user', content: message },
             {
               id: nextEntryId('status'),
               type: 'status',
-              content: 'Response sent. Job re-queued with the same worker.',
+              content: 'Response sent. Task re-queued with the same worker.',
             },
           ],
         }))
-        await loadJobs()
+        await loadTasks()
       } catch (error) {
         setWorkspaceError(errorText(error))
       }
@@ -1575,8 +1575,8 @@ export default function App() {
       open: true,
       mode,
       threadId: nextThreadId || '',
-      jobId: '',
-      jobStatus: '',
+      taskId: '',
+      taskStatus: '',
       harness: effectiveHarness,
       modelLabel: effectiveModelLabel,
       reasoningEffort,
@@ -1698,7 +1698,7 @@ export default function App() {
       setSidebarPlans((prev) => prev.filter((plan) => plan.id !== planThreadId))
       closeConversationDrawer()
       setActiveTab('feed')
-      await Promise.all([loadJobs(), loadPlans()])
+      await Promise.all([loadTasks(), loadPlans()])
     } catch (error) {
       setConversation((prev) => ({
         ...prev,
@@ -1728,8 +1728,8 @@ export default function App() {
         open: true,
         mode: 'chat',
         threadId: thread.id,
-        jobId: '',
-        jobStatus: '',
+        taskId: '',
+        taskStatus: '',
         harness: thread.harness,
         modelLabel: thread.model_label,
         reasoningEffort: 'medium',
@@ -1785,8 +1785,8 @@ export default function App() {
         open: true,
         mode: 'plan',
         threadId: data.thread.id,
-        jobId: '',
-        jobStatus: '',
+        taskId: '',
+        taskStatus: '',
         harness: data.thread.harness,
         modelLabel: data.thread.model_label,
         reasoningEffort: 'medium',
@@ -1803,21 +1803,21 @@ export default function App() {
     }
   }
 
-  async function handleOpenJobConversation(job, options = {}) {
-    const jobId = typeof job?.id === 'string' ? job.id : ''
-    if (!jobId) {
-      setWorkspaceError('Task is missing a job id.')
+  async function handleOpenTaskConversation(task, options = {}) {
+    const taskId = typeof task?.id === 'string' ? task.id : ''
+    if (!taskId) {
+      setWorkspaceError('Task is missing a task id.')
       return
     }
     const requestedServiceId =
       typeof options.serviceId === 'string' ? options.serviceId : ''
     setSelectedServiceId(requestedServiceId)
 
-    const threadId = typeof job?.thread_id === 'string' ? job.thread_id : ''
-    const title = normalizeJobTitle(job?.title)
-    const status = typeof job?.status === 'string' ? job.status : ''
+    const threadId = typeof task?.thread_id === 'string' ? task.thread_id : ''
+    const title = normalizeTaskTitle(task?.title)
+    const status = typeof task?.status === 'string' ? task.status : ''
     if (!title || !status) {
-      setWorkspaceError('Job payload is missing required fields.')
+      setWorkspaceError('Task payload is missing required fields.')
       return
     }
 
@@ -1831,9 +1831,9 @@ export default function App() {
         open: true,
         mode: 'chat',
         threadId: '',
-        jobId,
-        jobStatus: status,
-        jobTitle: title,
+        taskId,
+        taskStatus: status,
+        taskTitle: title,
         harness: runtime.harness,
         modelLabel: runtime.model_label,
         reasoningEffort: 'medium',
@@ -1864,9 +1864,9 @@ export default function App() {
           open: true,
           mode: 'chat',
           threadId: '',
-          jobId,
-          jobStatus: status,
-          jobTitle: title,
+          taskId,
+          taskStatus: status,
+          taskTitle: title,
           harness: runtime.harness,
           modelLabel: runtime.model_label,
           reasoningEffort: 'medium',
@@ -1892,9 +1892,9 @@ export default function App() {
         open: true,
         mode: 'chat',
         threadId: thread.id,
-        jobId,
-        jobStatus: status,
-        jobTitle: title,
+        taskId,
+        taskStatus: status,
+        taskTitle: title,
         harness: thread.harness,
         modelLabel: thread.model_label,
         reasoningEffort: 'medium',
@@ -1910,55 +1910,55 @@ export default function App() {
     }
   }
 
-  async function handleReviewJob(jobId, action) {
-    if (!jobId || (action !== 'approve' && action !== 'reopen')) {
+  async function handleReviewTask(taskId, action) {
+    if (!taskId || (action !== 'approve' && action !== 'reopen')) {
       return
     }
 
-    const reviewResult = await reviewJob(jobId, action)
+    const reviewResult = await reviewTask(taskId, action)
     const nextStatus = reviewResult.status
     const mergeState = reviewResult.merge_state
 
-    await loadJobs()
+    await loadTasks()
     if (action === 'approve' && mergeState === 'merged' && nextStatus === 'completed') {
       closeConversationDrawer()
       return
     }
 
     setConversation((prev) => {
-      if (!prev.open || prev.jobId !== jobId) {
+      if (!prev.open || prev.taskId !== taskId) {
         return prev
       }
       return {
         ...prev,
-        jobStatus: nextStatus,
+        taskStatus: nextStatus,
       }
     })
   }
 
-  async function handleSetJobRecipient(jobId, recipientAgentId) {
-    if (!jobId || !recipientAgentId) {
+  async function handleSetTaskRecipient(taskId, recipientAgentId) {
+    if (!taskId || !recipientAgentId) {
       return
     }
 
     try {
-      await setJobRecipient(jobId, recipientAgentId)
-      await loadJobs()
+      await setTaskRecipient(taskId, recipientAgentId)
+      await loadTasks()
     } catch (error) {
       setWorkspaceError(errorText(error))
     }
   }
 
-  async function handleDeleteJob(jobId) {
-    if (!jobId) {
+  async function handleDeleteTask(taskId) {
+    if (!taskId) {
       return
     }
 
     try {
-      await deleteJob(jobId)
-      await loadJobs()
+      await deleteTask(taskId)
+      await loadTasks()
       setConversation((prev) => {
-        if (prev.open && prev.jobId === jobId) {
+        if (prev.open && prev.taskId === taskId) {
           return { ...prev, open: false }
         }
         return prev
@@ -2050,15 +2050,15 @@ export default function App() {
               <h1>Tasks</h1>
             </div>
             <FeedView
-              jobs={jobs}
-              loading={jobsLoading}
-              error={jobsError}
+              tasks={tasks}
+              loading={tasksLoading}
+              error={tasksError}
               recipientAgents={recipientAgents}
-              onOpenJobConversation={(job) => {
-                void handleOpenJobConversation(job)
+              onOpenTaskConversation={(task) => {
+                void handleOpenTaskConversation(task)
               }}
-              onPickJobRecipient={(jobId, recipientAgentId) => {
-                void handleSetJobRecipient(jobId, recipientAgentId)
+              onPickTaskRecipient={(taskId, recipientAgentId) => {
+                void handleSetTaskRecipient(taskId, recipientAgentId)
               }}
             />
             <ConversationDrawer
@@ -2067,13 +2067,13 @@ export default function App() {
               entries={conversation.entries}
               loading={conversation.loading}
               error={conversation.error}
-              jobId={conversation.jobId}
-              jobStatus={conversation.jobStatus}
-              jobTitle={conversation.jobTitle}
+              taskId={conversation.taskId}
+              taskStatus={conversation.taskStatus}
+              taskTitle={conversation.taskTitle}
               headerAgentName={conversationHeaderAgent.name}
               headerAgentEmoji={conversationHeaderAgent.emoji}
-              onReviewAction={(jobId, action) => handleReviewJob(jobId, action)}
-              onDeleteJob={(jobId) => handleDeleteJob(jobId)}
+              onReviewAction={(taskId, action) => handleReviewTask(taskId, action)}
+              onDeleteTask={(taskId) => handleDeleteTask(taskId)}
               runtimeService={conversationRuntimeService}
               runtimeServiceLogs={conversationRuntimeService ? selectedRuntimeServiceLogs : []}
               runtimeServiceError={

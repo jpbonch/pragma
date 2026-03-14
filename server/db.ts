@@ -16,8 +16,8 @@ export const DEFAULT_AGENT_FILE = `# Orchestrator
 
 You are the orchestrator agent for Salmon.
 
-Your job is to:
-- Plan jobs into clear, ordered steps.
+Your task is to:
+- Plan tasks into clear, ordered steps.
 - Spawn specialized agents to execute those steps.
 - Coordinate progress across agents.
 - Track status, risks, and blockers.
@@ -25,12 +25,12 @@ Your job is to:
 
 ## Salmon Commands
 - \`salmon setup\`: Calls the API setup endpoint. This only bootstraps \`~/.salmon\`.
-- \`salmon create-job <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`jobs\` table. Default status is \`queued\`.
-- \`salmon list-jobs [--status <status>] [--limit <n>]\`: Calls the API to list jobs from newest to oldest.
-- \`salmon job select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
-- \`salmon job plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
-- \`salmon job ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
-- \`salmon job request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
+- \`salmon create-task <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`tasks\` table. Default status is \`queued\`.
+- \`salmon list-tasks [--status <status>] [--limit <n>]\`: Calls the API to list tasks from newest to oldest.
+- \`salmon task select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
+- \`salmon task plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
+- \`salmon task ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
+- \`salmon task request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
 - \`salmon server [--port <n>]\`: Starts the Salmon API server.
 - \`salmon ui [--port <n>] [--api-url <url>]\`: Starts the Salmon UI.
 - \`salmon\` (no args): Starts server + UI and opens the UI.
@@ -40,7 +40,7 @@ const CODER_AGENT_FILE = `# Coder
 
 You are the implementation specialist.
 
-Your job is to:
+Your task is to:
 - Turn requirements into working code.
 - Make focused, minimal diffs.
 - Run builds/tests and fix failures before handoff.
@@ -51,7 +51,7 @@ const RESEARCHER_AGENT_FILE = `# Researcher
 
 You are the investigation specialist.
 
-Your job is to:
+Your task is to:
 - Clarify requirements, constraints, and edge cases.
 - Compare options with concrete tradeoffs.
 - Identify risks early and propose mitigations.
@@ -62,7 +62,7 @@ const REVIEWER_AGENT_FILE = `# Reviewer
 
 You are the quality and safety specialist.
 
-Your job is to:
+Your task is to:
 - Review code for correctness, regressions, and risk.
 - Check tests and identify coverage gaps.
 - Flag security, reliability, and performance issues.
@@ -415,7 +415,7 @@ function patchDatabaseClose(db: PGlite): PGlite {
 }
 
 async function ensureRequiredSchema(db: PGlite): Promise<void> {
-  await ensureJobStatusEnumType(db);
+  await ensureTaskStatusEnumType(db);
 
   await db.exec(`
 CREATE TABLE IF NOT EXISTS agents (
@@ -431,10 +431,10 @@ CREATE TABLE IF NOT EXISTS agents (
 `);
 
   await db.exec(`
-CREATE TABLE IF NOT EXISTS jobs (
+CREATE TABLE IF NOT EXISTS tasks (
   id VARCHAR(64) PRIMARY KEY,
   title TEXT NOT NULL,
-  status job_status NOT NULL DEFAULT 'queued',
+  status task_status NOT NULL DEFAULT 'queued',
   assigned_to VARCHAR(64),
   output_dir TEXT,
   session_id VARCHAR(255),
@@ -451,48 +451,48 @@ CREATE TABLE IF NOT EXISTS jobs (
 SELECT udt_name
 FROM information_schema.columns
 WHERE table_schema = 'public'
-  AND table_name = 'jobs'
+  AND table_name = 'tasks'
   AND column_name = 'status'
 LIMIT 1
 `,
   );
 
   const statusType = statusColumn.rows[0]?.udt_name ?? "";
-  if (statusType && statusType !== "job_status") {
+  if (statusType && statusType !== "task_status") {
     await db.exec(`
-ALTER TABLE jobs
-ALTER COLUMN status TYPE job_status
-USING status::job_status
+ALTER TABLE tasks
+ALTER COLUMN status TYPE task_status
+USING status::task_status
 `);
   }
 
   await db.exec(`
-ALTER TABLE jobs
+ALTER TABLE tasks
 ALTER COLUMN status SET DEFAULT 'queued'
 `);
 
   await db.exec(`
-ALTER TABLE jobs
+ALTER TABLE tasks
 ALTER COLUMN status SET NOT NULL
 `);
 
   await db.exec(`
-ALTER TABLE jobs
+ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS git_branch_name VARCHAR(255)
 `);
 
   await db.exec(`
-ALTER TABLE jobs
+ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS git_state_json TEXT
 `);
 
   await db.exec(`
-ALTER TABLE jobs
+ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS test_commands_json TEXT
 `);
 
   await db.exec(`
-ALTER TABLE jobs
+ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS merge_retry_count INTEGER NOT NULL DEFAULT 0
 `);
 
@@ -505,14 +505,14 @@ CREATE TABLE IF NOT EXISTS humans (
 `);
 }
 
-async function ensureJobStatusEnumType(db: PGlite): Promise<void> {
+async function ensureTaskStatusEnumType(db: PGlite): Promise<void> {
   const statusType = await db.query<{ exists: boolean }>(
     `
 SELECT EXISTS (
   SELECT 1
   FROM pg_type t
   JOIN pg_namespace n ON n.oid = t.typnamespace
-  WHERE t.typname = 'job_status'
+  WHERE t.typname = 'task_status'
     AND n.nspname = 'public'
 ) AS exists
 `,
@@ -522,7 +522,7 @@ SELECT EXISTS (
   }
 
   await db.exec(`
-CREATE TYPE job_status AS ENUM (
+CREATE TYPE task_status AS ENUM (
   'queued',
   'orchestrating',
   'running',

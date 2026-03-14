@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 
-function normalizeJobTitle(title) {
+function normalizeTaskTitle(title) {
   if (typeof title !== 'string' || title.trim().length === 0) {
-    throw new Error('Job title is required.')
+    throw new Error('Task title is required.')
   }
   const value = title.trim()
   return value.replace(/^execute:\s*/i, '')
@@ -11,7 +11,7 @@ function normalizeJobTitle(title) {
 
 function getTimeAgo(dateStr) {
   if (typeof dateStr !== 'string' || dateStr.trim().length === 0) {
-    throw new Error('Job created_at is required.')
+    throw new Error('Task created_at is required.')
   }
 
   const date = new Date(dateStr)
@@ -100,8 +100,8 @@ function SectionLabel({ children, count, badge }) {
   )
 }
 
-function NeedsYouCard({ job, onClick, onPickJobRecipient, recipientAgents, pickerJobId, setPickerJobId }) {
-  const status = String(job.status).toLowerCase()
+function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pickerTaskId, setPickerTaskId }) {
+  const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
   const isRecipientPick = status === 'waiting_for_recipient'
@@ -112,50 +112,50 @@ function NeedsYouCard({ job, onClick, onPickJobRecipient, recipientAgents, picke
       style={{ '--accent': color }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={() => !isRecipientPick && onClick?.(job)}
+      onClick={() => !isRecipientPick && onClick?.(task)}
     >
       <div style={{ flex: 1, minWidth: 0, cursor: isRecipientPick ? 'default' : 'pointer' }}>
-        <div className="needs-you-title">{normalizeJobTitle(job.title)}</div>
+        <div className="needs-you-title">{normalizeTaskTitle(task.title)}</div>
         <div className="needs-you-subtitle">
           {NEEDS_YOU_SUBTITLES[status]}
         </div>
-        {job.assigned_to && (
+        {task.assigned_to && (
           <div style={{ fontSize: 11, color: '#C4C3BF', marginTop: 4 }}>
-            Assigned to {job.assigned_to}
+            Assigned to {task.assigned_to}
           </div>
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: '#C4C3BF' }}>{getTimeAgo(job.created_at)}</span>
+        <span style={{ fontSize: 11, color: '#C4C3BF' }}>{getTimeAgo(task.created_at)}</span>
         {isRecipientPick ? (
-          <div className="job-recipient-wrap">
+          <div className="task-recipient-wrap">
             <button
               className="needs-you-action"
               style={{ background: color, opacity: hovered ? 1 : 0.88 }}
               onClick={(e) => {
                 e.stopPropagation()
-                setPickerJobId((current) => (current === job.id ? '' : job.id))
+                setPickerTaskId((current) => (current === task.id ? '' : task.id))
               }}
             >
               {NEEDS_YOU_ACTIONS[status]}
             </button>
-            {pickerJobId === job.id && (
-              <div className="job-recipient-menu">
+            {pickerTaskId === task.id && (
+              <div className="task-recipient-menu">
                 {(!recipientAgents || recipientAgents.length === 0) && (
-                  <div className="job-recipient-empty">No agents available</div>
+                  <div className="task-recipient-empty">No agents available</div>
                 )}
                 {recipientAgents?.map((agent) => (
                   <button
                     key={agent.id}
-                    className="job-recipient-option"
+                    className="task-recipient-option"
                     onClick={(e) => {
                       e.stopPropagation()
-                      onPickJobRecipient?.(job.id, agent.id)
-                      setPickerJobId('')
+                      onPickTaskRecipient?.(task.id, agent.id)
+                      setPickerTaskId('')
                     }}
                   >
-                    <span className="job-recipient-name">{agent.name}</span>
-                    <span className="job-recipient-id">{agent.id}</span>
+                    <span className="task-recipient-name">{agent.name}</span>
+                    <span className="task-recipient-id">{agent.id}</span>
                   </button>
                 ))}
               </div>
@@ -167,7 +167,7 @@ function NeedsYouCard({ job, onClick, onPickJobRecipient, recipientAgents, picke
             style={{ background: color, opacity: hovered ? 1 : 0.88 }}
             onClick={(e) => {
               e.stopPropagation()
-              onClick?.(job)
+              onClick?.(task)
             }}
           >
             {NEEDS_YOU_ACTIONS[status]}
@@ -178,60 +178,60 @@ function NeedsYouCard({ job, onClick, onPickJobRecipient, recipientAgents, picke
   )
 }
 
-function ActiveTaskRow({ job, onClick }) {
-  const status = String(job.status).toLowerCase()
+function ActiveTaskRow({ task, onClick }) {
+  const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
 
   return (
-    <div className="task-row" onClick={() => onClick?.(job)}>
+    <div className="task-row" onClick={() => onClick?.(task)}>
       <div className="task-dot">
         <div className="task-dot-inner" style={{ background: color }} />
         {status === 'running' && (
           <div className="task-dot-pulse" style={{ border: `1.5px solid ${color}` }} />
         )}
       </div>
-      <span className="task-title active">{normalizeJobTitle(job.title)}</span>
+      <span className="task-title active">{normalizeTaskTitle(task.title)}</span>
       <div className="task-meta-right">
         <span className="type-tag" style={{ color, background: `${color}12` }}>
           {STATUS_LABELS[status]}
         </span>
-        {job.assigned_to && (
-          <span style={{ fontSize: 11, color: '#C4C3BF' }}>{job.assigned_to}</span>
+        {task.assigned_to && (
+          <span style={{ fontSize: 11, color: '#C4C3BF' }}>{task.assigned_to}</span>
         )}
-        <span className="task-time">{getTimeAgo(job.created_at)}</span>
+        <span className="task-time">{getTimeAgo(task.created_at)}</span>
       </div>
     </div>
   )
 }
 
-function DoneTaskRow({ job, onClick }) {
-  const status = String(job.status).toLowerCase()
+function DoneTaskRow({ task, onClick }) {
+  const status = String(task.status).toLowerCase()
   const color = status === 'failed' ? '#EB5757' : status === 'cancelled' ? '#9B9A97' : '#2FA67E'
   const icon = status === 'failed' ? '✕' : status === 'cancelled' ? '—' : '✓'
   const titleClass = status === 'failed' ? 'failed' : status === 'cancelled' ? 'done' : 'done'
 
   return (
-    <div className="task-row" onClick={() => onClick?.(job)}>
+    <div className="task-row" onClick={() => onClick?.(task)}>
       <div className="task-done-check" style={{ background: `${color}15`, color }}>
         {icon}
       </div>
       <span className={`task-title ${titleClass}`}>
-        {normalizeJobTitle(job.title)}
+        {normalizeTaskTitle(task.title)}
       </span>
-      <span className="task-time">{getTimeAgo(job.created_at)}</span>
+      <span className="task-time">{getTimeAgo(task.created_at)}</span>
     </div>
   )
 }
 
 export function FeedView({
-  jobs,
+  tasks,
   loading,
   error,
   recipientAgents = [],
-  onOpenJobConversation,
-  onPickJobRecipient,
+  onOpenTaskConversation,
+  onPickTaskRecipient,
 }) {
-  const [pickerJobId, setPickerJobId] = useState('')
+  const [pickerTaskId, setPickerTaskId] = useState('')
 
   const recipients = useMemo(() => {
     if (!Array.isArray(recipientAgents)) {
@@ -245,44 +245,44 @@ export function FeedView({
     const active = []
     const done = []
 
-    for (const job of jobs) {
-      const status = String(job.status).toLowerCase()
+    for (const task of tasks) {
+      const status = String(task.status).toLowerCase()
       if (isNeedsYou(status)) {
-        needsYou.push(job)
+        needsYou.push(task)
       } else if (isDone(status)) {
-        done.push(job)
+        done.push(task)
       } else {
-        active.push(job)
+        active.push(task)
       }
     }
 
     return { needsYou, active, done }
-  }, [jobs])
+  }, [tasks])
 
   return (
     <section className="feed">
-      {loading && <div className="muted">Loading jobs...</div>}
+      {loading && <div className="muted">Loading tasks...</div>}
       {error && <div className="error">Error: {error}</div>}
 
-      {!loading && !error && jobs.length === 0 && (
-        <div className="muted">No jobs found.</div>
+      {!loading && !error && tasks.length === 0 && (
+        <div className="muted">No tasks found.</div>
       )}
 
-      {!loading && !error && jobs.length > 0 && (
+      {!loading && !error && tasks.length > 0 && (
         <>
           {needsYou.length > 0 && (
             <>
               <SectionLabel count={needsYou.length} badge>Needs you</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {needsYou.map((job) => (
+                {needsYou.map((task) => (
                   <NeedsYouCard
-                    key={job.id}
-                    job={job}
-                    onClick={onOpenJobConversation}
-                    onPickJobRecipient={onPickJobRecipient}
+                    key={task.id}
+                    task={task}
+                    onClick={onOpenTaskConversation}
+                    onPickTaskRecipient={onPickTaskRecipient}
                     recipientAgents={recipients}
-                    pickerJobId={pickerJobId}
-                    setPickerJobId={setPickerJobId}
+                    pickerTaskId={pickerTaskId}
+                    setPickerTaskId={setPickerTaskId}
                   />
                 ))}
               </div>
@@ -293,11 +293,11 @@ export function FeedView({
             <>
               <SectionLabel count={active.length}>Working on</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                {active.map((job) => (
+                {active.map((task) => (
                   <ActiveTaskRow
-                    key={job.id}
-                    job={job}
-                    onClick={onOpenJobConversation}
+                    key={task.id}
+                    task={task}
+                    onClick={onOpenTaskConversation}
                   />
                 ))}
               </div>
@@ -308,11 +308,11 @@ export function FeedView({
             <>
               <SectionLabel count={done.length}>Done</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                {done.map((job) => (
+                {done.map((task) => (
                   <DoneTaskRow
-                    key={job.id}
-                    job={job}
-                    onClick={onOpenJobConversation}
+                    key={task.id}
+                    task={task}
+                    onClick={onOpenTaskConversation}
                   />
                 ))}
               </div>

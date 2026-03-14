@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS conversation_threads (
   model_label VARCHAR(128) NOT NULL,
   model_id VARCHAR(128) NOT NULL,
   harness_session_id VARCHAR(255),
-  job_id VARCHAR(64),
+  task_id VARCHAR(64),
   source_thread_id VARCHAR(64),
   chat_title TEXT,
   chat_preview TEXT,
@@ -85,7 +85,7 @@ export async function createThread(
     modelLabel: string;
     modelId: string;
     sourceThreadId?: string | null;
-    jobId?: string | null;
+    taskId?: string | null;
   },
 ): Promise<void> {
   await db.query(
@@ -98,7 +98,7 @@ INSERT INTO conversation_threads (
   model_label,
   model_id,
   source_thread_id,
-  job_id
+  task_id
 )
 VALUES ($1, $2, 'open', $3, $4, $5, $6, $7)
 `,
@@ -109,7 +109,7 @@ VALUES ($1, $2, 'open', $3, $4, $5, $6, $7)
       input.modelLabel,
       input.modelId,
       input.sourceThreadId ?? null,
-      input.jobId ?? null,
+      input.taskId ?? null,
     ],
   );
 }
@@ -127,7 +127,7 @@ SELECT id,
        model_label,
        model_id,
        harness_session_id,
-       job_id,
+       task_id,
        source_thread_id,
        chat_title,
        chat_preview,
@@ -428,21 +428,21 @@ VALUES ($1, $2, $3, $4, $5)
   );
 }
 
-export async function setThreadJobId(db: PGlite, threadId: string, jobId: string): Promise<void> {
+export async function setThreadTaskId(db: PGlite, threadId: string, taskId: string): Promise<void> {
   await db.query(
     `
 UPDATE conversation_threads
-SET job_id = $2,
+SET task_id = $2,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 `,
-    [threadId, jobId],
+    [threadId, taskId],
   );
 }
 
-export async function getThreadByJobId(
+export async function getThreadByTaskId(
   db: PGlite,
-  jobId: string,
+  taskId: string,
 ): Promise<ConversationThread | null> {
   const result = await db.query<ConversationThread>(
     `
@@ -453,7 +453,7 @@ SELECT id,
        model_label,
        model_id,
        harness_session_id,
-       job_id,
+       task_id,
        source_thread_id,
        chat_title,
        chat_preview,
@@ -461,11 +461,11 @@ SELECT id,
        created_at,
        updated_at
 FROM conversation_threads
-WHERE job_id = $1
+WHERE task_id = $1
 ORDER BY created_at DESC
 LIMIT 1
 `,
-    [jobId],
+    [taskId],
   );
 
   return result.rows[0] ?? null;

@@ -34,12 +34,12 @@ program
   });
 
 program
-  .command("create-job")
-  .description("Call the API to create a job")
-  .argument("<title>", "Job title")
+  .command("create-task")
+  .description("Call the API to create a task")
+  .argument("<title>", "Task title")
   .option("-a, --assigned-to <agentId>", "Assigned agent id")
   .option("-o, --output-dir <outputDir>", "Output directory")
-  .option("-s, --status <status>", "Job status", "queued")
+  .option("-s, --status <status>", "Task status", "queued")
   .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
   .action(
     async (
@@ -51,7 +51,7 @@ program
         apiUrl: string;
       },
     ) => {
-      const result = await apiRequest<{ id: string }>(options.apiUrl, "/jobs", {
+      const result = await apiRequest<{ id: string }>(options.apiUrl, "/tasks", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -62,15 +62,15 @@ program
         }),
       });
 
-      console.log(`Created job ${result.id}`);
+      console.log(`Created task ${result.id}`);
     },
   );
 
 program
-  .command("list-jobs")
-  .description("Call the API to list jobs")
+  .command("list-tasks")
+  .description("Call the API to list tasks")
   .option("-s, --status <status>", "Filter by status")
-  .option("-l, --limit <limit>", "Maximum jobs to return", "25")
+  .option("-l, --limit <limit>", "Maximum tasks to return", "25")
   .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
   .action(
     async (options: { status?: string; limit: string; apiUrl: string }) => {
@@ -80,17 +80,17 @@ program
       }
       params.set("limit", options.limit);
 
-      const result = await apiRequest<{ jobs: Record<string, unknown>[] }>(
+      const result = await apiRequest<{ tasks: Record<string, unknown>[] }>(
         options.apiUrl,
-        `/jobs?${params.toString()}`,
+        `/tasks?${params.toString()}`,
       );
 
-      if (result.jobs.length === 0) {
-        console.log("No jobs found.");
+      if (result.tasks.length === 0) {
+        console.log("No tasks found.");
         return;
       }
 
-      console.table(result.jobs);
+      console.table(result.tasks);
     },
   );
 
@@ -117,30 +117,30 @@ program
     console.table(result.agents);
   });
 
-const jobCommand = program
-  .command("job")
-  .description("Agent job-control commands");
+const taskCommand = program
+  .command("task")
+  .description("Agent task-control commands");
 
-jobCommand
+taskCommand
   .command("select-recipient")
-  .description("Select a worker recipient for the current orchestrating job")
+  .description("Select a worker recipient for the current orchestrating task")
   .requiredOption("--agent-id <id>", "Worker agent id")
   .requiredOption("--reason <text>", "Selection reason")
-  .option("--job-id <id>", "Job id")
+  .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
   .option("--api-url <url>", "Salmon API base URL")
   .action(
     async (options: {
       agentId: string;
       reason: string;
-      jobId?: string;
+      taskId?: string;
       turnId?: string;
       apiUrl?: string;
     }) => {
-      const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
+      const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
       const result = await apiRequest<{ assigned_to?: string }>(
         apiUrl,
-        `/jobs/${encodeURIComponent(jobId)}/agent/select-recipient`,
+        `/tasks/${encodeURIComponent(taskId)}/agent/select-recipient`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -153,11 +153,11 @@ jobCommand
       );
 
       const selected = result.assigned_to || options.agentId;
-      console.log(`Selected recipient ${selected} for job ${jobId}.`);
+      console.log(`Selected recipient ${selected} for task ${taskId}.`);
     },
   );
 
-jobCommand
+taskCommand
   .command("plan-select-recipient")
   .description("Select a worker recipient for the current plan turn")
   .requiredOption("--agent-id <id>", "Worker agent id")
@@ -192,27 +192,27 @@ jobCommand
     },
   );
 
-jobCommand
+taskCommand
   .command("ask-question")
   .description("Pause execution and ask the human a clarification question")
   .requiredOption("--question <text>", "Question for the human")
   .option("--details <text>", "Optional context details")
-  .option("--job-id <id>", "Job id")
+  .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
   .option("--api-url <url>", "Salmon API base URL")
   .action(
     async (options: {
       question: string;
       details?: string;
-      jobId?: string;
+      taskId?: string;
       turnId?: string;
       apiUrl?: string;
     }) => {
-      const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
+      const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
       const agentId = normalizeOptionalString(process.env.SALMON_AGENT_ID);
       await apiRequest<{ status: string }>(
         apiUrl,
-        `/jobs/${encodeURIComponent(jobId)}/agent/ask-question`,
+        `/tasks/${encodeURIComponent(taskId)}/agent/ask-question`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -225,31 +225,31 @@ jobCommand
         },
       );
 
-      console.log(`Question submitted for job ${jobId}.`);
+      console.log(`Question submitted for task ${taskId}.`);
     },
   );
 
-jobCommand
+taskCommand
   .command("request-help")
   .description("Pause execution and request human help")
   .requiredOption("--summary <text>", "Help summary")
   .option("--details <text>", "Optional context details")
-  .option("--job-id <id>", "Job id")
+  .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
   .option("--api-url <url>", "Salmon API base URL")
   .action(
     async (options: {
       summary: string;
       details?: string;
-      jobId?: string;
+      taskId?: string;
       turnId?: string;
       apiUrl?: string;
     }) => {
-      const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
+      const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
       const agentId = normalizeOptionalString(process.env.SALMON_AGENT_ID);
       await apiRequest<{ status: string }>(
         apiUrl,
-        `/jobs/${encodeURIComponent(jobId)}/agent/request-help`,
+        `/tasks/${encodeURIComponent(taskId)}/agent/request-help`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -262,13 +262,13 @@ jobCommand
         },
       );
 
-      console.log(`Help request submitted for job ${jobId}.`);
+      console.log(`Help request submitted for task ${taskId}.`);
     },
   );
 
-jobCommand
+taskCommand
   .command("submit-test-commands")
-  .description("Submit runnable test commands for the current job (appends by default)")
+  .description("Submit runnable test commands for the current task (appends by default)")
   .requiredOption(
     "--command <text>",
     "Test command (repeat for multiple commands)",
@@ -277,7 +277,7 @@ jobCommand
   )
   .requiredOption(
     "--cwd <path>",
-    "Run directory aligned to --command order (repeatable, relative to job workspace root)",
+    "Run directory aligned to --command order (repeatable, relative to task workspace root)",
     (value: string, prev: string[]) => [...prev, value],
     [],
   )
@@ -287,7 +287,7 @@ jobCommand
     (value: string, prev: string[]) => [...prev, value],
     [],
   )
-  .option("--job-id <id>", "Job id")
+  .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
   .option("--replace", "Replace existing commands instead of appending")
   .option("--api-url <url>", "Salmon API base URL")
@@ -296,12 +296,12 @@ jobCommand
       command: string[];
       cwd: string[];
       name: string[];
-      jobId?: string;
+      taskId?: string;
       turnId?: string;
       replace?: boolean;
       apiUrl?: string;
     }) => {
-      const { apiUrl, jobId, turnId } = resolveJobCommandContext(options);
+      const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
       const cwdByIndex = Array.isArray(options.cwd) ? options.cwd : [];
       const commands = (Array.isArray(options.command) ? options.command : [])
         .map((value, index) => {
@@ -321,7 +321,7 @@ jobCommand
 
       await apiRequest(
         apiUrl,
-        `/jobs/${encodeURIComponent(jobId)}/agent/test-commands`,
+        `/tasks/${encodeURIComponent(taskId)}/agent/test-commands`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -334,11 +334,11 @@ jobCommand
         },
       );
 
-      console.log(`Submitted ${commands.length} test command(s) for job ${jobId}.`);
+      console.log(`Submitted ${commands.length} test command(s) for task ${taskId}.`);
     },
   );
 
-jobCommand
+taskCommand
   .command("plan-summary")
   .description("Submit structured plan summary for the current plan turn")
   .requiredOption("--title <text>", "Plan title")
@@ -589,19 +589,19 @@ function parsePort(portValue: string): number {
   return port;
 }
 
-function resolveJobCommandContext(input: {
+function resolveTaskCommandContext(input: {
   apiUrl?: string;
-  jobId?: string;
+  taskId?: string;
   turnId?: string;
 }): {
   apiUrl: string;
-  jobId: string;
+  taskId: string;
   turnId?: string;
 } {
   const apiUrl = resolveRequiredOptionOrEnv(input.apiUrl, "SALMON_API_URL", "--api-url");
-  const jobId = resolveRequiredOptionOrEnv(input.jobId, "SALMON_JOB_ID", "--job-id");
+  const taskId = resolveRequiredOptionOrEnv(input.taskId, "SALMON_TASK_ID", "--task-id");
   const turnId = normalizeOptionalString(input.turnId) || normalizeOptionalString(process.env.SALMON_TURN_ID);
-  return { apiUrl, jobId, turnId };
+  return { apiUrl, taskId, turnId };
 }
 
 function resolveThreadTurnCommandContext(input: {

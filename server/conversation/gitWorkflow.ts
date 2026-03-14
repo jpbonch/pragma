@@ -10,23 +10,23 @@ export type WorkspacePathsLike = {
   contextDir: string;
 };
 
-export type JobGitRepoState = {
+export type TaskGitRepoState = {
   relative_path: string;
   base_branch: string;
   base_commit: string;
 };
 
-export type JobGitState = {
+export type TaskGitState = {
   version: 1;
   branch_name: string;
-  repos: JobGitRepoState[];
+  repos: TaskGitRepoState[];
 };
 
-export type PrepareJobWorkspaceResult = {
-  jobRootDir: string;
-  jobWorkspaceDir: string;
+export type PrepareTaskWorkspaceResult = {
+  taskRootDir: string;
+  taskWorkspaceDir: string;
   outputDir: string;
-  gitState: JobGitState;
+  gitState: TaskGitState;
 };
 
 export type MergeConflict = {
@@ -35,7 +35,7 @@ export type MergeConflict = {
   message: string;
 };
 
-export type MergeJobResult = {
+export type MergeTaskResult = {
   mergedRepos: string[];
   conflicts: MergeConflict[];
 };
@@ -63,21 +63,21 @@ export async function initializeWorkspaceGit(paths: WorkspacePathsLike): Promise
   await commitIfNeeded(paths.workspaceDir, "salmon: initialize workspace repo");
 }
 
-export function getJobWorktreeOutputDir(paths: WorkspacePathsLike, jobId: string): string {
-  return join(paths.worktreesDir, jobId, "workspace", "outputs", jobId);
+export function getTaskWorktreeOutputDir(paths: WorkspacePathsLike, taskId: string): string {
+  return join(paths.worktreesDir, taskId, "workspace", "outputs", taskId);
 }
 
-export function getJobMainOutputDir(paths: WorkspacePathsLike, jobId: string): string {
-  return join(paths.outputsDir, jobId);
+export function getTaskMainOutputDir(paths: WorkspacePathsLike, taskId: string): string {
+  return join(paths.outputsDir, taskId);
 }
 
-export function parseJobGitState(value: string | null | undefined): JobGitState | null {
+export function parseTaskGitState(value: string | null | undefined): TaskGitState | null {
   if (!value || typeof value !== "string") {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(value) as Partial<JobGitState>;
+    const parsed = JSON.parse(value) as Partial<TaskGitState>;
     if (!parsed || typeof parsed !== "object") {
       return null;
     }
@@ -91,12 +91,12 @@ export function parseJobGitState(value: string | null | undefined): JobGitState 
       return null;
     }
 
-    const repos: JobGitRepoState[] = [];
+    const repos: TaskGitRepoState[] = [];
     for (const repo of parsed.repos) {
       if (!repo || typeof repo !== "object") {
         return null;
       }
-      const candidate = repo as Partial<JobGitRepoState>;
+      const candidate = repo as Partial<TaskGitRepoState>;
       if (
         typeof candidate.relative_path !== "string" ||
         candidate.relative_path.trim().length === 0 ||
@@ -124,68 +124,68 @@ export function parseJobGitState(value: string | null | undefined): JobGitState 
   }
 }
 
-export function serializeJobGitState(state: JobGitState): string {
+export function serializeTaskGitState(state: TaskGitState): string {
   return JSON.stringify(state);
 }
 
-export async function prepareJobWorkspace(input: {
+export async function prepareTaskWorkspace(input: {
   workspacePaths: WorkspacePathsLike;
-  jobId: string;
-  existingState: JobGitState | null;
-}): Promise<PrepareJobWorkspaceResult> {
-  const jobRootDir = join(input.workspacePaths.worktreesDir, input.jobId);
-  const jobWorkspaceDir = join(jobRootDir, "workspace");
-  const outputDir = getJobWorktreeOutputDir(input.workspacePaths, input.jobId);
-  await mkdir(jobRootDir, { recursive: true });
+  taskId: string;
+  existingState: TaskGitState | null;
+}): Promise<PrepareTaskWorkspaceResult> {
+  const taskRootDir = join(input.workspacePaths.worktreesDir, input.taskId);
+  const taskWorkspaceDir = join(taskRootDir, "workspace");
+  const outputDir = getTaskWorktreeOutputDir(input.workspacePaths, input.taskId);
+  await mkdir(taskRootDir, { recursive: true });
   await mkdir(input.workspacePaths.outputsDir, { recursive: true });
 
   const gitState = input.existingState
-    ? await ensureExistingJobWorktrees({
+    ? await ensureExistingTaskWorktrees({
         workspacePaths: input.workspacePaths,
-        jobWorkspaceDir,
+        taskWorkspaceDir,
         gitState: input.existingState,
       })
-    : await createFreshJobWorktrees({
+    : await createFreshTaskWorktrees({
         workspacePaths: input.workspacePaths,
-        jobId: input.jobId,
-        jobWorkspaceDir,
+        taskId: input.taskId,
+        taskWorkspaceDir,
       });
 
-  const jobCodeDir = join(jobWorkspaceDir, "code");
-  await mkdir(jobCodeDir, { recursive: true });
-  await mkdir(join(jobWorkspaceDir, "outputs"), { recursive: true });
-  await seedNonRepoCodeIntoJobWorkspace({
+  const taskCodeDir = join(taskWorkspaceDir, "code");
+  await mkdir(taskCodeDir, { recursive: true });
+  await mkdir(join(taskWorkspaceDir, "outputs"), { recursive: true });
+  await seedNonRepoCodeIntoTaskWorkspace({
     sourceCodeDir: input.workspacePaths.codeDir,
-    targetCodeDir: jobCodeDir,
+    targetCodeDir: taskCodeDir,
     managedCodeRepoPaths: gitState.repos.map((repo) => repo.relative_path),
   });
   await mkdir(outputDir, { recursive: true });
 
   return {
-    jobRootDir,
-    jobWorkspaceDir,
+    taskRootDir,
+    taskWorkspaceDir,
     outputDir,
     gitState,
   };
 }
 
-export async function checkpointJobRepos(input: {
+export async function checkpointTaskRepos(input: {
   workspacePaths: WorkspacePathsLike;
-  jobId: string;
-  gitState: JobGitState;
+  taskId: string;
+  gitState: TaskGitState;
   commitMessage: string;
 }): Promise<void> {
-  const jobWorkspaceDir = join(input.workspacePaths.worktreesDir, input.jobId, "workspace");
+  const taskWorkspaceDir = join(input.workspacePaths.worktreesDir, input.taskId, "workspace");
 
   for (const repo of input.gitState.repos) {
-    const jobRepoPath = resolveRepoPath(jobWorkspaceDir, repo.relative_path);
-    if (!(await isDirectory(jobRepoPath))) {
+    const taskRepoPath = resolveRepoPath(taskWorkspaceDir, repo.relative_path);
+    if (!(await isDirectory(taskRepoPath))) {
       continue;
     }
 
-    await runGit(jobRepoPath, ["add", "-A"]);
-    if (await hasStagedChanges(jobRepoPath)) {
-      await runGit(jobRepoPath, [
+    await runGit(taskRepoPath, ["add", "-A"]);
+    if (await hasStagedChanges(taskRepoPath)) {
+      await runGit(taskRepoPath, [
         "-c",
         "user.name=Salmon",
         "-c",
@@ -198,19 +198,19 @@ export async function checkpointJobRepos(input: {
   }
 }
 
-export async function mergeApprovedJob(input: {
+export async function mergeApprovedTask(input: {
   workspacePaths: WorkspacePathsLike;
-  jobId: string;
-  gitState: JobGitState;
-}): Promise<MergeJobResult> {
-  const jobWorkspaceDir = join(input.workspacePaths.worktreesDir, input.jobId, "workspace");
+  taskId: string;
+  gitState: TaskGitState;
+}): Promise<MergeTaskResult> {
+  const taskWorkspaceDir = join(input.workspacePaths.worktreesDir, input.taskId, "workspace");
   const mergedRepos: string[] = [];
   const conflicts: MergeConflict[] = [];
 
   for (const repo of input.gitState.repos) {
     const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, repo.relative_path);
-    const jobRepoPath = resolveRepoPath(jobWorkspaceDir, repo.relative_path);
-    const commitMessage = `salmon: merge job ${input.jobId} (${repo.relative_path})`;
+    const taskRepoPath = resolveRepoPath(taskWorkspaceDir, repo.relative_path);
+    const commitMessage = `salmon: merge task ${input.taskId} (${repo.relative_path})`;
 
     try {
       await runGitSafe(sourceRepoPath, ["merge", "--abort"]);
@@ -246,7 +246,7 @@ export async function mergeApprovedJob(input: {
       await runGitSafe(sourceRepoPath, ["merge", "--abort"]);
       await runGitSafe(sourceRepoPath, ["reset", "--hard", "HEAD"]);
       await runGitSafe(sourceRepoPath, ["clean", "-fd"]);
-      await primeConflictInJobRepo(jobRepoPath, repo.base_branch);
+      await primeConflictInTaskRepo(taskRepoPath, repo.base_branch);
       conflicts.push({
         repo_path: repo.relative_path,
         files,
@@ -257,40 +257,40 @@ export async function mergeApprovedJob(input: {
 
   if (conflicts.length === 0) {
     await syncNonRepoCodeBackToWorkspace({
-      sourceCodeDir: join(jobWorkspaceDir, "code"),
+      sourceCodeDir: join(taskWorkspaceDir, "code"),
       targetCodeDir: input.workspacePaths.codeDir,
       managedCodeRepoPaths: input.gitState.repos.map((repo) => repo.relative_path),
     });
-    await syncJobOutputsBackToWorkspace({
+    await syncTaskOutputsBackToWorkspace({
       workspacePaths: input.workspacePaths,
-      jobId: input.jobId,
+      taskId: input.taskId,
     });
   }
 
   return { mergedRepos, conflicts };
 }
 
-export async function deleteJobWorktree(input: {
+export async function deleteTaskWorktree(input: {
   workspacePaths: WorkspacePathsLike;
-  jobId: string;
+  taskId: string;
 }): Promise<void> {
-  const jobRootDir = join(input.workspacePaths.worktreesDir, input.jobId);
-  await rm(jobRootDir, { recursive: true, force: true });
+  const taskRootDir = join(input.workspacePaths.worktreesDir, input.taskId);
+  await rm(taskRootDir, { recursive: true, force: true });
 }
 
 export async function buildRepoDiffEntries(input: {
   workspacePaths: WorkspacePathsLike;
-  jobId: string;
-  gitState: JobGitState;
+  taskId: string;
+  gitState: TaskGitState;
 }): Promise<RepoDiffEntry[]> {
-  const jobWorkspaceDir = join(input.workspacePaths.worktreesDir, input.jobId, "workspace");
+  const taskWorkspaceDir = join(input.workspacePaths.worktreesDir, input.taskId, "workspace");
   const entries: RepoDiffEntry[] = [];
 
   for (const repo of input.gitState.repos) {
-    const jobRepoPath = resolveRepoPath(jobWorkspaceDir, repo.relative_path);
+    const taskRepoPath = resolveRepoPath(taskWorkspaceDir, repo.relative_path);
     try {
-      const headCommit = (await runGitCapture(jobRepoPath, ["rev-parse", "HEAD"])).trim();
-      const commitDiff = await runGitCapture(jobRepoPath, [
+      const headCommit = (await runGitCapture(taskRepoPath, ["rev-parse", "HEAD"])).trim();
+      const commitDiff = await runGitCapture(taskRepoPath, [
         "diff",
         `${repo.base_commit}..HEAD`,
         "--",
@@ -333,18 +333,18 @@ function resolveRepoPath(rootPath: string, relativeRepoPath: string): string {
   return join(rootPath, relativeRepoPath);
 }
 
-async function createFreshJobWorktrees(input: {
+async function createFreshTaskWorktrees(input: {
   workspacePaths: WorkspacePathsLike;
-  jobId: string;
-  jobWorkspaceDir: string;
-}): Promise<JobGitState> {
-  const branchName = `salmon/job/${input.jobId}`;
+  taskId: string;
+  taskWorkspaceDir: string;
+}): Promise<TaskGitState> {
+  const branchName = `salmon/task/${input.taskId}`;
   const relativeRepoPaths = await discoverFlatRepoPaths(input.workspacePaths);
-  const repos: JobGitRepoState[] = [];
+  const repos: TaskGitRepoState[] = [];
 
   for (const relativePath of relativeRepoPaths) {
     const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, relativePath);
-    const jobRepoPath = resolveRepoPath(input.jobWorkspaceDir, relativePath);
+    const taskRepoPath = resolveRepoPath(input.taskWorkspaceDir, relativePath);
     const baseBranch = await getCurrentBranch(sourceRepoPath);
     if (!baseBranch || baseBranch === "HEAD") {
       throw new Error(`Repository is in detached HEAD and cannot be used: ${relativePath}`);
@@ -353,7 +353,7 @@ async function createFreshJobWorktrees(input: {
 
     await ensureWorktree({
       sourceRepoPath,
-      worktreePath: jobRepoPath,
+      worktreePath: taskRepoPath,
       branchName,
       startPoint: baseCommit,
     });
@@ -372,19 +372,19 @@ async function createFreshJobWorktrees(input: {
   };
 }
 
-async function ensureExistingJobWorktrees(input: {
+async function ensureExistingTaskWorktrees(input: {
   workspacePaths: WorkspacePathsLike;
-  jobWorkspaceDir: string;
-  gitState: JobGitState;
-}): Promise<JobGitState> {
-  const repos: JobGitRepoState[] = [];
+  taskWorkspaceDir: string;
+  gitState: TaskGitState;
+}): Promise<TaskGitState> {
+  const repos: TaskGitRepoState[] = [];
   for (const repo of input.gitState.repos) {
     const relativePath = normalizeRelativeRepoPath(repo.relative_path);
     const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, relativePath);
-    const jobRepoPath = resolveRepoPath(input.jobWorkspaceDir, relativePath);
+    const taskRepoPath = resolveRepoPath(input.taskWorkspaceDir, relativePath);
     await ensureWorktree({
       sourceRepoPath,
-      worktreePath: jobRepoPath,
+      worktreePath: taskRepoPath,
       branchName: input.gitState.branch_name,
       startPoint: repo.base_commit,
     });
@@ -565,19 +565,19 @@ async function hasAnyCommits(repoPath: string): Promise<boolean> {
   }
 }
 
-async function primeConflictInJobRepo(jobRepoPath: string, baseBranch: string): Promise<void> {
-  if (!(await isDirectory(jobRepoPath))) {
+async function primeConflictInTaskRepo(taskRepoPath: string, baseBranch: string): Promise<void> {
+  if (!(await isDirectory(taskRepoPath))) {
     return;
   }
 
-  await runGitSafe(jobRepoPath, ["merge", "--abort"]);
-  await runGitSafe(jobRepoPath, ["reset", "--hard", "HEAD"]);
-  await runGitSafe(jobRepoPath, ["clean", "-fd"]);
+  await runGitSafe(taskRepoPath, ["merge", "--abort"]);
+  await runGitSafe(taskRepoPath, ["reset", "--hard", "HEAD"]);
+  await runGitSafe(taskRepoPath, ["clean", "-fd"]);
 
   try {
-    await runGit(jobRepoPath, ["merge", "--no-commit", "--no-ff", baseBranch]);
+    await runGit(taskRepoPath, ["merge", "--no-commit", "--no-ff", baseBranch]);
   } catch {
-    // Leave merge conflict state in the job worktree for retry resolution.
+    // Leave merge conflict state in the task worktree for retry resolution.
   }
 }
 
@@ -620,7 +620,7 @@ function collectManagedTopLevelCodeRepoNames(managedCodeRepoPaths: string[]): Se
   return names;
 }
 
-async function seedNonRepoCodeIntoJobWorkspace(input: {
+async function seedNonRepoCodeIntoTaskWorkspace(input: {
   sourceCodeDir: string;
   targetCodeDir: string;
   managedCodeRepoPaths: string[];
@@ -661,16 +661,16 @@ async function syncNonRepoCodeBackToWorkspace(input: {
   }
 }
 
-async function syncJobOutputsBackToWorkspace(input: {
+async function syncTaskOutputsBackToWorkspace(input: {
   workspacePaths: WorkspacePathsLike;
-  jobId: string;
+  taskId: string;
 }): Promise<void> {
-  const sourceOutputDir = getJobWorktreeOutputDir(input.workspacePaths, input.jobId);
+  const sourceOutputDir = getTaskWorktreeOutputDir(input.workspacePaths, input.taskId);
   if (!(await isDirectory(sourceOutputDir))) {
     return;
   }
 
-  const targetOutputDir = getJobMainOutputDir(input.workspacePaths, input.jobId);
+  const targetOutputDir = getTaskMainOutputDir(input.workspacePaths, input.taskId);
   await mkdir(input.workspacePaths.outputsDir, { recursive: true });
   await rm(targetOutputDir, { recursive: true, force: true });
   await mkdir(targetOutputDir, { recursive: true });

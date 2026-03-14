@@ -24,10 +24,10 @@ import { getConversationAdapter } from "./conversation/adapters";
 import { ExecuteRunner } from "./conversation/executeRunner";
 import {
   buildRepoDiffEntries,
-  deleteJobWorktree,
-  getJobMainOutputDir,
-  mergeApprovedJob,
-  parseJobGitState,
+  deleteTaskWorktree,
+  getTaskMainOutputDir,
+  mergeApprovedTask,
+  parseTaskGitState,
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
 import { buildPrompt } from "./conversation/prompts";
@@ -39,7 +39,7 @@ import {
   ensureConversationSchema,
   getLatestCompletedPlanTurn,
   getLatestExecuteTurn,
-  getThreadByJobId,
+  getThreadByTaskId,
   getThreadById,
   getThreadWithDetails,
   insertEvent,
@@ -47,13 +47,13 @@ import {
   listChatThreads,
   listOpenPlanThreads,
   reopenThread,
-  setThreadJobId,
+  setThreadTaskId,
   updateChatThreadMetadata,
   updateThreadSession,
   completeTurn,
   failTurn,
 } from "./conversation/store";
-import type { HarnessId, JobStatus, ReasoningEffort } from "./conversation/types";
+import type { HarnessId, TaskStatus, ReasoningEffort } from "./conversation/types";
 import {
   agentSubmitTestCommandsSchema,
   agentAskQuestionSchema,
@@ -67,22 +67,22 @@ import {
   createContextFileSchema,
   createHumanSchema,
   createContextFolderSchema,
-  createExecuteJobSchema,
-  createJobSchema,
+  createExecuteTaskSchema,
+  createTaskSchema,
   createWorkspaceSchema,
   executeFromThreadSchema,
-  jobsQuerySchema,
-  jobRespondSchema,
+  tasksQuerySchema,
+  taskRespondSchema,
   openOutputFolderSchema,
   outputFileQuerySchema,
   plansQuerySchema,
   planSelectRecipientSchema,
   planSummarySchema,
-  reviewJobSchema,
-  runJobTestCommandSchema,
-  updateJobTestCommandsSchema,
+  reviewTaskSchema,
+  runTaskTestCommandSchema,
+  updateTaskTestCommandsSchema,
   setActiveWorkspaceSchema,
-  setJobRecipientSchema,
+  setTaskRecipientSchema,
   updateAgentSchema,
   updateContextFileSchema,
   updateHumanSchema,
@@ -94,14 +94,14 @@ type StartServerOptions = {
   port: number;
 };
 
-type JobStatusStreamEvent = {
-  job_id: string;
-  status: JobStatus;
+type TaskStatusStreamEvent = {
+  task_id: string;
+  status: TaskStatus;
   changed_at: string;
   source: string;
 };
 
-type JobStatusListener = (event: JobStatusStreamEvent) => void;
+type TaskStatusListener = (event: TaskStatusStreamEvent) => void;
 type ThreadUpdateListener = (event: {
   thread_id: string;
   changed_at: string;
@@ -121,7 +121,7 @@ type RuntimeServiceLogEntry = {
 type RuntimeServiceSummary = {
   id: string;
   workspace: string;
-  job_id: string;
+  task_id: string;
   label: string;
   command: string;
   cwd: string;
@@ -146,7 +146,7 @@ type RuntimeServiceRecord = RuntimeServiceSummary & {
   listeners: Set<RuntimeServiceListener>;
 };
 
-const JOB_STATUS_LISTENERS = new Map<string, Set<JobStatusListener>>();
+const TASK_STATUS_LISTENERS = new Map<string, Set<TaskStatusListener>>();
 const THREAD_UPDATE_LISTENERS = new Map<string, Set<ThreadUpdateListener>>();
 const RUNTIME_SERVICES_BY_WORKSPACE = new Map<string, Map<string, RuntimeServiceRecord>>();
 const MAX_RUNTIME_SERVICE_LOG_ENTRIES = 2000;
@@ -155,28 +155,28 @@ function threadListenerKey(workspaceName: string, threadId: string): string {
   return `${workspaceName}:${threadId}`;
 }
 
-function subscribeJobStatus(workspaceName: string, listener: JobStatusListener): () => void {
-  const current = JOB_STATUS_LISTENERS.get(workspaceName);
+function subscribeTaskStatus(workspaceName: string, listener: TaskStatusListener): () => void {
+  const current = TASK_STATUS_LISTENERS.get(workspaceName);
   if (current) {
     current.add(listener);
   } else {
-    JOB_STATUS_LISTENERS.set(workspaceName, new Set([listener]));
+    TASK_STATUS_LISTENERS.set(workspaceName, new Set([listener]));
   }
 
   return () => {
-    const listeners = JOB_STATUS_LISTENERS.get(workspaceName);
+    const listeners = TASK_STATUS_LISTENERS.get(workspaceName);
     if (!listeners) {
       return;
     }
     listeners.delete(listener);
     if (listeners.size === 0) {
-      JOB_STATUS_LISTENERS.delete(workspaceName);
+      TASK_STATUS_LISTENERS.delete(workspaceName);
     }
   };
 }
 
-function publishJobStatus(workspaceName: string, event: JobStatusStreamEvent): void {
-  const listeners = JOB_STATUS_LISTENERS.get(workspaceName);
+function publishTaskStatus(workspaceName: string, event: TaskStatusStreamEvent): void {
+  const listeners = TASK_STATUS_LISTENERS.get(workspaceName);
   if (!listeners || listeners.size === 0) {
     return;
   }
@@ -252,7 +252,7 @@ function toRuntimeServiceSummary(service: RuntimeServiceRecord): RuntimeServiceS
   return {
     id: service.id,
     workspace: service.workspace,
-    job_id: service.job_id,
+    task_id: service.task_id,
     label: service.label,
     command: service.command,
     cwd: service.cwd,
@@ -328,7 +328,7 @@ function updateRuntimeServiceStatus(
 
 function startRuntimeService(input: {
   workspaceName: string;
-  jobId: string;
+  taskId: string;
   label: string;
   command: string;
   requestedCwd: string;
@@ -340,7 +340,7 @@ function startRuntimeService(input: {
   const service: RuntimeServiceRecord = {
     id: serviceId,
     workspace: input.workspaceName,
-    job_id: input.jobId,
+    task_id: input.taskId,
     label: input.label,
     command: input.command,
     cwd: input.requestedCwd,
@@ -439,9 +439,9 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   const executeRunner = new ExecuteRunner({
     apiUrl,
     salmonCliCommand,
-    onJobStatusChanged: (input) => {
-      publishJobStatus(input.workspaceName, {
-        job_id: input.jobId,
+    onTaskStatusChanged: (input) => {
+      publishTaskStatus(input.workspaceName, {
+        task_id: input.taskId,
         status: input.status,
         changed_at: new Date().toISOString(),
         source: input.source,
@@ -454,14 +454,14 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
   const app = new Hono();
   app.use("*", cors());
-  const emitJobStatus = (
+  const emitTaskStatus = (
     workspaceName: string,
-    jobId: string,
-    status: JobStatus,
+    taskId: string,
+    status: TaskStatus,
     source: string,
   ): void => {
-    publishJobStatus(workspaceName, {
-      job_id: jobId,
+    publishTaskStatus(workspaceName, {
+      task_id: taskId,
       status,
       changed_at: new Date().toISOString(),
       source,
@@ -706,7 +706,7 @@ WHERE id = $1
     }
   });
 
-  app.get("/jobs", validateQuery(jobsQuerySchema), async (c) => {
+  app.get("/tasks", validateQuery(tasksQuerySchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const { status, limit } = c.req.valid("query");
 
@@ -725,11 +725,11 @@ SELECT j.id,
        (
          SELECT ct.id
          FROM conversation_threads ct
-         WHERE ct.job_id = j.id
+         WHERE ct.task_id = j.id
          ORDER BY ct.created_at DESC
          LIMIT 1
        ) AS thread_id
-FROM jobs j
+FROM tasks j
 `;
 
       if (status) {
@@ -742,7 +742,7 @@ FROM jobs j
       const result = await db.query<{
         id: string;
         title: string;
-        status: JobStatus;
+        status: TaskStatus;
         assigned_to: string | null;
         output_dir: string | null;
         session_id: string | null;
@@ -750,13 +750,13 @@ FROM jobs j
         thread_id: string | null;
       }>(query, params);
 
-      return c.json({ jobs: result.rows });
+      return c.json({ tasks: result.rows });
     } finally {
       await db.close();
     }
   });
 
-  app.get("/jobs/stream", async (c) => {
+  app.get("/tasks/stream", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
 
     c.header("cache-control", "no-store");
@@ -779,8 +779,8 @@ FROM jobs j
 
       await writeEvent("ready", { workspace: workspaceName, ts: new Date().toISOString() });
 
-      const unsubscribe = subscribeJobStatus(workspaceName, (event) => {
-        void writeEvent("job_status_changed", event);
+      const unsubscribe = subscribeTaskStatus(workspaceName, (event) => {
+        void writeEvent("task_status_changed", event);
       });
 
       const pingTimer = setInterval(() => {
@@ -943,39 +943,39 @@ FROM jobs j
     });
   });
 
-  app.get("/jobs/:jobId/output/changes", async (c) => {
+  app.get("/tasks/:taskId/output/changes", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const db = await openDatabase(workspaceName);
 
     try {
-      const jobResult = await db.query<{ id: string; git_state_json: string | null }>(
+      const taskResult = await db.query<{ id: string; git_state_json: string | null }>(
         `
 SELECT id, git_state_json
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
-      const job = jobResult.rows[0];
-      if (!job) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
-      const gitState = parseJobGitState(job.git_state_json);
+      const gitState = parseTaskGitState(task.git_state_json);
       if (!gitState) {
         throw new SalmonError(
-          "JOB_GIT_STATE_MISSING",
+          "TASK_GIT_STATE_MISSING",
           409,
-          `Job has no git execution state: ${jobId}`,
+          `Task has no git execution state: ${taskId}`,
         );
       }
 
       const workspacePaths = getWorkspacePaths(workspaceName);
       const repoDiffs = await buildRepoDiffEntries({
         workspacePaths,
-        jobId,
+        taskId,
         gitState,
       });
 
@@ -990,7 +990,7 @@ LIMIT 1
         .join("\n\n");
 
       return c.json({
-        roots: [join(workspacePaths.worktreesDir, jobId, "workspace")],
+        roots: [join(workspacePaths.worktreesDir, taskId, "workspace")],
         repos: repoDiffs,
         diff: combinedDiff,
       });
@@ -999,14 +999,14 @@ LIMIT 1
     }
   });
 
-  app.get("/jobs/:jobId/output/files", async (c) => {
+  app.get("/tasks/:taskId/output/files", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const db = await openDatabase(workspaceName);
 
     try {
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await getJobOutputsRoot(db, workspacePaths, jobId);
+      const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
       const files = await listOutputFiles(outputsRoot);
 
       return c.json({
@@ -1018,15 +1018,15 @@ LIMIT 1
     }
   });
 
-  app.get("/jobs/:jobId/output/file/content", validateQuery(outputFileQuerySchema), async (c) => {
+  app.get("/tasks/:taskId/output/file/content", validateQuery(outputFileQuerySchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const { path: relativePath } = c.req.valid("query");
     const db = await openDatabase(workspaceName);
 
     try {
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await getJobOutputsRoot(db, workspacePaths, jobId);
+      const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
       const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
       const fileInfo = await stat(absolutePath).catch(() => null);
       if (!fileInfo?.isFile()) {
@@ -1048,15 +1048,15 @@ LIMIT 1
     }
   });
 
-  app.get("/jobs/:jobId/output/file/download", validateQuery(outputFileQuerySchema), async (c) => {
+  app.get("/tasks/:taskId/output/file/download", validateQuery(outputFileQuerySchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const { path: relativePath } = c.req.valid("query");
     const db = await openDatabase(workspaceName);
 
     try {
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await getJobOutputsRoot(db, workspacePaths, jobId);
+      const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
       const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
       const fileInfo = await stat(absolutePath).catch(() => null);
       if (!fileInfo?.isFile()) {
@@ -1078,15 +1078,15 @@ LIMIT 1
     }
   });
 
-  app.post("/jobs/:jobId/output/open-folder", validateJson(openOutputFolderSchema), async (c) => {
+  app.post("/tasks/:taskId/output/open-folder", validateJson(openOutputFolderSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
 
     const db = await openDatabase(workspaceName);
     try {
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await getJobOutputsRoot(db, workspacePaths, jobId);
+      const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
 
       let targetPath = outputsRoot;
       if (body.path) {
@@ -1105,28 +1105,28 @@ LIMIT 1
     }
   });
 
-  app.get("/jobs/:jobId/test-commands", async (c) => {
+  app.get("/tasks/:taskId/test-commands", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const db = await openDatabase(workspaceName);
 
     try {
       const result = await db.query<{ id: string; test_commands_json: string | null }>(
         `
 SELECT id, test_commands_json
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
       const row = result.rows[0];
       if (!row) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
       return c.json({
-        commands: parseJobTestCommands(row.test_commands_json),
+        commands: parseTaskTestCommands(row.test_commands_json),
       });
     } finally {
       await db.close();
@@ -1134,30 +1134,30 @@ LIMIT 1
   });
 
   app.put(
-    "/jobs/:jobId/test-commands",
-    validateJson(updateJobTestCommandsSchema),
+    "/tasks/:taskId/test-commands",
+    validateJson(updateTaskTestCommandsSchema),
     async (c) => {
       const workspaceName = await requireActiveWorkspaceName();
-      const jobId = c.req.param("jobId");
+      const taskId =c.req.param("taskId");
       const body = c.req.valid("json");
       const db = await openDatabase(workspaceName);
 
       try {
-        const jobResult = await db.query<{ id: string }>(
+        const taskResult = await db.query<{ id: string }>(
           `
 SELECT id
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-          [jobId],
+          [taskId],
         );
-        const job = jobResult.rows[0];
-        if (!job) {
-          throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+        const task = taskResult.rows[0];
+        if (!task) {
+          throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
         }
 
-        const normalizedCommands = normalizeJobTestCommands(body.commands);
+        const normalizedCommands = normalizeTaskTestCommands(body.commands);
         if (normalizedCommands.length === 0) {
           throw new SalmonError(
             "INVALID_TEST_COMMANDS",
@@ -1168,11 +1168,11 @@ LIMIT 1
 
         await db.query(
           `
-UPDATE jobs
+UPDATE tasks
 SET test_commands_json = $2
 WHERE id = $1
 `,
-          [jobId, JSON.stringify(normalizedCommands)],
+          [taskId, JSON.stringify(normalizedCommands)],
         );
 
         return c.json({
@@ -1185,9 +1185,9 @@ WHERE id = $1
     },
   );
 
-  app.post("/jobs/:jobId/test-commands/run", validateJson(runJobTestCommandSchema), async (c) => {
+  app.post("/tasks/:taskId/test-commands/run", validateJson(runTaskTestCommandSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
     const db = await openDatabase(workspaceName);
 
@@ -1198,18 +1198,18 @@ WHERE id = $1
       }>(
         `
 SELECT id, test_commands_json
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
       const row = result.rows[0];
       if (!row) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
-      const commands = parseJobTestCommands(row.test_commands_json);
+      const commands = parseTaskTestCommands(row.test_commands_json);
       const selected = commands.find(
         (item) => item.command === body.command && item.cwd === body.cwd,
       );
@@ -1217,16 +1217,16 @@ LIMIT 1
         throw new SalmonError(
           "TEST_COMMAND_NOT_ALLOWED",
           409,
-          "Test command is not registered for this job.",
+          "Test command is not registered for this task.",
         );
       }
 
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const runRoot = await resolveJobExecutionRoot(workspacePaths, jobId);
-      const commandCwd = await resolveJobCommandCwd(runRoot, selected.cwd);
+      const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
+      const commandCwd = await resolveTaskCommandCwd(runRoot, selected.cwd);
       const service = startRuntimeService({
         workspaceName,
-        jobId,
+        taskId,
         label: selected.label,
         command: selected.command,
         requestedCwd: selected.cwd,
@@ -1234,7 +1234,7 @@ LIMIT 1
         env: {
           ...process.env,
           SALMON_WORKSPACE_NAME: workspaceName,
-          SALMON_JOB_ID: jobId,
+          SALMON_TASK_ID: taskId,
         },
       });
 
@@ -1247,90 +1247,90 @@ LIMIT 1
     }
   });
 
-  app.post("/jobs/:jobId/review", validateJson(reviewJobSchema), async (c) => {
+  app.post("/tasks/:taskId/review", validateJson(reviewTaskSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
 
     const db = await openDatabase(workspaceName);
     try {
       await ensureConversationSchema(db);
 
-      const jobResult = await db.query<{
+      const taskResult = await db.query<{
         id: string;
-        status: JobStatus;
+        status: TaskStatus;
         assigned_to: string | null;
         merge_retry_count: number | null;
         git_state_json: string | null;
       }>(
         `
 SELECT id, status, assigned_to, merge_retry_count, git_state_json
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
-      const job = jobResult.rows[0];
-      if (!job) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
       if (body.action === "reopen") {
-        if (job.status !== "completed") {
+        if (task.status !== "completed") {
           throw new SalmonError(
-            "JOB_NOT_COMPLETED",
+            "TASK_NOT_COMPLETED",
             409,
-            `Job is not completed: ${jobId}`,
+            `Task is not completed: ${taskId}`,
           );
         }
 
-        const thread = await getThreadByJobId(db, jobId);
+        const thread = await getThreadByTaskId(db, taskId);
         if (!thread) {
-          throw new SalmonError("JOB_THREAD_NOT_FOUND", 404, `No conversation thread found for job: ${jobId}`);
+          throw new SalmonError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
         }
 
         const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
         if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-          throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this job.");
+          throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
         }
 
         const assignedWorker =
-          job.assigned_to && job.assigned_to !== DEFAULT_AGENT_ID
-            ? await getAgentRow(db, job.assigned_to)
+          task.assigned_to && task.assigned_to !== DEFAULT_AGENT_ID
+            ? await getAgentRow(db, task.assigned_to)
             : null;
 
         await db.query(
           `
-UPDATE jobs
+UPDATE tasks
 SET status = 'queued',
     merge_retry_count = 0
 WHERE id = $1
 `,
-          [jobId],
+          [taskId],
         );
-        emitJobStatus(workspaceName, jobId, "queued", "review_reopen");
+        emitTaskStatus(workspaceName, taskId, "queued", "review_reopen");
 
         await insertEvent(db, {
           id: `evt_${randomUUID().slice(0, 12)}`,
           threadId: thread.id,
           turnId: latestExecuteTurn.id,
-          eventName: "job_reopened",
+          eventName: "task_reopened",
           payload: {
             from_status: "completed",
           },
         });
-        publishThreadUpdated(workspaceName, thread.id, "job_reopened");
+        publishThreadUpdated(workspaceName, thread.id, "task_reopened");
 
         executeRunner.execute({
           workspaceName,
-          jobId,
+          taskId,
           threadId: thread.id,
           prompt: latestExecuteTurn.user_message,
           requestedRecipientAgentId: assignedWorker?.id ?? undefined,
           reasoningEffort: requireReasoningEffort(
             latestExecuteTurn.reasoning_effort,
-            `latest execute turn for reopen job ${jobId}`,
+            `latest execute turn for reopen task ${taskId}`,
           ),
         });
 
@@ -1341,44 +1341,44 @@ WHERE id = $1
         });
       }
 
-      if (job.status !== "pending_review") {
+      if (task.status !== "pending_review") {
         throw new SalmonError(
-          "JOB_NOT_PENDING_REVIEW",
+          "TASK_NOT_PENDING_REVIEW",
           409,
-          `Job is not pending review: ${jobId}`,
+          `Task is not pending review: ${taskId}`,
         );
       }
 
-      const gitState = parseJobGitState(job.git_state_json);
+      const gitState = parseTaskGitState(task.git_state_json);
       if (!gitState) {
         throw new SalmonError(
-          "JOB_GIT_STATE_MISSING",
+          "TASK_GIT_STATE_MISSING",
           409,
-          `Job has no git execution state: ${jobId}`,
+          `Task has no git execution state: ${taskId}`,
         );
       }
 
       const workspacePaths = getWorkspacePaths(workspaceName);
-      const mergeResult = await mergeApprovedJob({
+      const mergeResult = await mergeApprovedTask({
         workspacePaths,
-        jobId,
+        taskId,
         gitState,
       });
 
       if (mergeResult.conflicts.length === 0) {
-        const nextStatus: JobStatus = "completed";
-        const mergedOutputDir = getJobMainOutputDir(workspacePaths, jobId);
+        const nextStatus: TaskStatus = "completed";
+        const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
         await db.query(
           `
-UPDATE jobs
+UPDATE tasks
 SET status = $2,
     output_dir = $3
 WHERE id = $1
 `,
-          [jobId, nextStatus, mergedOutputDir],
+          [taskId, nextStatus, mergedOutputDir],
         );
-        emitJobStatus(workspaceName, jobId, nextStatus, "review_action");
-        await deleteJobWorktree({ workspacePaths, jobId });
+        emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+        await deleteTaskWorktree({ workspacePaths, taskId });
         return c.json({
           ok: true,
           status: nextStatus,
@@ -1387,20 +1387,20 @@ WHERE id = $1
         });
       }
 
-      const retryCount = Number.isInteger(job.merge_retry_count) ? (job.merge_retry_count as number) : 0;
+      const retryCount = Number.isInteger(task.merge_retry_count) ? (task.merge_retry_count as number) : 0;
       if (retryCount < 1) {
         await db.query(
           `
-UPDATE jobs
+UPDATE tasks
 SET status = 'queued',
     merge_retry_count = COALESCE(merge_retry_count, 0) + 1
 WHERE id = $1
 `,
-          [jobId],
+          [taskId],
         );
-        emitJobStatus(workspaceName, jobId, "queued", "review_conflict_retry");
+        emitTaskStatus(workspaceName, taskId, "queued", "review_conflict_retry");
 
-        const thread = await getThreadByJobId(db, jobId);
+        const thread = await getThreadByTaskId(db, taskId);
         const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
         if (thread && latestExecuteTurn && latestExecuteTurn.user_message.trim()) {
           const retryPrompt = buildConflictRetryPrompt({
@@ -1409,13 +1409,13 @@ WHERE id = $1
           });
           executeRunner.execute({
             workspaceName,
-            jobId,
+            taskId,
             threadId: thread.id,
             prompt: retryPrompt,
-            requestedRecipientAgentId: job.assigned_to ?? undefined,
+            requestedRecipientAgentId: task.assigned_to ?? undefined,
             reasoningEffort: requireReasoningEffort(
               latestExecuteTurn.reasoning_effort,
-              `latest execute turn for conflict retry job ${jobId}`,
+              `latest execute turn for conflict retry task ${taskId}`,
             ),
           });
 
@@ -1429,13 +1429,13 @@ WHERE id = $1
 
         await db.query(
           `
-UPDATE jobs
+UPDATE tasks
 SET status = 'needs_fix'
 WHERE id = $1
 `,
-          [jobId],
+          [taskId],
         );
-        emitJobStatus(workspaceName, jobId, "needs_fix", "review_conflict_missing_retry_context");
+        emitTaskStatus(workspaceName, taskId, "needs_fix", "review_conflict_missing_retry_context");
         return c.json({
           ok: true,
           status: "needs_fix",
@@ -1446,13 +1446,13 @@ WHERE id = $1
 
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET status = 'needs_fix'
 WHERE id = $1
 `,
-        [jobId],
+        [taskId],
       );
-      emitJobStatus(workspaceName, jobId, "needs_fix", "review_conflict_manual");
+      emitTaskStatus(workspaceName, taskId, "needs_fix", "review_conflict_manual");
       return c.json({
         ok: true,
         status: "needs_fix",
@@ -1464,44 +1464,44 @@ WHERE id = $1
     }
   });
 
-  app.delete("/jobs/:jobId", async (c) => {
+  app.delete("/tasks/:taskId", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
 
     const db = await openDatabase(workspaceName);
     try {
       await ensureConversationSchema(db);
 
-      const jobResult = await db.query<{
+      const taskResult = await db.query<{
         id: string;
-        status: JobStatus;
+        status: TaskStatus;
       }>(
         `
 SELECT id, status
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
-      const job = jobResult.rows[0];
-      if (!job) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
       const workspacePaths = getWorkspacePaths(workspaceName);
 
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET status = 'cancelled'
 WHERE id = $1
 `,
-        [jobId],
+        [taskId],
       );
-      emitJobStatus(workspaceName, jobId, "cancelled", "job_deleted");
+      emitTaskStatus(workspaceName, taskId, "cancelled", "task_deleted");
 
-      await deleteJobWorktree({ workspacePaths, jobId });
+      await deleteTaskWorktree({ workspacePaths, taskId });
 
       return c.json({ ok: true, status: "cancelled" });
     } finally {
@@ -1509,22 +1509,22 @@ WHERE id = $1
     }
   });
 
-  app.post("/jobs", validateJson(createJobSchema), async (c) => {
+  app.post("/tasks", validateJson(createTaskSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const body = c.req.valid("json");
 
-    const jobId = `job_${randomUUID().slice(0, 8)}`;
-    const status: JobStatus = body.status;
+    const taskId =`task_${randomUUID().slice(0, 8)}`;
+    const status: TaskStatus = body.status;
     const db = await openDatabase(workspaceName);
 
     try {
       await db.query(
         `
-INSERT INTO jobs (id, title, status, assigned_to, output_dir, session_id)
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
 VALUES ($1, $2, $3, $4, $5, $6)
 `,
         [
-          jobId,
+          taskId,
           body.title,
           status,
           body.assigned_to ?? null,
@@ -1532,23 +1532,23 @@ VALUES ($1, $2, $3, $4, $5, $6)
           body.session_id ?? null,
         ],
       );
-      emitJobStatus(workspaceName, jobId, status, "job_created");
+      emitTaskStatus(workspaceName, taskId, status, "task_created");
     } catch (error: unknown) {
-      throw new SalmonError("CREATE_JOB_FAILED", 400, errorMessage(error));
+      throw new SalmonError("CREATE_TASK_FAILED", 400, errorMessage(error));
     } finally {
       await db.close();
     }
 
-    return c.json({ id: jobId }, 201);
+    return c.json({ id: taskId }, 201);
   });
 
-  app.post("/jobs/execute", validateJson(createExecuteJobSchema), async (c) => {
+  app.post("/tasks/execute", validateJson(createExecuteTaskSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const body = c.req.valid("json");
     const prompt = body.prompt;
     const reasoningEffort = body.reasoning_effort;
     const title = prompt.length > 100 ? `${prompt.slice(0, 97)}...` : prompt;
-    const jobId = `job_${randomUUID().slice(0, 8)}`;
+    const taskId =`task_${randomUUID().slice(0, 8)}`;
     const threadId = `thread_${randomUUID().slice(0, 12)}`;
 
     const db = await openDatabase(workspaceName);
@@ -1582,12 +1582,12 @@ VALUES ($1, $2, $3, $4, $5, $6)
 
       await db.query(
         `
-INSERT INTO jobs (id, title, status, assigned_to, output_dir, session_id)
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
 VALUES ($1, $2, 'queued', NULL, NULL, NULL)
 `,
-        [jobId, title],
+        [taskId, title],
       );
-      emitJobStatus(workspaceName, jobId, "queued", "execute_created");
+      emitTaskStatus(workspaceName, taskId, "queued", "execute_created");
 
       await createThread(db, {
         id: threadId,
@@ -1596,12 +1596,12 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL)
         modelLabel: orchestrator.model_label,
         modelId: orchestrator.model_id,
         sourceThreadId: null,
-        jobId,
+        taskId,
       });
 
       executeRunner.execute({
         workspaceName,
-        jobId,
+        taskId,
         threadId,
         prompt,
         requestedRecipientAgentId,
@@ -1611,41 +1611,41 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL)
       if (error instanceof SalmonError) {
         throw error;
       }
-      throw new SalmonError("CREATE_EXECUTE_JOB_FAILED", 400, errorMessage(error));
+      throw new SalmonError("CREATE_EXECUTE_TASK_FAILED", 400, errorMessage(error));
     } finally {
       await db.close();
     }
 
-    return c.json({ job_id: jobId }, 201);
+    return c.json({ task_id: taskId }, 201);
   });
 
-  app.post("/jobs/:jobId/recipient", validateJson(setJobRecipientSchema), async (c) => {
+  app.post("/tasks/:taskId/recipient", validateJson(setTaskRecipientSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
     const recipientAgentId = body.recipient_agent_id;
     const db = await openDatabase(workspaceName);
 
     try {
       await ensureConversationSchema(db);
-      const jobResult = await db.query<{ id: string; status: JobStatus }>(
+      const taskResult = await db.query<{ id: string; status: TaskStatus }>(
         `
 SELECT id, status
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
-      const job = jobResult.rows[0];
-      if (!job) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
-      if (job.status !== "waiting_for_recipient") {
+      if (task.status !== "waiting_for_recipient") {
         throw new SalmonError(
-          "JOB_NOT_WAITING_FOR_RECIPIENT",
+          "TASK_NOT_WAITING_FOR_RECIPIENT",
           409,
-          `Job is not waiting for recipient input: ${jobId}`,
+          `Task is not waiting for recipient input: ${taskId}`,
         );
       }
 
@@ -1654,36 +1654,36 @@ LIMIT 1
         throw new SalmonError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${recipientAgentId}`);
       }
 
-      const thread = await getThreadByJobId(db, jobId);
+      const thread = await getThreadByTaskId(db, taskId);
       if (!thread) {
-        throw new SalmonError("JOB_THREAD_NOT_FOUND", 404, `No conversation thread found for job: ${jobId}`);
+        throw new SalmonError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
       }
 
       const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
       if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-        throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this job.");
+        throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
       }
 
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET status = 'queued'
 WHERE id = $1
 `,
-        [jobId],
+        [taskId],
       );
-      emitJobStatus(workspaceName, jobId, "queued", "human_response");
-      emitJobStatus(workspaceName, jobId, "queued", "recipient_selected");
+      emitTaskStatus(workspaceName, taskId, "queued", "human_response");
+      emitTaskStatus(workspaceName, taskId, "queued", "recipient_selected");
 
       executeRunner.execute({
         workspaceName,
-        jobId,
+        taskId,
         threadId: thread.id,
         prompt: latestExecuteTurn.user_message,
         requestedRecipientAgentId: recipientAgentId,
         reasoningEffort: requireReasoningEffort(
           latestExecuteTurn.reasoning_effort,
-          `latest execute turn for job ${jobId}`,
+          `latest execute turn for task ${taskId}`,
         ),
       });
     } finally {
@@ -1694,35 +1694,35 @@ WHERE id = $1
   });
 
   app.post(
-    "/jobs/:jobId/agent/select-recipient",
+    "/tasks/:taskId/agent/select-recipient",
     validateJson(agentSelectRecipientSchema),
     async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
     const selectedAgentId = body.agent_id;
     const db = await openDatabase(workspaceName);
 
     try {
       await ensureConversationSchema(db);
-      const jobResult = await db.query<{ id: string; status: JobStatus }>(
+      const taskResult = await db.query<{ id: string; status: TaskStatus }>(
         `
 SELECT id, status
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
-      const job = jobResult.rows[0];
-      if (!job) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
-      if (job.status !== "orchestrating") {
+      if (task.status !== "orchestrating") {
         throw new SalmonError(
-          "JOB_NOT_ORCHESTRATING",
+          "TASK_NOT_ORCHESTRATING",
           409,
-          `Job is not orchestrating: ${jobId}`,
+          `Task is not orchestrating: ${taskId}`,
         );
       }
 
@@ -1733,11 +1733,11 @@ LIMIT 1
 
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET assigned_to = $2
 WHERE id = $1
 `,
-        [jobId, selectedAgentId],
+        [taskId, selectedAgentId],
       );
 
     } finally {
@@ -1748,43 +1748,43 @@ WHERE id = $1
   });
 
   app.post(
-    "/jobs/:jobId/agent/test-commands",
+    "/tasks/:taskId/agent/test-commands",
     validateJson(agentSubmitTestCommandsSchema),
     async (c) => {
       const workspaceName = await requireActiveWorkspaceName();
-      const jobId = c.req.param("jobId");
+      const taskId =c.req.param("taskId");
       const body = c.req.valid("json");
 
       const db = await openDatabase(workspaceName);
       try {
         await ensureConversationSchema(db);
-        const jobResult = await db.query<{
+        const taskResult = await db.query<{
           id: string;
-          status: JobStatus;
+          status: TaskStatus;
           assigned_to: string | null;
           test_commands_json: string | null;
         }>(
           `
 SELECT id, status, assigned_to, test_commands_json
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-          [jobId],
+          [taskId],
         );
-        const job = jobResult.rows[0];
-        if (!job) {
-          throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+        const task = taskResult.rows[0];
+        if (!task) {
+          throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
         }
-        if (job.status !== "running" && job.status !== "pending_review") {
+        if (task.status !== "running" && task.status !== "pending_review") {
           throw new SalmonError(
-            "JOB_NOT_ACCEPTING_TEST_COMMANDS",
+            "TASK_NOT_ACCEPTING_TEST_COMMANDS",
             409,
-            `Job cannot accept test commands in status: ${job.status}`,
+            `Task cannot accept test commands in status: ${task.status}`,
           );
         }
 
-        const normalizedCommands = normalizeJobTestCommands(body.commands);
+        const normalizedCommands = normalizeTaskTestCommands(body.commands);
         if (normalizedCommands.length === 0) {
           throw new SalmonError(
             "INVALID_TEST_COMMANDS",
@@ -1804,24 +1804,24 @@ LIMIT 1
           );
         }
 
-        const existingCommands = parseJobTestCommands(job.test_commands_json);
+        const existingCommands = parseTaskTestCommands(task.test_commands_json);
         const combinedCommands = body.replace
           ? normalizedCommands
-          : normalizeJobTestCommands(
+          : normalizeTaskTestCommands(
               [...existingCommands, ...normalizedCommands],
               Number.MAX_SAFE_INTEGER,
             ).slice(-8);
 
         await db.query(
           `
-UPDATE jobs
+UPDATE tasks
 SET test_commands_json = $2
 WHERE id = $1
 `,
-          [jobId, JSON.stringify(combinedCommands)],
+          [taskId, JSON.stringify(combinedCommands)],
         );
 
-        const thread = await getThreadByJobId(db, jobId);
+        const thread = await getThreadByTaskId(db, taskId);
         if (thread) {
           const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
           await insertEvent(db, {
@@ -1832,7 +1832,7 @@ WHERE id = $1
             payload: {
               commands: combinedCommands,
               replace: Boolean(body.replace),
-              agent_id: body.agent_id ?? job.assigned_to ?? null,
+              agent_id: body.agent_id ?? task.assigned_to ?? null,
             },
           });
           publishThreadUpdated(workspaceName, thread.id, "worker_test_commands_submitted");
@@ -1848,43 +1848,43 @@ WHERE id = $1
     },
   );
 
-  app.post("/jobs/:jobId/agent/ask-question", validateJson(agentAskQuestionSchema), async (c) => {
+  app.post("/tasks/:taskId/agent/ask-question", validateJson(agentAskQuestionSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
 
     const db = await openDatabase(workspaceName);
     try {
       await ensureConversationSchema(db);
-      const jobResult = await db.query<{ id: string; status: JobStatus; assigned_to: string | null }>(
+      const taskResult = await db.query<{ id: string; status: TaskStatus; assigned_to: string | null }>(
         `
 SELECT id, status, assigned_to
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
-      emitJobStatus(workspaceName, jobId, "waiting_for_question_response", "worker_ask_question");
-      const job = jobResult.rows[0];
-      if (!job) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "worker_ask_question");
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
-      if (job.status !== "running") {
-        throw new SalmonError("JOB_NOT_RUNNING", 409, `Job is not running: ${jobId}`);
+      if (task.status !== "running") {
+        throw new SalmonError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
       }
 
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET status = 'waiting_for_question_response'
 WHERE id = $1
 `,
-        [jobId],
+        [taskId],
       );
-      emitJobStatus(workspaceName, jobId, "waiting_for_question_response", "worker_ask_question");
+      emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "worker_ask_question");
 
-      const thread = await getThreadByJobId(db, jobId);
+      const thread = await getThreadByTaskId(db, taskId);
       if (thread) {
         const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
         await insertEvent(db, {
@@ -1895,7 +1895,7 @@ WHERE id = $1
           payload: {
             question: body.question,
             details: body.details ?? null,
-            agent_id: body.agent_id ?? job.assigned_to ?? null,
+            agent_id: body.agent_id ?? task.assigned_to ?? null,
           },
         });
       }
@@ -1906,42 +1906,42 @@ WHERE id = $1
     }
   });
 
-  app.post("/jobs/:jobId/agent/request-help", validateJson(agentRequestHelpSchema), async (c) => {
+  app.post("/tasks/:taskId/agent/request-help", validateJson(agentRequestHelpSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
 
     const db = await openDatabase(workspaceName);
     try {
       await ensureConversationSchema(db);
-      const jobResult = await db.query<{ id: string; status: JobStatus; assigned_to: string | null }>(
+      const taskResult = await db.query<{ id: string; status: TaskStatus; assigned_to: string | null }>(
         `
 SELECT id, status, assigned_to
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
-      const job = jobResult.rows[0];
-      if (!job) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
-      if (job.status !== "running") {
-        throw new SalmonError("JOB_NOT_RUNNING", 409, `Job is not running: ${jobId}`);
+      if (task.status !== "running") {
+        throw new SalmonError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
       }
 
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET status = 'waiting_for_help_response'
 WHERE id = $1
 `,
-        [jobId],
+        [taskId],
       );
-      emitJobStatus(workspaceName, jobId, "waiting_for_help_response", "worker_request_help");
+      emitTaskStatus(workspaceName, taskId, "waiting_for_help_response", "worker_request_help");
 
-      const thread = await getThreadByJobId(db, jobId);
+      const thread = await getThreadByTaskId(db, taskId);
       if (thread) {
         const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
         await insertEvent(db, {
@@ -1952,7 +1952,7 @@ WHERE id = $1
           payload: {
             summary: body.summary,
             details: body.details ?? null,
-            agent_id: body.agent_id ?? job.assigned_to ?? null,
+            agent_id: body.agent_id ?? task.assigned_to ?? null,
           },
         });
       }
@@ -1963,9 +1963,9 @@ WHERE id = $1
     }
   });
 
-  app.post("/jobs/:jobId/respond", validateJson(jobRespondSchema), async (c) => {
+  app.post("/tasks/:taskId/respond", validateJson(taskRespondSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
-    const jobId = c.req.param("jobId");
+    const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
 
     const db = await openDatabase(workspaceName);
@@ -1978,57 +1978,57 @@ WHERE id = $1
 
     try {
       await ensureConversationSchema(db);
-      const jobResult = await db.query<{
+      const taskResult = await db.query<{
         id: string;
-        status: JobStatus;
+        status: TaskStatus;
         assigned_to: string | null;
       }>(
         `
 SELECT id, status, assigned_to
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [jobId],
+        [taskId],
       );
-      const job = jobResult.rows[0];
-      if (!job) {
-        throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
       if (
-        job.status !== "waiting_for_question_response" &&
-        job.status !== "waiting_for_help_response"
+        task.status !== "waiting_for_question_response" &&
+        task.status !== "waiting_for_help_response"
       ) {
         throw new SalmonError(
-          "JOB_NOT_WAITING_FOR_RESPONSE",
+          "TASK_NOT_WAITING_FOR_RESPONSE",
           409,
-          `Job is not waiting for a human response: ${jobId}`,
+          `Task is not waiting for a human response: ${taskId}`,
         );
       }
-      if (!job.assigned_to) {
+      if (!task.assigned_to) {
         throw new SalmonError(
-          "JOB_MISSING_ASSIGNED_WORKER",
+          "TASK_MISSING_ASSIGNED_WORKER",
           409,
-          `Job has no assigned worker to resume: ${jobId}`,
+          `Task has no assigned worker to resume: ${taskId}`,
         );
       }
-      const resumeWorker = await getAgentRow(db, job.assigned_to);
+      const resumeWorker = await getAgentRow(db, task.assigned_to);
       if (!resumeWorker || resumeWorker.id === DEFAULT_AGENT_ID) {
         throw new SalmonError(
-          "JOB_INVALID_ASSIGNED_WORKER",
+          "TASK_INVALID_ASSIGNED_WORKER",
           409,
-          `Assigned worker is invalid for resume: ${jobId}`,
+          `Assigned worker is invalid for task resume: ${taskId}`,
         );
       }
 
-      const thread = await getThreadByJobId(db, jobId);
+      const thread = await getThreadByTaskId(db, taskId);
       if (!thread) {
-        throw new SalmonError("JOB_THREAD_NOT_FOUND", 404, `No conversation thread found for job: ${jobId}`);
+        throw new SalmonError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
       }
 
       const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
       if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-        throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this job.");
+        throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
       }
 
       await insertMessage(db, {
@@ -2046,17 +2046,17 @@ LIMIT 1
         eventName: "human_response_received",
         payload: {
           message: body.message,
-          responded_to_status: job.status,
+          responded_to_status: task.status,
         },
       });
 
       await db.query(
         `
-UPDATE jobs
+UPDATE tasks
 SET status = 'queued'
 WHERE id = $1
 `,
-        [jobId],
+        [taskId],
       );
 
       requeue = {
@@ -2065,7 +2065,7 @@ WHERE id = $1
         recipientAgentId: resumeWorker.id,
         reasoningEffort: requireReasoningEffort(
           latestExecuteTurn.reasoning_effort,
-          `latest execute turn for job ${jobId}`,
+          `latest execute turn for task ${taskId}`,
         ),
       };
     } finally {
@@ -2075,7 +2075,7 @@ WHERE id = $1
     if (requeue) {
       executeRunner.execute({
         workspaceName,
-        jobId,
+        taskId,
         threadId: requeue.threadId,
         prompt: requeue.prompt,
         requestedRecipientAgentId: requeue.recipientAgentId,
@@ -2460,7 +2460,7 @@ WHERE id = $1
             threadId,
             turnId,
             agentId: DEFAULT_AGENT_ID,
-            jobId: thread.job_id,
+            taskId: thread.task_id,
           }),
           mode: body.mode,
           reasoningEffort,
@@ -2516,7 +2516,7 @@ WHERE id = $1
           throw new SalmonError(
             "PLAN_SUMMARY_REQUIRED",
             409,
-            "Plan mode requires at least one `salmon job plan-summary` CLI submission.",
+            "Plan mode requires at least one `salmon task plan-summary` CLI submission.",
           );
         }
         if (
@@ -2526,7 +2526,7 @@ WHERE id = $1
           throw new SalmonError(
             "PLAN_RECIPIENT_REQUIRED",
             409,
-            "Plan mode requires at least one `salmon job plan-select-recipient` CLI submission.",
+            "Plan mode requires at least one `salmon task plan-select-recipient` CLI submission.",
           );
         }
         const planSummary = body.mode === "plan" ? declaredPlanSummary : null;
@@ -2613,7 +2613,7 @@ WHERE id = $1
     const body = c.req.valid("json");
     const reasoningEffort = body.reasoning_effort;
     const db = await openDatabase(workspaceName);
-    let jobId = `job_${randomUUID().slice(0, 8)}`;
+    let taskId =`task_${randomUUID().slice(0, 8)}`;
     let executeThreadId = `thread_${randomUUID().slice(0, 12)}`;
     let executePrompt = "";
     let requestedRecipientAgentId: string | null = null;
@@ -2651,7 +2651,7 @@ WHERE id = $1
         throw new SalmonError(
           "PLAN_RECIPIENT_MISSING",
           409,
-          "Plan is missing a selected recipient. Submit `salmon job plan-select-recipient` in plan mode.",
+          "Plan is missing a selected recipient. Submit `salmon task plan-select-recipient` in plan mode.",
         );
       }
       const executeRecipient = await getAgentRow(db, requestedRecipientAgentId);
@@ -2675,12 +2675,12 @@ WHERE id = $1
 
       await db.query(
         `
-INSERT INTO jobs (id, title, status, assigned_to, output_dir, session_id)
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
 VALUES ($1, $2, 'queued', $3, NULL, NULL)
 `,
-        [jobId, planTitle, executeRecipient.id],
+        [taskId, planTitle, executeRecipient.id],
       );
-      emitJobStatus(workspaceName, jobId, "queued", "execute_from_plan_created");
+      emitTaskStatus(workspaceName, taskId, "queued", "execute_from_plan_created");
 
       await createThread(db, {
         id: executeThreadId,
@@ -2689,10 +2689,10 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
         modelLabel: executeRecipient.model_label,
         modelId: executeRecipient.model_id,
         sourceThreadId: threadId,
-        jobId,
+        taskId,
       });
 
-      await setThreadJobId(db, executeThreadId, jobId);
+      await setThreadTaskId(db, executeThreadId, taskId);
       await closeThread(db, threadId);
     } finally {
       await db.close();
@@ -2700,7 +2700,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
 
     executeRunner.execute({
       workspaceName,
-      jobId,
+      taskId,
       threadId: executeThreadId,
       prompt: executePrompt,
       requestedRecipientAgentId,
@@ -2708,7 +2708,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
       skipOrchestratorSelection: true,
     });
 
-    return c.json({ job_id: jobId }, 201);
+    return c.json({ task_id: taskId }, 201);
   });
 
   app.get("/code/folders", async (c) => {
@@ -3338,7 +3338,7 @@ function buildConversationAgentEnv(input: {
   threadId: string;
   turnId: string;
   agentId: string;
-  jobId?: string | null;
+  taskId?: string | null;
 }): Record<string, string> {
   const env: Record<string, string> = {
     SALMON_API_URL: input.apiUrl,
@@ -3349,8 +3349,8 @@ function buildConversationAgentEnv(input: {
     SALMON_AGENT_ID: input.agentId,
   };
 
-  if (input.jobId && input.jobId.trim()) {
-    env.SALMON_JOB_ID = input.jobId;
+  if (input.taskId && input.taskId.trim()) {
+    env.SALMON_TASK_ID = input.taskId;
   }
 
   return env;
@@ -3372,7 +3372,7 @@ function buildConflictRetryPrompt(input: {
 
   return [
     "The previous approval merge reported conflicts.",
-    "Resolve all merge conflicts in the current job worktrees, then finish with a clean summary for review.",
+    "Resolve all merge conflicts in the current task worktrees, then finish with a clean summary for review.",
     "Conflict details:",
     conflictLines || "(none reported)",
     "Requirements:",
@@ -3384,49 +3384,49 @@ function buildConflictRetryPrompt(input: {
   ].join("\n\n");
 }
 
-async function getJobOutputsRoot(
+async function getTaskOutputsRoot(
   db: Awaited<ReturnType<typeof openDatabase>>,
   workspacePaths: ReturnType<typeof getWorkspacePaths>,
-  jobId: string,
+  taskId: string,
 ): Promise<string> {
   const result = await db.query<{ id: string; output_dir: string | null }>(
     `
 SELECT id, output_dir
-FROM jobs
+FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-    [jobId],
+    [taskId],
   );
 
   const row = result.rows[0];
   if (!row) {
-    throw new SalmonError("JOB_NOT_FOUND", 404, `Job not found: ${jobId}`);
+    throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
   }
 
-  return resolveJobOutputsRoot(workspacePaths, jobId, row.output_dir);
+  return resolveTaskOutputsRoot(workspacePaths, taskId, row.output_dir);
 }
 
-async function resolveJobOutputsRoot(
+async function resolveTaskOutputsRoot(
   workspacePaths: ReturnType<typeof getWorkspacePaths>,
-  jobId: string,
+  taskId: string,
   storedOutputDir?: string | null,
 ): Promise<string> {
-  const mainRoot = resolve(join(workspacePaths.outputsDir, jobId));
+  const mainRoot = resolve(join(workspacePaths.outputsDir, taskId));
   const worktreeRoot = resolve(
-    join(workspacePaths.worktreesDir, jobId, "workspace", "outputs", jobId),
+    join(workspacePaths.worktreesDir, taskId, "workspace", "outputs", taskId),
   );
 
   if (typeof storedOutputDir !== "string" || storedOutputDir.trim().length === 0) {
-    throw new SalmonError("JOB_OUTPUT_DIR_MISSING", 409, `Job output directory is missing: ${jobId}`);
+    throw new SalmonError("TASK_OUTPUT_DIR_MISSING", 409, `Task output directory is missing: ${taskId}`);
   }
 
   const absolute = resolve(storedOutputDir.trim());
   if (!isWithinRoot(mainRoot, absolute) && !isWithinRoot(worktreeRoot, absolute)) {
-    throw new SalmonError("JOB_OUTPUT_DIR_INVALID", 409, `Job output directory is invalid: ${jobId}`);
+    throw new SalmonError("TASK_OUTPUT_DIR_INVALID", 409, `Task output directory is invalid: ${taskId}`);
   }
   if (!(await isDirectory(absolute))) {
-    throw new SalmonError("JOB_OUTPUT_DIR_NOT_FOUND", 409, `Job output directory not found: ${jobId}`);
+    throw new SalmonError("TASK_OUTPUT_DIR_NOT_FOUND", 409, `Task output directory not found: ${taskId}`);
   }
   return absolute;
 }
@@ -3666,13 +3666,13 @@ function normalizeContextFolderName(name: string): string {
   return trimmed;
 }
 
-type JobTestCommand = {
+type TaskTestCommand = {
   label: string;
   command: string;
   cwd: string;
 };
 
-function parseJobTestCommands(value: string | null | undefined): JobTestCommand[] {
+function parseTaskTestCommands(value: string | null | undefined): TaskTestCommand[] {
   if (!value || typeof value !== "string") {
     return [];
   }
@@ -3682,18 +3682,18 @@ function parseJobTestCommands(value: string | null | undefined): JobTestCommand[
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return normalizeJobTestCommands(parsed);
+    return normalizeTaskTestCommands(parsed);
   } catch {
     return [];
   }
 }
 
-function normalizeJobTestCommands(input: unknown, limit = 8): JobTestCommand[] {
+function normalizeTaskTestCommands(input: unknown, limit = 8): TaskTestCommand[] {
   if (!Array.isArray(input)) {
     return [];
   }
 
-  const commands: JobTestCommand[] = [];
+  const commands: TaskTestCommand[] = [];
   const seen = new Set<string>();
   for (const item of input) {
     if (!item || typeof item !== "object") {
@@ -3705,7 +3705,7 @@ function normalizeJobTestCommands(input: unknown, limit = 8): JobTestCommand[] {
     const labelSource =
       typeof record.label === "string" ? record.label.trim() : "";
     const cwdSource = typeof record.cwd === "string" ? record.cwd.trim() : "";
-    const cwd = normalizeJobTestCommandCwd(cwdSource);
+    const cwd = normalizeTaskTestCommandCwd(cwdSource);
     if (!command || !cwd) {
       continue;
     }
@@ -3757,18 +3757,18 @@ function isDisallowedHumanOnlyTestCommand(command: string): boolean {
   return disallowedPatterns.some((pattern) => pattern.test(normalized));
 }
 
-async function resolveJobExecutionRoot(
+async function resolveTaskExecutionRoot(
   workspacePaths: ReturnType<typeof getWorkspacePaths>,
-  jobId: string,
+  taskId: string,
 ): Promise<string> {
-  const worktreeRoot = resolve(join(workspacePaths.worktreesDir, jobId, "workspace"));
+  const worktreeRoot = resolve(join(workspacePaths.worktreesDir, taskId, "workspace"));
   if (await isDirectory(worktreeRoot)) {
     return worktreeRoot;
   }
   return workspacePaths.workspaceDir;
 }
 
-function normalizeJobTestCommandCwd(value: string): string {
+function normalizeTaskTestCommandCwd(value: string): string {
   if (!value) {
     return "";
   }
@@ -3782,8 +3782,8 @@ function normalizeJobTestCommandCwd(value: string): string {
   return normalized;
 }
 
-async function resolveJobCommandCwd(baseDir: string, requestedCwd: string): Promise<string> {
-  const normalized = normalizeJobTestCommandCwd(requestedCwd);
+async function resolveTaskCommandCwd(baseDir: string, requestedCwd: string): Promise<string> {
+  const normalized = normalizeTaskTestCommandCwd(requestedCwd);
   if (!normalized) {
     throw new SalmonError("INVALID_TEST_COMMAND_CWD", 400, "Test command cwd is invalid.");
   }
@@ -3795,7 +3795,7 @@ async function resolveJobCommandCwd(baseDir: string, requestedCwd: string): Prom
     throw new SalmonError(
       "INVALID_TEST_COMMAND_CWD",
       400,
-      "Test command cwd must stay within the job workspace.",
+      "Test command cwd must stay within the task workspace.",
     );
   }
   if (!(await isDirectory(candidate))) {

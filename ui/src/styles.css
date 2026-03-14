@@ -3172,13 +3172,13 @@ select { cursor: pointer; }
   font-size: 13px;
 }
 
-.jobs-list {
+.tasks-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.job-row {
+.task-row {
   border: 1px solid #ecebe8;
   border-radius: 10px;
   background: #fff;
@@ -3190,13 +3190,13 @@ select { cursor: pointer; }
   position: relative;
 }
 
-.job-row:hover {
+.task-row:hover {
   border-color: #dddcd8;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
   background: #fcfcfb;
 }
 
-.job-row-main {
+.task-row-main {
   border: none;
   background: transparent;
   padding: 12px;
@@ -3207,7 +3207,7 @@ select { cursor: pointer; }
   flex: 1;
 }
 
-.job-row-right {
+.task-row-right {
   padding: 10px 12px 10px 0;
   display: flex;
   flex-direction: column;
@@ -3216,14 +3216,14 @@ select { cursor: pointer; }
   flex-shrink: 0;
 }
 
-.job-title {
+.task-title {
   font-size: 14px;
   color: #37352f;
   font-weight: 600;
   margin-bottom: 6px;
 }
 
-.job-meta {
+.task-meta {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -3232,7 +3232,7 @@ select { cursor: pointer; }
   font-size: 12px;
 }
 
-.job-chip {
+.task-chip {
   border-radius: 999px;
   background: #f1f0ed;
   color: #6f6d67;
@@ -3241,17 +3241,17 @@ select { cursor: pointer; }
   font-weight: 600;
 }
 
-.job-time {
+.task-time {
   color: #9b9a97;
   font-size: 12px;
   white-space: nowrap;
 }
 
-.job-recipient-wrap {
+.task-recipient-wrap {
   position: relative;
 }
 
-.job-recipient-btn {
+.task-recipient-btn {
   border: 1px solid #d8d6d2;
   background: #fff;
   color: #5e5c58;
@@ -3263,7 +3263,7 @@ select { cursor: pointer; }
   cursor: pointer;
 }
 
-.job-recipient-menu {
+.task-recipient-menu {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
@@ -3276,13 +3276,13 @@ select { cursor: pointer; }
   z-index: 40;
 }
 
-.job-recipient-empty {
+.task-recipient-empty {
   padding: 8px 10px;
   font-size: 12px;
   color: #9b9a97;
 }
 
-.job-recipient-option {
+.task-recipient-option {
   width: 100%;
   border: none;
   background: transparent;
@@ -3296,17 +3296,17 @@ select { cursor: pointer; }
   font-family: inherit;
 }
 
-.job-recipient-option:hover {
+.task-recipient-option:hover {
   background: #f7f7f5;
 }
 
-.job-recipient-name {
+.task-recipient-name {
   font-size: 12px;
   font-weight: 600;
   color: #37352f;
 }
 
-.job-recipient-id {
+.task-recipient-id {
   font-size: 11px;
   color: #9b9a97;
 }

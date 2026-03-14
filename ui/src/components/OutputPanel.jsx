@@ -3,10 +3,10 @@ import { FileCode2, FileImage, FileSpreadsheet, FileText, FileType2 } from 'luci
 import Papa from 'papaparse'
 import ReactMarkdown from 'react-markdown'
 import {
-  fetchJobOutputChanges,
-  fetchJobOutputFiles,
-  jobOutputContentUrl,
-  jobOutputDownloadUrl,
+  fetchTaskOutputChanges,
+  fetchTaskOutputFiles,
+  taskOutputContentUrl,
+  taskOutputDownloadUrl,
 } from '../api'
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
@@ -103,8 +103,8 @@ function formatRuntimeLogEntry(entry) {
 }
 
 export function OutputPanel({
-  jobId,
-  jobStatus,
+  taskId,
+  taskStatus,
   testCommands = [],
   testCommandsLoading = false,
   testCommandsError = '',
@@ -136,11 +136,11 @@ export function OutputPanel({
   const [previewError, setPreviewError] = useState('')
 
   useEffect(() => {
-    if (!jobId) return
+    if (!taskId) return
     setTab('outputs')
-    void loadChanges(jobId)
-    void loadFiles(jobId)
-  }, [jobId])
+    void loadChanges(taskId)
+    void loadFiles(taskId)
+  }, [taskId])
 
   useEffect(() => {
     if (!files.length) {
@@ -163,7 +163,7 @@ export function OutputPanel({
   const selectedKind = previewKind(selectedPath || '')
 
   useEffect(() => {
-    if (!jobId || !selectedPath) {
+    if (!taskId || !selectedPath) {
       setPreviewText('')
       setPreviewError('')
       setPreviewLoading(false)
@@ -181,7 +181,7 @@ export function OutputPanel({
     setPreviewLoading(true)
     setPreviewError('')
 
-    void fetch(jobOutputContentUrl(jobId, selectedPath), { signal: controller.signal })
+    void fetch(taskOutputContentUrl(taskId, selectedPath), { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
@@ -206,14 +206,14 @@ export function OutputPanel({
     return () => {
       controller.abort()
     }
-  }, [jobId, selectedPath, selectedKind])
+  }, [taskId, selectedPath, selectedKind])
 
-  async function loadChanges(targetJobId) {
+  async function loadChanges(targetTaskId) {
     setChangesLoading(true)
     setChangesError('')
 
     try {
-      const data = await fetchJobOutputChanges(targetJobId)
+      const data = await fetchTaskOutputChanges(targetTaskId)
       setChanges(typeof data.diff === 'string' ? data.diff : '')
     } catch (error) {
       setChangesError(error instanceof Error ? error.message : String(error))
@@ -223,12 +223,12 @@ export function OutputPanel({
     }
   }
 
-  async function loadFiles(targetJobId) {
+  async function loadFiles(targetTaskId) {
     setFilesLoading(true)
     setFilesError('')
 
     try {
-      const data = await fetchJobOutputFiles(targetJobId)
+      const data = await fetchTaskOutputFiles(targetTaskId)
       const nextFiles = Array.isArray(data.files) ? data.files : []
       setFiles(nextFiles)
     } catch (error) {
@@ -239,8 +239,8 @@ export function OutputPanel({
     }
   }
 
-  const outputDownloadUrl = selectedPath ? jobOutputDownloadUrl(jobId, selectedPath) : ''
-  const outputContentUrl = selectedPath ? jobOutputContentUrl(jobId, selectedPath) : ''
+  const outputDownloadUrl = selectedPath ? taskOutputDownloadUrl(taskId, selectedPath) : ''
+  const outputContentUrl = selectedPath ? taskOutputContentUrl(taskId, selectedPath) : ''
   const runtimeLogText = useMemo(() => {
     if (!Array.isArray(runtimeServiceLogs) || runtimeServiceLogs.length === 0) {
       return ''
@@ -311,7 +311,7 @@ export function OutputPanel({
       {tab === 'changes' && (
         <div className="output-tab-body">
           <div className="output-toolbar">
-            <div className="output-status">Status: {jobStatus}</div>
+            <div className="output-status">Status: {taskStatus}</div>
           </div>
 
           {changesLoading && <div className="muted">Loading diff...</div>}
@@ -420,7 +420,7 @@ export function OutputPanel({
             {testCommandsError && <div className="error">Error: {testCommandsError}</div>}
           </div>
 
-          {runtimeService && runtimeService.job_id === jobId && (
+          {runtimeService && runtimeService.task_id === taskId && (
             <div className="output-runtime-card">
               <div className="output-runtime-header">
                 <div className="output-runtime-title-wrap">

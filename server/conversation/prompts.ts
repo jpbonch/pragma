@@ -34,8 +34,8 @@ export function buildPrompt(
   }
 
   if (mode === "plan") {
-    const planRecipientCommand = `${cli} job plan-select-recipient --agent-id "<candidate_id>" --reason "<one sentence reason>"`;
-    const planSummaryCommand = `${cli} job plan-summary --title "<short title>" --summary "<1-2 sentence summary>" --step "<step 1>" --step "<step 2>"`;
+    const planRecipientCommand = `${cli} task plan-select-recipient --agent-id "<candidate_id>" --reason "<one sentence reason>"`;
+    const planSummaryCommand = `${cli} task plan-summary --title "<short title>" --summary "<1-2 sentence summary>" --step "<step 1>" --step "<step 2>"`;
     const listAgentsCommand = `${cli} list-agents`;
     const candidates = Array.isArray(options.planCandidates) ? options.planCandidates : [];
     const candidateLines = candidates.map((candidate, index) => {
@@ -92,14 +92,14 @@ export function buildOrchestratorPrompt(input: {
   const forced = input.forcedRecipientAgentId?.trim() || "";
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
   const cli = input.salmonCliCommand?.trim() || "salmon";
-  const selectRecipientCommand = `${cli} job select-recipient --agent-id <candidate_id> --reason "<one sentence reason>"`;
+  const selectRecipientCommand = `${cli} task select-recipient --agent-id <candidate_id> --reason "<one sentence reason>"`;
   const candidateLines = input.candidates.map((candidate, index) => {
     return `${index + 1}. id=${candidate.id}; name=${candidate.name}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
   });
 
   return [
     "You are an Orchestrator.",
-    "Your only job is to pick the best worker agent for the task.",
+    "Your only task is to pick the best worker agent for the task below.",
     "Do not execute the task.",
     `Use this Salmon CLI command prefix: ${cli}`,
     "Call exactly one CLI command to persist the selected worker:",
@@ -128,27 +128,27 @@ export function buildWorkerPrompt(input: {
   reasoningEffort?: ReasoningEffort;
   salmonCliCommand?: string;
   preferredCodePath?: string | null;
-  jobWorkspaceDir?: string;
+  taskWorkspaceDir?: string;
 }): string {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
   const cli = input.salmonCliCommand?.trim() || "salmon";
   const preferredCodePath = input.preferredCodePath?.trim() || "";
-  const jobWorkspaceDir = input.jobWorkspaceDir?.trim() || "";
-  const askQuestionCommand = `${cli} job ask-question --question "<question>" [--details "<optional context>"]`;
-  const requestHelpCommand = `${cli} job request-help --summary "<short summary>" [--details "<optional context>"]`;
-  const submitTestsCommand = `${cli} job submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]`;
+  const taskWorkspaceDir = input.taskWorkspaceDir?.trim() || "";
+  const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"]`;
+  const requestHelpCommand = `${cli} task request-help --summary "<short summary>" [--details "<optional context>"]`;
+  const submitTestsCommand = `${cli} task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]`;
   const codePathPolicyLine = preferredCodePath
-    ? jobWorkspaceDir
-      ? `- Put code/source changes under \`${join(jobWorkspaceDir, preferredCodePath)}/\` (relative: \`${preferredCodePath}/\`) unless the task explicitly targets another repo inside this job workspace.`
+    ? taskWorkspaceDir
+      ? `- Put code/source changes under \`${join(taskWorkspaceDir, preferredCodePath)}/\` (relative: \`${preferredCodePath}/\`) unless the task explicitly targets another repo inside this task workspace.`
       : `- Put code/source changes under \`${preferredCodePath}/\` unless the task explicitly targets another repo.`
-    : jobWorkspaceDir
-      ? `- Put code/source changes under \`${join(jobWorkspaceDir, "code")}/\`.`
+    : taskWorkspaceDir
+      ? `- Put code/source changes under \`${join(taskWorkspaceDir, "code")}/\`.`
       : "- Put code/source changes under `code/`.";
-  const workspaceBoundaryLine = jobWorkspaceDir
-    ? `- Active job workspace root (write boundary): \`${jobWorkspaceDir}/\`.`
-    : "- Active job workspace root (write boundary): current working directory.";
+  const workspaceBoundaryLine = taskWorkspaceDir
+    ? `- Active task workspace root (write boundary): \`${taskWorkspaceDir}/\`.`
+    : "- Active task workspace root (write boundary): current working directory.";
 
   return [
     `You are ${input.workerName}.`,
@@ -157,9 +157,9 @@ export function buildWorkerPrompt(input: {
     `Use this Salmon CLI command prefix: ${cli}`,
     "Path policy:",
     workspaceBoundaryLine,
-    "- Never write outside the active job workspace root; runtime guard blocks writes outside the job worktree.",
+    "- Never write outside the active task workspace root; runtime guard blocks writes outside the task worktree.",
     codePathPolicyLine,
-    "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$SALMON_JOB_ID/`.",
+    "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$SALMON_TASK_ID/`.",
     "- Do not place source code files at workspace root.",
     "If you need clarification from the human, run:",
     askQuestionCommand,

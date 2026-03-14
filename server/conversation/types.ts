@@ -3,7 +3,7 @@ export type ConversationMode = "chat" | "plan" | "execute";
 export type HarnessId = "codex" | "claude_code";
 export type ReasoningEffort = "low" | "medium" | "high" | "extra_high";
 
-export const JOB_STATUS_VALUES = [
+export const TASK_STATUS_VALUES = [
   "queued",
   "orchestrating",
   "running",
@@ -17,12 +17,12 @@ export const JOB_STATUS_VALUES = [
   "cancelled",
 ] as const;
 
-export type JobStatus = (typeof JOB_STATUS_VALUES)[number];
+export type TaskStatus = (typeof TASK_STATUS_VALUES)[number];
 
-const JOB_STATUS_SET = new Set<string>(JOB_STATUS_VALUES);
+const TASK_STATUS_SET = new Set<string>(TASK_STATUS_VALUES);
 
-export function isJobStatus(value: unknown): value is JobStatus {
-  return typeof value === "string" && JOB_STATUS_SET.has(value);
+export function isTaskStatus(value: unknown): value is TaskStatus {
+  return typeof value === "string" && TASK_STATUS_SET.has(value);
 }
 
 export type ConversationStatus = "open" | "closed";
@@ -35,7 +35,7 @@ export type ConversationThread = {
   model_label: string;
   model_id: string;
   harness_session_id: string | null;
-  job_id: string | null;
+  task_id: string | null;
   source_thread_id: string | null;
   chat_title?: string | null;
   chat_preview?: string | null;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, X, Sparkles, User, Wrench, Info } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { OutputPanel } from './OutputPanel'
-import { fetchJobTestCommands, runJobTestCommand, updateJobTestCommands } from '../api'
+import { fetchTaskTestCommands, runTaskTestCommand, updateTaskTestCommands } from '../api'
 
 const HEADER_STATUS_LABELS = {
   pending_review: 'Review',
@@ -25,8 +25,8 @@ function toTitleCaseStatus(value) {
   return parts.map((part) => part[0].toUpperCase() + part.slice(1)).join(' ')
 }
 
-function getHeaderStatusLabel({ jobStatus, mode, loading }) {
-  const normalizedStatus = typeof jobStatus === 'string' ? jobStatus.trim().toLowerCase() : ''
+function getHeaderStatusLabel({ taskStatus, mode, loading }) {
+  const normalizedStatus = typeof taskStatus === 'string' ? taskStatus.trim().toLowerCase() : ''
   if (normalizedStatus) {
     return HEADER_STATUS_LABELS[normalizedStatus] || toTitleCaseStatus(normalizedStatus)
   }
@@ -52,13 +52,13 @@ export function ConversationDrawer({
   selectedRecipientAgentId = '',
   onSelectRecipientAgentId,
   onPromptSubmit,
-  jobId,
-  jobStatus,
-  jobTitle = '',
+  taskId,
+  taskStatus,
+  taskTitle = '',
   headerAgentName = '',
   headerAgentEmoji = '',
   onReviewAction,
-  onDeleteJob,
+  onDeleteTask,
   runtimeService = null,
   runtimeServiceLogs = [],
   runtimeServiceError = '',
@@ -75,13 +75,13 @@ export function ConversationDrawer({
   const [runningTestCommand, setRunningTestCommand] = useState('')
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
-  const showOutputPanel = Boolean(jobId) && mode === 'chat'
-  const canApprove = showOutputPanel && jobStatus === 'pending_review'
-  const canReopenCompleted = showOutputPanel && jobStatus === 'completed'
-  const isCompletedJob = showOutputPanel && jobStatus === 'completed'
+  const showOutputPanel = Boolean(taskId) && mode === 'chat'
+  const canApprove = showOutputPanel && taskStatus === 'pending_review'
+  const canReopenCompleted = showOutputPanel && taskStatus === 'completed'
+  const isCompletedTask = showOutputPanel && taskStatus === 'completed'
   const headerStatusLabel = useMemo(
-    () => getHeaderStatusLabel({ jobStatus, mode, loading }),
-    [jobStatus, mode, loading],
+    () => getHeaderStatusLabel({ taskStatus, mode, loading }),
+    [taskStatus, mode, loading],
   )
   const displayHeaderAgentName =
     typeof headerAgentName === 'string' ? headerAgentName.trim() : ''
@@ -112,14 +112,14 @@ export function ConversationDrawer({
   }, [open])
 
   useEffect(() => {
-    if (!open || !jobId || !showOutputPanel) {
+    if (!open || !taskId || !showOutputPanel) {
       return
     }
 
     let cancelled = false
     setTestCommandsLoading(true)
     setTestCommandsError('')
-    void fetchJobTestCommands(jobId)
+    void fetchTaskTestCommands(taskId)
       .then((data) => {
         if (cancelled) {
           return
@@ -143,7 +143,7 @@ export function ConversationDrawer({
     return () => {
       cancelled = true
     }
-  }, [open, jobId, showOutputPanel, entries.length, jobStatus])
+  }, [open, taskId, showOutputPanel, entries.length, taskStatus])
 
   function submitPrompt() {
     if (loading) {
@@ -158,13 +158,13 @@ export function ConversationDrawer({
   }
 
   async function submitReviewAction(action) {
-    if (!jobId || !onReviewAction || approveLoading) {
+    if (!taskId || !onReviewAction || approveLoading) {
       return
     }
     setApproveError('')
     setApproveLoading(true)
     try {
-      await onReviewAction(jobId, action)
+      await onReviewAction(taskId, action)
     } catch (error) {
       setApproveError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -172,13 +172,13 @@ export function ConversationDrawer({
     }
   }
 
-  async function handleDeleteJob() {
-    if (!jobId || !onDeleteJob || deleteLoading) {
+  async function handleDeleteTask() {
+    if (!taskId || !onDeleteTask || deleteLoading) {
       return
     }
     setDeleteLoading(true)
     try {
-      await onDeleteJob(jobId)
+      await onDeleteTask(taskId)
     } catch {
       setDeleteLoading(false)
       setDeleteConfirming(false)
@@ -189,13 +189,13 @@ export function ConversationDrawer({
     const command = typeof item?.command === 'string' ? item.command : ''
     const cwd = typeof item?.cwd === 'string' ? item.cwd : ''
     const runKey = `${cwd}\n${command}`
-    if (!jobId || !command || !cwd || runningTestCommand) {
+    if (!taskId || !command || !cwd || runningTestCommand) {
       return
     }
     setRunningTestCommand(runKey)
     setTestCommandsError('')
     try {
-      const result = await runJobTestCommand(jobId, command, cwd)
+      const result = await runTaskTestCommand(taskId, command, cwd)
       const service = result?.service && typeof result.service === 'object' ? result.service : null
       if (service) {
         onServiceStarted?.(service)
@@ -208,7 +208,7 @@ export function ConversationDrawer({
   }
 
   async function handleUpdateTestCommand(index, nextCommand) {
-    if (!jobId || !Number.isInteger(index) || index < 0) {
+    if (!taskId || !Number.isInteger(index) || index < 0) {
       return
     }
     const trimmed = typeof nextCommand === 'string' ? nextCommand.trim() : ''
@@ -243,7 +243,7 @@ export function ConversationDrawer({
 
     setTestCommandsError('')
     try {
-      const data = await updateJobTestCommands(jobId, nextCommands)
+      const data = await updateTaskTestCommands(taskId, nextCommands)
       const updated = Array.isArray(data?.commands) ? data.commands : nextCommands
       setTestCommands(updated)
     } catch (error) {
@@ -319,7 +319,7 @@ export function ConversationDrawer({
         <div className="conv-header">
           <div className="conv-header-left">
             <div className={`conv-mode-indicator ${mode}`} />
-            <span className="conv-header-title">{jobTitle || headerStatusLabel}</span>
+            <span className="conv-header-title">{taskTitle || headerStatusLabel}</span>
             {loading && <span className="conv-streaming-dot" />}
           </div>
           <div className="conv-header-right">
@@ -354,11 +354,11 @@ export function ConversationDrawer({
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder={
-                      isCompletedJob
+                      isCompletedTask
                         ? 'Task is completed. Mark it as not completed to continue.'
                         : 'Continue this conversation...'
                     }
-                    disabled={loading || isCompletedJob}
+                    disabled={loading || isCompletedTask}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault()
@@ -369,7 +369,7 @@ export function ConversationDrawer({
                   <button
                     className="conv-prompt-send"
                     onClick={submitPrompt}
-                    disabled={loading || isCompletedJob || !prompt.trim()}
+                    disabled={loading || isCompletedTask || !prompt.trim()}
                     aria-label="Send"
                   >
                     <ArrowUp size={15} strokeWidth={2.5} />
@@ -378,8 +378,8 @@ export function ConversationDrawer({
               </div>
               <div className="conv-output-side">
                 <OutputPanel
-                  jobId={jobId}
-                  jobStatus={jobStatus}
+                  taskId={taskId}
+                  taskStatus={taskStatus}
                   testCommands={testCommands}
                   testCommandsLoading={testCommandsLoading}
                   testCommandsError={testCommandsError}
@@ -413,7 +413,7 @@ export function ConversationDrawer({
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button
                       className="conv-delete-btn"
-                      onClick={() => { void handleDeleteJob() }}
+                      onClick={() => { void handleDeleteTask() }}
                       disabled={deleteLoading}
                     >
                       {deleteLoading ? 'Deleting...' : 'Confirm Delete'}
@@ -431,7 +431,7 @@ export function ConversationDrawer({
                     className="conv-delete-btn"
                     onClick={() => setDeleteConfirming(true)}
                   >
-                    Delete Job
+                    Delete Task
                   </button>
                 )}
               </div>

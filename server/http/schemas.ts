@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { JOB_STATUS_VALUES } from "../conversation/types";
+import { TASK_STATUS_VALUES } from "../conversation/types";
 
 const harnessSchema = z.enum(["codex", "claude_code"]);
 const reasoningEffortSchema = z.enum(["low", "medium", "high", "extra_high"]);
-const jobStatusSchema = z.enum(JOB_STATUS_VALUES);
+const taskStatusSchema = z.enum(TASK_STATUS_VALUES);
 
 const nonEmptyString = z.string().trim().min(1);
 const testCommandItemSchema = z
@@ -53,24 +53,24 @@ export const updateAgentSchema = z
   })
   .strict();
 
-export const jobsQuerySchema = z
+export const tasksQuerySchema = z
   .object({
-    status: jobStatusSchema.optional(),
+    status: taskStatusSchema.optional(),
     limit: positiveIntegerString,
   })
   .strict();
 
-export const createJobSchema = z
+export const createTaskSchema = z
   .object({
     title: nonEmptyString,
-    status: jobStatusSchema,
+    status: taskStatusSchema,
     assigned_to: nonEmptyString.optional(),
     output_dir: nonEmptyString.optional(),
     session_id: nonEmptyString.optional(),
   })
   .strict();
 
-export const createExecuteJobSchema = z
+export const createExecuteTaskSchema = z
   .object({
     prompt: nonEmptyString,
     recipient_agent_id: nonEmptyString.optional(),
@@ -78,7 +78,7 @@ export const createExecuteJobSchema = z
   })
   .strict();
 
-export const setJobRecipientSchema = z
+export const setTaskRecipientSchema = z
   .object({
     recipient_agent_id: nonEmptyString,
   })
@@ -126,13 +126,13 @@ export const agentSubmitTestCommandsSchema = z
   })
   .strict();
 
-export const updateJobTestCommandsSchema = z
+export const updateTaskTestCommandsSchema = z
   .object({
     commands: z.array(testCommandItemSchema).min(1),
   })
   .strict();
 
-export const jobRespondSchema = z
+export const taskRespondSchema = z
   .object({
     message: nonEmptyString,
   })
@@ -146,7 +146,7 @@ export const planSummarySchema = z
   })
   .strict();
 
-export const reviewJobSchema = z
+export const reviewTaskSchema = z
   .object({
     action: z.enum(["approve", "reopen"]),
   })
@@ -224,7 +224,7 @@ export const createCodeFolderCopySchema = z
   })
   .strict();
 
-export const runJobTestCommandSchema = z
+export const runTaskTestCommandSchema = z
   .object({
     command: nonEmptyString,
     cwd: nonEmptyString,
@@ -259,4 +259,4 @@ export const updateHumanSchema = z
 
 export type Harness = z.infer<typeof harnessSchema>;
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
-export type JobStatus = z.infer<typeof jobStatusSchema>;
+export type TaskStatus = z.infer<typeof taskStatusSchema>;
