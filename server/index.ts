@@ -1269,7 +1269,7 @@ WHERE id = $1
         });
         publishThreadUpdated(workspaceName, thread.id, "job_reopened");
 
-        executeRunner.enqueue({
+        executeRunner.execute({
           workspaceName,
           jobId,
           threadId: thread.id,
@@ -1354,7 +1354,7 @@ WHERE id = $1
             originalTask: latestExecuteTurn.user_message,
             conflicts: mergeResult.conflicts,
           });
-          executeRunner.enqueue({
+          executeRunner.execute({
             workspaceName,
             jobId,
             threadId: thread.id,
@@ -1501,7 +1501,7 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL)
         jobId,
       });
 
-      executeRunner.enqueue({
+      executeRunner.execute({
         workspaceName,
         jobId,
         threadId,
@@ -1577,7 +1577,7 @@ WHERE id = $1
       emitJobStatus(workspaceName, jobId, "queued", "human_response");
       emitJobStatus(workspaceName, jobId, "queued", "recipient_selected");
 
-      executeRunner.enqueue({
+      executeRunner.execute({
         workspaceName,
         jobId,
         threadId: thread.id,
@@ -1942,7 +1942,7 @@ WHERE id = $1
     }
 
     if (requeue) {
-      executeRunner.enqueue({
+      executeRunner.execute({
         workspaceName,
         jobId,
         threadId: requeue.threadId,
@@ -2567,7 +2567,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
       await db.close();
     }
 
-    executeRunner.enqueue({
+    executeRunner.execute({
       workspaceName,
       jobId,
       threadId: executeThreadId,

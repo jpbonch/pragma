@@ -11,7 +11,6 @@ import {
 } from "./gitWorkflow";
 import type { JobGitState } from "./gitWorkflow";
 import { buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
-import { InProcessQueue } from "./queue";
 import {
   closeThread,
   completeTurn,
@@ -56,7 +55,6 @@ type ThreadUpdatedInput = {
 };
 
 export class ExecuteRunner {
-  private readonly queue = new InProcessQueue();
   private readonly apiUrl: string;
   private readonly salmonCliCommand: string;
   private readonly onJobStatusChanged?: (input: JobStatusChangedInput) => void | Promise<void>;
@@ -74,14 +72,15 @@ export class ExecuteRunner {
     this.onThreadUpdated = options.onThreadUpdated;
   }
 
-  enqueue(input: EnqueueExecuteInput): void {
-    this.queue.enqueue(async () => {
-      await runExecuteTask(input, {
-        apiUrl: this.apiUrl,
-        salmonCliCommand: this.salmonCliCommand,
-        onJobStatusChanged: this.onJobStatusChanged,
-        onThreadUpdated: this.onThreadUpdated,
-      });
+  execute(input: EnqueueExecuteInput): void {
+    runExecuteTask(input, {
+      apiUrl: this.apiUrl,
+      salmonCliCommand: this.salmonCliCommand,
+      onJobStatusChanged: this.onJobStatusChanged,
+      onThreadUpdated: this.onThreadUpdated,
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Execute task failed: ${message}`);
     });
   }
 }
