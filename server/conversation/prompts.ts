@@ -12,7 +12,7 @@ export function buildPrompt(
   mode: "chat" | "plan" | "execute",
   message: string,
   reasoningEffort: ReasoningEffort = "medium",
-  salmonCliCommand = "salmon",
+  pragmaCliCommand = "pragma",
   options: {
     planCandidates?: WorkerCandidate[];
     workspaceIsEmpty?: boolean;
@@ -20,7 +20,7 @@ export function buildPrompt(
 ): string {
   const cleanMessage = message.trim();
   const reasoningLine = formatReasoningInstruction(reasoningEffort);
-  const cli = salmonCliCommand.trim() || "salmon";
+  const cli = pragmaCliCommand.trim() || "pragma";
 
   if (mode === "chat") {
     return [
@@ -51,7 +51,7 @@ export function buildPrompt(
       workspaceInstruction,
       "Do not execute implementation work and do not modify files.",
       "Return a concrete, decision-complete plan in plain language.",
-      `Use this Salmon CLI command prefix: ${cli}`,
+      `Use this Pragma CLI command prefix: ${cli}`,
       "If you need to inspect available agents, run:",
       listAgentsCommand,
       "Available worker candidates (use one of these ids for `--agent-id`):",
@@ -87,11 +87,11 @@ export function buildOrchestratorPrompt(input: {
   candidates: WorkerCandidate[];
   forcedRecipientAgentId?: string | null;
   reasoningEffort?: ReasoningEffort;
-  salmonCliCommand?: string;
+  pragmaCliCommand?: string;
 }): string {
   const forced = input.forcedRecipientAgentId?.trim() || "";
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
-  const cli = input.salmonCliCommand?.trim() || "salmon";
+  const cli = input.pragmaCliCommand?.trim() || "pragma";
   const selectRecipientCommand = `${cli} task select-recipient --agent-id <candidate_id> --reason "<one sentence reason>"`;
   const candidateLines = input.candidates.map((candidate, index) => {
     return `${index + 1}. id=${candidate.id}; name=${candidate.name}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
@@ -101,7 +101,7 @@ export function buildOrchestratorPrompt(input: {
     "You are an Orchestrator.",
     "Your only task is to pick the best worker agent for the task below.",
     "Do not execute the task.",
-    `Use this Salmon CLI command prefix: ${cli}`,
+    `Use this Pragma CLI command prefix: ${cli}`,
     "Call exactly one CLI command to persist the selected worker:",
     selectRecipientCommand,
     "Rules:",
@@ -126,14 +126,14 @@ export function buildWorkerPrompt(input: {
   workerName: string;
   workerAgentFile: string;
   reasoningEffort?: ReasoningEffort;
-  salmonCliCommand?: string;
+  pragmaCliCommand?: string;
   preferredCodePath?: string | null;
   taskWorkspaceDir?: string;
 }): string {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
-  const cli = input.salmonCliCommand?.trim() || "salmon";
+  const cli = input.pragmaCliCommand?.trim() || "pragma";
   const preferredCodePath = input.preferredCodePath?.trim() || "";
   const taskWorkspaceDir = input.taskWorkspaceDir?.trim() || "";
   const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"]`;
@@ -154,12 +154,12 @@ export function buildWorkerPrompt(input: {
     `You are ${input.workerName}.`,
     "Follow your agent instructions exactly, then execute the task.",
     "Use exploratory probing as needed to gather context before making changes.",
-    `Use this Salmon CLI command prefix: ${cli}`,
+    `Use this Pragma CLI command prefix: ${cli}`,
     "Path policy:",
     workspaceBoundaryLine,
     "- Never write outside the active task workspace root; runtime guard blocks writes outside the task worktree.",
     codePathPolicyLine,
-    "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$SALMON_TASK_ID/`.",
+    "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$PRAGMA_TASK_ID/`.",
     "- Do not place source code files at workspace root.",
     "If you need clarification from the human, run:",
     askQuestionCommand,

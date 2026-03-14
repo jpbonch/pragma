@@ -60,7 +60,7 @@ export async function initializeWorkspaceGit(paths: WorkspacePathsLike): Promise
   await ensureGitRepo(paths.workspaceDir);
   await ensureRootGitIgnore(paths.workspaceDir);
   await ensureDefaultCodeRepo(paths.codeDir);
-  await commitIfNeeded(paths.workspaceDir, "salmon: initialize workspace repo");
+  await commitIfNeeded(paths.workspaceDir, "pragma: initialize workspace repo");
 }
 
 export function getTaskWorktreeOutputDir(paths: WorkspacePathsLike, taskId: string): string {
@@ -187,9 +187,9 @@ export async function checkpointTaskRepos(input: {
     if (await hasStagedChanges(taskRepoPath)) {
       await runGit(taskRepoPath, [
         "-c",
-        "user.name=Salmon",
+        "user.name=Pragma",
         "-c",
-        "user.email=salmon@local",
+        "user.email=pragma@local",
         "commit",
         "-m",
         input.commitMessage,
@@ -210,7 +210,7 @@ export async function mergeApprovedTask(input: {
   for (const repo of input.gitState.repos) {
     const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, repo.relative_path);
     const taskRepoPath = resolveRepoPath(taskWorkspaceDir, repo.relative_path);
-    const commitMessage = `salmon: merge task ${input.taskId} (${repo.relative_path})`;
+    const commitMessage = `pragma: merge task ${input.taskId} (${repo.relative_path})`;
 
     try {
       await runGitSafe(sourceRepoPath, ["merge", "--abort"]);
@@ -230,9 +230,9 @@ export async function mergeApprovedTask(input: {
       if (await hasStagedChanges(sourceRepoPath)) {
         await runGit(sourceRepoPath, [
           "-c",
-          "user.name=Salmon",
+          "user.name=Pragma",
           "-c",
-          "user.email=salmon@local",
+          "user.email=pragma@local",
           "commit",
           "-m",
           commitMessage,
@@ -338,7 +338,7 @@ async function createFreshTaskWorktrees(input: {
   taskId: string;
   taskWorkspaceDir: string;
 }): Promise<TaskGitState> {
-  const branchName = `salmon/task/${input.taskId}`;
+  const branchName = `pragma/task/${input.taskId}`;
   const relativeRepoPaths = await discoverFlatRepoPaths(input.workspacePaths);
   const repos: TaskGitRepoState[] = [];
 
@@ -521,7 +521,7 @@ async function ensureDefaultCodeRepo(codeDir: string): Promise<void> {
     const content = [
       "# Default Code Repo",
       "",
-      "This repository is created automatically for Salmon workspaces.",
+      "This repository is created automatically for Pragma workspaces.",
       "",
     ].join("\n");
     await writeFile(readmePath, content, "utf8");
@@ -530,13 +530,13 @@ async function ensureDefaultCodeRepo(codeDir: string): Promise<void> {
   await runGit(defaultRepoDir, ["add", "-A"]);
   await runGit(defaultRepoDir, [
     "-c",
-    "user.name=Salmon",
+    "user.name=Pragma",
     "-c",
-    "user.email=salmon@local",
+    "user.email=pragma@local",
     "commit",
     "--allow-empty",
     "-m",
-    "salmon: initialize default code repo",
+    "pragma: initialize default code repo",
   ]);
 }
 
@@ -547,9 +547,9 @@ async function commitIfNeeded(repoPath: string, message: string): Promise<void> 
   }
   await runGit(repoPath, [
     "-c",
-    "user.name=Salmon",
+    "user.name=Pragma",
     "-c",
-    "user.email=salmon@local",
+    "user.email=pragma@local",
     "commit",
     "-m",
     message,

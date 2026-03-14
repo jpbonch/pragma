@@ -8,16 +8,16 @@ import type { ExecaChildProcess } from "execa";
 import { spawnCommand, spawnNodeCommand } from "../server/process/runCommand";
 
 const program = new Command();
-const DEFAULT_API_URL = process.env.SALMON_API_URL ?? "http://127.0.0.1:3000";
-const DEFAULT_UI_URL = process.env.SALMON_UI_URL ?? "http://127.0.0.1:5173";
+const DEFAULT_API_URL = process.env.PRAGMA_API_URL ?? "http://127.0.0.1:3000";
+const DEFAULT_UI_URL = process.env.PRAGMA_UI_URL ?? "http://127.0.0.1:5173";
 
-if (!process.env.SALMON_CLI_COMMAND) {
-  const entry = process.argv[1] ? quoteShellArg(process.argv[1]) : "salmon";
-  process.env.SALMON_CLI_COMMAND = `${quoteShellArg(process.execPath)} ${entry}`;
+if (!process.env.PRAGMA_CLI_COMMAND) {
+  const entry = process.argv[1] ? quoteShellArg(process.argv[1]) : "pragma";
+  process.env.PRAGMA_CLI_COMMAND = `${quoteShellArg(process.execPath)} ${entry}`;
 }
 
 program
-  .name("salmon")
+  .name("pragma")
   .description("Very minimal CLI")
   .version("0.1.0")
   .action(async () => {
@@ -27,7 +27,7 @@ program
 program
   .command("setup")
   .description("Call the API setup endpoint")
-  .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
+  .option("-u, --api-url <url>", "Pragma API base URL", DEFAULT_API_URL)
   .action(async (options: { apiUrl: string }) => {
     await apiRequest(options.apiUrl, "/setup", { method: "POST" });
     console.log("Setup complete.");
@@ -40,7 +40,7 @@ program
   .option("-a, --assigned-to <agentId>", "Assigned agent id")
   .option("-o, --output-dir <outputDir>", "Output directory")
   .option("-s, --status <status>", "Task status", "queued")
-  .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
+  .option("-u, --api-url <url>", "Pragma API base URL", DEFAULT_API_URL)
   .action(
     async (
       title: string,
@@ -71,7 +71,7 @@ program
   .description("Call the API to list tasks")
   .option("-s, --status <status>", "Filter by status")
   .option("-l, --limit <limit>", "Maximum tasks to return", "25")
-  .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
+  .option("-u, --api-url <url>", "Pragma API base URL", DEFAULT_API_URL)
   .action(
     async (options: { status?: string; limit: string; apiUrl: string }) => {
       const params = new URLSearchParams();
@@ -97,7 +97,7 @@ program
 program
   .command("list-agents")
   .description("Call the API to list all agents")
-  .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
+  .option("-u, --api-url <url>", "Pragma API base URL", DEFAULT_API_URL)
   .action(async (options: { apiUrl: string }) => {
     const result = await apiRequest<{
       agents: Array<{
@@ -128,7 +128,7 @@ taskCommand
   .requiredOption("--reason <text>", "Selection reason")
   .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
-  .option("--api-url <url>", "Salmon API base URL")
+  .option("--api-url <url>", "Pragma API base URL")
   .action(
     async (options: {
       agentId: string;
@@ -164,7 +164,7 @@ taskCommand
   .requiredOption("--reason <text>", "Selection reason")
   .option("--thread-id <id>", "Conversation thread id")
   .option("--turn-id <id>", "Conversation turn id")
-  .option("--api-url <url>", "Salmon API base URL")
+  .option("--api-url <url>", "Pragma API base URL")
   .action(
     async (options: {
       agentId: string;
@@ -199,7 +199,7 @@ taskCommand
   .option("--details <text>", "Optional context details")
   .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
-  .option("--api-url <url>", "Salmon API base URL")
+  .option("--api-url <url>", "Pragma API base URL")
   .action(
     async (options: {
       question: string;
@@ -209,7 +209,7 @@ taskCommand
       apiUrl?: string;
     }) => {
       const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
-      const agentId = normalizeOptionalString(process.env.SALMON_AGENT_ID);
+      const agentId = normalizeOptionalString(process.env.PRAGMA_AGENT_ID);
       await apiRequest<{ status: string }>(
         apiUrl,
         `/tasks/${encodeURIComponent(taskId)}/agent/ask-question`,
@@ -236,7 +236,7 @@ taskCommand
   .option("--details <text>", "Optional context details")
   .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
-  .option("--api-url <url>", "Salmon API base URL")
+  .option("--api-url <url>", "Pragma API base URL")
   .action(
     async (options: {
       summary: string;
@@ -246,7 +246,7 @@ taskCommand
       apiUrl?: string;
     }) => {
       const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
-      const agentId = normalizeOptionalString(process.env.SALMON_AGENT_ID);
+      const agentId = normalizeOptionalString(process.env.PRAGMA_AGENT_ID);
       await apiRequest<{ status: string }>(
         apiUrl,
         `/tasks/${encodeURIComponent(taskId)}/agent/request-help`,
@@ -290,7 +290,7 @@ taskCommand
   .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
   .option("--replace", "Replace existing commands instead of appending")
-  .option("--api-url <url>", "Salmon API base URL")
+  .option("--api-url <url>", "Pragma API base URL")
   .action(
     async (options: {
       command: string[];
@@ -328,7 +328,7 @@ taskCommand
           body: JSON.stringify({
             commands,
             turn_id: turnId,
-            agent_id: normalizeOptionalString(process.env.SALMON_AGENT_ID),
+            agent_id: normalizeOptionalString(process.env.PRAGMA_AGENT_ID),
             replace: Boolean(options.replace),
           }),
         },
@@ -351,7 +351,7 @@ taskCommand
   )
   .option("--thread-id <id>", "Conversation thread id")
   .option("--turn-id <id>", "Conversation turn id")
-  .option("--api-url <url>", "Salmon API base URL")
+  .option("--api-url <url>", "Pragma API base URL")
   .action(
     async (options: {
       title: string;
@@ -389,7 +389,7 @@ taskCommand
 
 program
   .command("server")
-  .description("Start the Salmon API server")
+  .description("Start the Pragma API server")
   .option("-p, --port <port>", "Port to listen on", "3000")
   .action(async (options: { port: string }) => {
     const port = parsePort(options.port);
@@ -399,9 +399,9 @@ program
 
 program
   .command("ui")
-  .description("Start the Salmon UI")
+  .description("Start the Pragma UI")
   .option("-p, --port <port>", "UI port", "5173")
-  .option("-u, --api-url <url>", "Salmon API base URL", DEFAULT_API_URL)
+  .option("-u, --api-url <url>", "Pragma API base URL", DEFAULT_API_URL)
   .action(async (options: { port: string; apiUrl: string }) => {
     await startUi({
       port: parsePort(options.port),
@@ -598,9 +598,9 @@ function resolveTaskCommandContext(input: {
   taskId: string;
   turnId?: string;
 } {
-  const apiUrl = resolveRequiredOptionOrEnv(input.apiUrl, "SALMON_API_URL", "--api-url");
-  const taskId = resolveRequiredOptionOrEnv(input.taskId, "SALMON_TASK_ID", "--task-id");
-  const turnId = normalizeOptionalString(input.turnId) || normalizeOptionalString(process.env.SALMON_TURN_ID);
+  const apiUrl = resolveRequiredOptionOrEnv(input.apiUrl, "PRAGMA_API_URL", "--api-url");
+  const taskId = resolveRequiredOptionOrEnv(input.taskId, "PRAGMA_TASK_ID", "--task-id");
+  const turnId = normalizeOptionalString(input.turnId) || normalizeOptionalString(process.env.PRAGMA_TURN_ID);
   return { apiUrl, taskId, turnId };
 }
 
@@ -613,9 +613,9 @@ function resolveThreadTurnCommandContext(input: {
   threadId: string;
   turnId: string;
 } {
-  const apiUrl = resolveRequiredOptionOrEnv(input.apiUrl, "SALMON_API_URL", "--api-url");
-  const threadId = resolveRequiredOptionOrEnv(input.threadId, "SALMON_THREAD_ID", "--thread-id");
-  const turnId = resolveRequiredOptionOrEnv(input.turnId, "SALMON_TURN_ID", "--turn-id");
+  const apiUrl = resolveRequiredOptionOrEnv(input.apiUrl, "PRAGMA_API_URL", "--api-url");
+  const threadId = resolveRequiredOptionOrEnv(input.threadId, "PRAGMA_THREAD_ID", "--thread-id");
+  const turnId = resolveRequiredOptionOrEnv(input.turnId, "PRAGMA_TURN_ID", "--turn-id");
   return { apiUrl, threadId, turnId };
 }
 

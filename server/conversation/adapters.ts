@@ -309,10 +309,10 @@ function resolveSandboxRoot(input: AdapterSendTurnInput): string {
     return resolvedCwd;
   }
 
-  const rawTaskWorkspace = input.env?.SALMON_TASK_WORKSPACE;
+  const rawTaskWorkspace = input.env?.PRAGMA_TASK_WORKSPACE;
   const taskWorkspace = typeof rawTaskWorkspace === "string" ? rawTaskWorkspace.trim() : "";
   if (!taskWorkspace) {
-    throw new Error("Execute mode requires SALMON_TASK_WORKSPACE.");
+    throw new Error("Execute mode requires PRAGMA_TASK_WORKSPACE.");
   }
 
   const resolvedTaskWorkspace = resolve(taskWorkspace);

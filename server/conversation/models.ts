@@ -1,4 +1,4 @@
-import { SalmonError } from "../db";
+import { PragmaError } from "../db";
 import type { HarnessId } from "./types";
 
 const MODEL_MAP: Record<HarnessId, Record<string, string>> = {
@@ -17,7 +17,7 @@ export function resolveModelId(harness: HarnessId, label: string): string {
   const mapping = MODEL_MAP[harness];
   const modelId = mapping?.[label];
   if (!modelId) {
-    throw new SalmonError(
+    throw new PragmaError(
       "INVALID_MODEL",
       400,
       `Unknown model for harness ${harness}: ${label}`,

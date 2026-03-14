@@ -5,16 +5,16 @@ import { PGlite } from "@electric-sql/pglite";
 import { initializeWorkspaceGit } from "./conversation/gitWorkflow";
 import { ensureConversationSchema } from "./conversation/store";
 
-export const SALMON_DIR = join(homedir(), ".salmon");
-const ACTIVE_WORKSPACE_FILE = join(SALMON_DIR, "active_workspace");
+export const PRAGMA_DIR = join(homedir(), ".pragma");
+const ACTIVE_WORKSPACE_FILE = join(PRAGMA_DIR, "active_workspace");
 const RESERVED_ROOT_NAMES = new Set(["db", "workspace", "worktrees"]);
-export const DEFAULT_AGENT_ID = "salmon-orchestrator";
+export const DEFAULT_AGENT_ID = "pragma-orchestrator";
 const OPEN_DATABASES = new Map<string, Promise<PGlite>>();
 const REAL_CLOSE = new WeakMap<PGlite, () => Promise<void>>();
 
 export const DEFAULT_AGENT_FILE = `# Orchestrator
 
-You are the orchestrator agent for Salmon.
+You are the orchestrator agent for Pragma.
 
 Your task is to:
 - Plan tasks into clear, ordered steps.
@@ -23,17 +23,17 @@ Your task is to:
 - Track status, risks, and blockers.
 - Produce concise updates and a final combined result.
 
-## Salmon Commands
-- \`salmon setup\`: Calls the API setup endpoint. This only bootstraps \`~/.salmon\`.
-- \`salmon create-task <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`tasks\` table. Default status is \`queued\`.
-- \`salmon list-tasks [--status <status>] [--limit <n>]\`: Calls the API to list tasks from newest to oldest.
-- \`salmon task select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
-- \`salmon task plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
-- \`salmon task ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
-- \`salmon task request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
-- \`salmon server [--port <n>]\`: Starts the Salmon API server.
-- \`salmon ui [--port <n>] [--api-url <url>]\`: Starts the Salmon UI.
-- \`salmon\` (no args): Starts server + UI and opens the UI.
+## Pragma Commands
+- \`pragma setup\`: Calls the API setup endpoint. This only bootstraps \`~/.pragma\`.
+- \`pragma create-task <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`tasks\` table. Default status is \`queued\`.
+- \`pragma list-tasks [--status <status>] [--limit <n>]\`: Calls the API to list tasks from newest to oldest.
+- \`pragma task select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
+- \`pragma task plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
+- \`pragma task ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
+- \`pragma task request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
+- \`pragma server [--port <n>]\`: Starts the Pragma API server.
+- \`pragma ui [--port <n>] [--api-url <url>]\`: Starts the Pragma UI.
+- \`pragma\` (no args): Starts server + UI and opens the UI.
 `;
 
 const CODER_AGENT_FILE = `# Coder
@@ -92,7 +92,7 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
     model_id: "opus",
   },
   {
-    id: "salmon-coder",
+    id: "pragma-coder",
     name: "Coder",
     status: "idle",
     agent_file: CODER_AGENT_FILE,
@@ -102,7 +102,7 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
     model_id: "opus",
   },
   {
-    id: "salmon-researcher",
+    id: "pragma-researcher",
     name: "Researcher",
     status: "idle",
     agent_file: RESEARCHER_AGENT_FILE,
@@ -112,7 +112,7 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
     model_id: "opus",
   },
   {
-    id: "salmon-reviewer",
+    id: "pragma-reviewer",
     name: "Reviewer",
     status: "idle",
     agent_file: REVIEWER_AGENT_FILE,
@@ -123,7 +123,7 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
   },
 ];
 
-export class SalmonError extends Error {
+export class PragmaError extends Error {
   code: string;
   status: number;
 
@@ -134,8 +134,8 @@ export class SalmonError extends Error {
   }
 }
 
-export function getSalmonRoot(): string {
-  return SALMON_DIR;
+export function getPragmaRoot(): string {
+  return PRAGMA_DIR;
 }
 
 export function getWorkspacePaths(name: string): {
@@ -149,7 +149,7 @@ export function getWorkspacePaths(name: string): {
   worktreesDir: string;
   goalFile: string;
 } {
-  const rootDir = join(SALMON_DIR, name);
+  const rootDir = join(PRAGMA_DIR, name);
   const workspaceDir = join(rootDir, "workspace");
   const contextDir = join(workspaceDir, "context");
 
@@ -166,14 +166,14 @@ export function getWorkspacePaths(name: string): {
   };
 }
 
-export async function setupSalmon(): Promise<void> {
-  await mkdir(SALMON_DIR, { recursive: true });
+export async function setupPragma(): Promise<void> {
+  await mkdir(PRAGMA_DIR, { recursive: true });
 }
 
 export async function listWorkspaceNames(): Promise<string[]> {
-  await setupSalmon();
+  await setupPragma();
 
-  const entries = await readdir(SALMON_DIR, { withFileTypes: true });
+  const entries = await readdir(PRAGMA_DIR, { withFileTypes: true });
   return entries
     .filter((entry) => {
       if (!entry.isDirectory()) {
@@ -192,7 +192,7 @@ export async function listWorkspaceNames(): Promise<string[]> {
 }
 
 export async function getActiveWorkspaceName(): Promise<string | null> {
-  await setupSalmon();
+  await setupPragma();
 
   let storedName = "";
   try {
@@ -222,14 +222,14 @@ export async function setActiveWorkspaceName(name: string): Promise<void> {
   validateWorkspaceName(name);
 
   if (!(await workspaceExists(name))) {
-    throw new SalmonError(
+    throw new PragmaError(
       "WORKSPACE_NOT_FOUND",
       404,
       `Workspace does not exist: ${name}`,
     );
   }
 
-  await setupSalmon();
+  await setupPragma();
   await writeFile(ACTIVE_WORKSPACE_FILE, name, "utf8");
 }
 
@@ -242,14 +242,14 @@ export async function createWorkspace(input: {
 
   validateWorkspaceName(name);
   if (typeof goal !== "string" || goal.trim().length === 0) {
-    throw new SalmonError("INVALID_GOAL", 400, "Goal is required.");
+    throw new PragmaError("INVALID_GOAL", 400, "Goal is required.");
   }
 
-  await setupSalmon();
+  await setupPragma();
 
   const paths = getWorkspacePaths(name);
   if (await pathExists(paths.rootDir)) {
-    throw new SalmonError(
+    throw new PragmaError(
       "WORKSPACE_EXISTS",
       409,
       `Workspace already exists: ${name}`,
@@ -276,7 +276,7 @@ export async function deleteWorkspace(name: string): Promise<{ nextActive: strin
 
   const paths = getWorkspacePaths(name);
   if (!(await pathExists(paths.rootDir))) {
-    throw new SalmonError("WORKSPACE_NOT_FOUND", 404, `Workspace does not exist: ${name}`);
+    throw new PragmaError("WORKSPACE_NOT_FOUND", 404, `Workspace does not exist: ${name}`);
   }
 
   const currentActive = await getActiveWorkspaceName();
@@ -326,7 +326,7 @@ export async function openDatabase(workspaceName: string): Promise<PGlite> {
   validateWorkspaceName(workspaceName);
 
   const paths = getWorkspacePaths(workspaceName);
-  await setupSalmon();
+  await setupPragma();
   await mkdir(paths.dbDir, { recursive: true });
 
   const existing = OPEN_DATABASES.get(workspaceName);
@@ -369,15 +369,15 @@ export function parseLimit(limitValue: string): number {
 
 export function validateWorkspaceName(name: string): void {
   if (typeof name !== "string") {
-    throw new SalmonError("INVALID_WORKSPACE_NAME", 400, "Workspace name must be a string.");
+    throw new PragmaError("INVALID_WORKSPACE_NAME", 400, "Workspace name must be a string.");
   }
 
   if (name.trim().length === 0) {
-    throw new SalmonError("INVALID_WORKSPACE_NAME", 400, "Workspace name is required.");
+    throw new PragmaError("INVALID_WORKSPACE_NAME", 400, "Workspace name is required.");
   }
 
   if (name.includes("\0") || name.includes("/") || name.includes("\\") || name.includes("..")) {
-    throw new SalmonError(
+    throw new PragmaError(
       "INVALID_WORKSPACE_NAME",
       400,
       "Workspace name cannot contain '/', '\\', '..', or NUL.",
@@ -385,7 +385,7 @@ export function validateWorkspaceName(name: string): void {
   }
 
   if (name === "active_workspace" || RESERVED_ROOT_NAMES.has(name)) {
-    throw new SalmonError(
+    throw new PragmaError(
       "INVALID_WORKSPACE_NAME",
       400,
       "Workspace name is reserved.",

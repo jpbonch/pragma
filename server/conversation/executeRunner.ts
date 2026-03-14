@@ -56,18 +56,18 @@ type ThreadUpdatedInput = {
 
 export class ExecuteRunner {
   private readonly apiUrl: string;
-  private readonly salmonCliCommand: string;
+  private readonly pragmaCliCommand: string;
   private readonly onTaskStatusChanged?: (input: TaskStatusChangedInput) => void | Promise<void>;
   private readonly onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
 
   constructor(options: {
     apiUrl: string;
-    salmonCliCommand: string;
+    pragmaCliCommand: string;
     onTaskStatusChanged?: (input: TaskStatusChangedInput) => void | Promise<void>;
     onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
   }) {
     this.apiUrl = options.apiUrl;
-    this.salmonCliCommand = options.salmonCliCommand;
+    this.pragmaCliCommand = options.pragmaCliCommand;
     this.onTaskStatusChanged = options.onTaskStatusChanged;
     this.onThreadUpdated = options.onThreadUpdated;
   }
@@ -75,7 +75,7 @@ export class ExecuteRunner {
   execute(input: EnqueueExecuteInput): void {
     runExecuteTask(input, {
       apiUrl: this.apiUrl,
-      salmonCliCommand: this.salmonCliCommand,
+      pragmaCliCommand: this.pragmaCliCommand,
       onTaskStatusChanged: this.onTaskStatusChanged,
       onThreadUpdated: this.onThreadUpdated,
     }).catch((error: unknown) => {
@@ -89,7 +89,7 @@ async function runExecuteTask(
   input: EnqueueExecuteInput,
   options: {
     apiUrl: string;
-    salmonCliCommand: string;
+    pragmaCliCommand: string;
     onTaskStatusChanged?: (input: TaskStatusChangedInput) => void | Promise<void>;
     onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
   },
@@ -297,7 +297,7 @@ WHERE id = $1
         })),
         forcedRecipientAgentId: requestedRecipientId,
         reasoningEffort,
-        salmonCliCommand: options.salmonCliCommand,
+        pragmaCliCommand: options.pragmaCliCommand,
       });
 
       const orchestratorAdapter = getConversationAdapter(orchestrator.harness);
@@ -310,7 +310,7 @@ WHERE id = $1
         cwd: taskWorkspaceDir,
         env: buildAgentRuntimeEnv({
           apiUrl: options.apiUrl,
-          salmonCliCommand: options.salmonCliCommand,
+          pragmaCliCommand: options.pragmaCliCommand,
           codeDir: join(taskWorkspaceDir, "code"),
           outputDir,
           taskWorkspaceDir,
@@ -489,7 +489,7 @@ WHERE id = $1
       workerName: selectedWorker.name,
       workerAgentFile: selectedWorker.agent_file ?? "",
       reasoningEffort,
-      salmonCliCommand: options.salmonCliCommand,
+      pragmaCliCommand: options.pragmaCliCommand,
       preferredCodePath,
       taskWorkspaceDir,
     });
@@ -502,7 +502,7 @@ WHERE id = $1
       cwd: taskWorkspaceDir,
       env: buildAgentRuntimeEnv({
         apiUrl: options.apiUrl,
-        salmonCliCommand: options.salmonCliCommand,
+        pragmaCliCommand: options.pragmaCliCommand,
         codeDir: join(taskWorkspaceDir, "code"),
         outputDir,
         taskWorkspaceDir,
@@ -582,7 +582,7 @@ WHERE id = $1
       workspacePaths: paths,
       taskId: input.taskId,
       gitState,
-      commitMessage: `salmon: task ${input.taskId} checkpoint`,
+      commitMessage: `pragma: task ${input.taskId} checkpoint`,
     });
 
     await closeThread(db, input.threadId);
@@ -693,7 +693,7 @@ LIMIT 1
 
 function buildAgentRuntimeEnv(input: {
   apiUrl: string;
-  salmonCliCommand: string;
+  pragmaCliCommand: string;
   codeDir: string;
   outputDir: string;
   taskWorkspaceDir: string;
@@ -704,16 +704,16 @@ function buildAgentRuntimeEnv(input: {
   agentId: string;
 }): Record<string, string> {
   return {
-    SALMON_API_URL: input.apiUrl,
-    SALMON_CLI_COMMAND: input.salmonCliCommand,
-    SALMON_CODE_DIR: input.codeDir,
-    SALMON_OUTPUT_DIR: input.outputDir,
-    SALMON_TASK_WORKSPACE: input.taskWorkspaceDir,
-    SALMON_WORKSPACE_NAME: input.workspaceName,
-    SALMON_TASK_ID: input.taskId,
-    SALMON_THREAD_ID: input.threadId,
-    SALMON_TURN_ID: input.turnId,
-    SALMON_AGENT_ID: input.agentId,
+    PRAGMA_API_URL: input.apiUrl,
+    PRAGMA_CLI_COMMAND: input.pragmaCliCommand,
+    PRAGMA_CODE_DIR: input.codeDir,
+    PRAGMA_OUTPUT_DIR: input.outputDir,
+    PRAGMA_TASK_WORKSPACE: input.taskWorkspaceDir,
+    PRAGMA_WORKSPACE_NAME: input.workspaceName,
+    PRAGMA_TASK_ID: input.taskId,
+    PRAGMA_THREAD_ID: input.threadId,
+    PRAGMA_TURN_ID: input.turnId,
+    PRAGMA_AGENT_ID: input.agentId,
   };
 }
 

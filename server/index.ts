@@ -9,7 +9,7 @@ import { lookup as lookupMimeType } from "mime-types";
 import open from "open";
 import {
   DEFAULT_AGENT_ID,
-  SalmonError,
+  PragmaError,
   createWorkspace,
   deleteWorkspace,
   closeOpenDatabases,
@@ -18,7 +18,7 @@ import {
   listWorkspaceNames,
   openDatabase,
   setActiveWorkspaceName,
-  setupSalmon,
+  setupPragma,
 } from "./db";
 import { getConversationAdapter } from "./conversation/adapters";
 import { ExecuteRunner } from "./conversation/executeRunner";
@@ -31,7 +31,7 @@ import {
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
 import { buildPrompt } from "./conversation/prompts";
-import { resolveSalmonCliCommand } from "./conversation/salmonCli";
+import { resolvePragmaCliCommand } from "./conversation/pragmaCli";
 import {
   closeThread,
   createThread,
@@ -433,12 +433,12 @@ function stopRuntimeService(service: RuntimeServiceRecord): void {
 }
 
 export async function startServer(options: StartServerOptions): Promise<void> {
-  await setupSalmon();
-  const apiUrl = process.env.SALMON_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
-  const salmonCliCommand = resolveSalmonCliCommand(__dirname);
+  await setupPragma();
+  const apiUrl = process.env.PRAGMA_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
+  const pragmaCliCommand = resolvePragmaCliCommand(__dirname);
   const executeRunner = new ExecuteRunner({
     apiUrl,
-    salmonCliCommand,
+    pragmaCliCommand,
     onTaskStatusChanged: (input) => {
       publishTaskStatus(input.workspaceName, {
         task_id: input.taskId,
@@ -471,7 +471,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   app.get("/health", (c) => c.json({ ok: true }));
 
   app.post("/setup", async (c) => {
-    await setupSalmon();
+    await setupPragma();
     return c.json({ ok: true });
   });
 
@@ -577,7 +577,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       return c.json({ ok: true, id: agentId }, 201);
     } catch (error: unknown) {
       const message = errorMessage(error);
-      throw new SalmonError("CREATE_AGENT_FAILED", 400, message);
+      throw new PragmaError("CREATE_AGENT_FAILED", 400, message);
     } finally {
       await db.close();
     }
@@ -614,7 +614,7 @@ WHERE id = $1
       );
 
       if ((updated.affectedRows ?? 0) === 0) {
-        throw new SalmonError("AGENT_NOT_FOUND", 404, `Agent not found: ${id}`);
+        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${id}`);
       }
 
       return c.json({ ok: true });
@@ -657,7 +657,7 @@ WHERE id = $1
       return c.json({ ok: true, id }, 201);
     } catch (error: unknown) {
       const message = errorMessage(error);
-      throw new SalmonError("CREATE_HUMAN_FAILED", 400, message);
+      throw new PragmaError("CREATE_HUMAN_FAILED", 400, message);
     } finally {
       await db.close();
     }
@@ -676,7 +676,7 @@ WHERE id = $1
       );
 
       if ((updated.affectedRows ?? 0) === 0) {
-        throw new SalmonError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
+        throw new PragmaError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
       }
 
       return c.json({ ok: true });
@@ -697,7 +697,7 @@ WHERE id = $1
       );
 
       if ((deleted.affectedRows ?? 0) === 0) {
-        throw new SalmonError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
+        throw new PragmaError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
       }
 
       return c.json({ ok: true });
@@ -813,7 +813,7 @@ FROM tasks j
     const serviceId = c.req.param("serviceId");
     const service = getRuntimeService(workspaceName, serviceId);
     if (!service) {
-      throw new SalmonError("SERVICE_NOT_FOUND", 404, `Service not found: ${serviceId}`);
+      throw new PragmaError("SERVICE_NOT_FOUND", 404, `Service not found: ${serviceId}`);
     }
 
     stopRuntimeService(service);
@@ -828,7 +828,7 @@ FROM tasks j
     const serviceId = c.req.param("serviceId");
     const service = getRuntimeService(workspaceName, serviceId);
     if (!service) {
-      throw new SalmonError("SERVICE_NOT_FOUND", 404, `Service not found: ${serviceId}`);
+      throw new PragmaError("SERVICE_NOT_FOUND", 404, `Service not found: ${serviceId}`);
     }
 
     c.header("cache-control", "no-store");
@@ -893,7 +893,7 @@ FROM tasks j
       await ensureConversationSchema(db);
       const thread = await getThreadById(db, threadId);
       if (!thread) {
-        throw new SalmonError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
       }
     } finally {
       await db.close();
@@ -960,12 +960,12 @@ LIMIT 1
       );
       const task = taskResult.rows[0];
       if (!task) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
       const gitState = parseTaskGitState(task.git_state_json);
       if (!gitState) {
-        throw new SalmonError(
+        throw new PragmaError(
           "TASK_GIT_STATE_MISSING",
           409,
           `Task has no git execution state: ${taskId}`,
@@ -1030,12 +1030,12 @@ LIMIT 1
       const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
       const fileInfo = await stat(absolutePath).catch(() => null);
       if (!fileInfo?.isFile()) {
-        throw new SalmonError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
+        throw new PragmaError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
       }
 
       const mime = lookupMimeType(absolutePath);
       if (!mime) {
-        throw new SalmonError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
+        throw new PragmaError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
       }
       const content = await readFile(absolutePath);
       return c.body(content, 200, {
@@ -1060,12 +1060,12 @@ LIMIT 1
       const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
       const fileInfo = await stat(absolutePath).catch(() => null);
       if (!fileInfo?.isFile()) {
-        throw new SalmonError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
+        throw new PragmaError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
       }
 
       const mime = lookupMimeType(absolutePath);
       if (!mime) {
-        throw new SalmonError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
+        throw new PragmaError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
       }
       const content = await readFile(absolutePath);
       return c.body(content, 200, {
@@ -1093,7 +1093,7 @@ LIMIT 1
         const { absolutePath } = resolveOutputPath(outputsRoot, body.path);
         const fileInfo = await stat(absolutePath).catch(() => null);
         if (!fileInfo) {
-          throw new SalmonError("OUTPUT_PATH_NOT_FOUND", 404, "Output path does not exist.");
+          throw new PragmaError("OUTPUT_PATH_NOT_FOUND", 404, "Output path does not exist.");
         }
         targetPath = fileInfo.isDirectory() ? absolutePath : dirname(absolutePath);
       }
@@ -1122,7 +1122,7 @@ LIMIT 1
       );
       const row = result.rows[0];
       if (!row) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
       return c.json({
@@ -1154,12 +1154,12 @@ LIMIT 1
         );
         const task = taskResult.rows[0];
         if (!task) {
-          throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+          throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
         }
 
         const normalizedCommands = normalizeTaskTestCommands(body.commands);
         if (normalizedCommands.length === 0) {
-          throw new SalmonError(
+          throw new PragmaError(
             "INVALID_TEST_COMMANDS",
             400,
             "No valid test commands were provided.",
@@ -1206,7 +1206,7 @@ LIMIT 1
       );
       const row = result.rows[0];
       if (!row) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
       const commands = parseTaskTestCommands(row.test_commands_json);
@@ -1214,7 +1214,7 @@ LIMIT 1
         (item) => item.command === body.command && item.cwd === body.cwd,
       );
       if (!selected) {
-        throw new SalmonError(
+        throw new PragmaError(
           "TEST_COMMAND_NOT_ALLOWED",
           409,
           "Test command is not registered for this task.",
@@ -1233,8 +1233,8 @@ LIMIT 1
         absoluteCwd: commandCwd,
         env: {
           ...process.env,
-          SALMON_WORKSPACE_NAME: workspaceName,
-          SALMON_TASK_ID: taskId,
+          PRAGMA_WORKSPACE_NAME: workspaceName,
+          PRAGMA_TASK_ID: taskId,
         },
       });
 
@@ -1273,12 +1273,12 @@ LIMIT 1
       );
       const task = taskResult.rows[0];
       if (!task) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
       if (body.action === "reopen") {
         if (task.status !== "completed") {
-          throw new SalmonError(
+          throw new PragmaError(
             "TASK_NOT_COMPLETED",
             409,
             `Task is not completed: ${taskId}`,
@@ -1287,12 +1287,12 @@ LIMIT 1
 
         const thread = await getThreadByTaskId(db, taskId);
         if (!thread) {
-          throw new SalmonError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
+          throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
         }
 
         const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
         if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-          throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
+          throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
         }
 
         const assignedWorker =
@@ -1342,7 +1342,7 @@ WHERE id = $1
       }
 
       if (task.status !== "pending_review") {
-        throw new SalmonError(
+        throw new PragmaError(
           "TASK_NOT_PENDING_REVIEW",
           409,
           `Task is not pending review: ${taskId}`,
@@ -1351,7 +1351,7 @@ WHERE id = $1
 
       const gitState = parseTaskGitState(task.git_state_json);
       if (!gitState) {
-        throw new SalmonError(
+        throw new PragmaError(
           "TASK_GIT_STATE_MISSING",
           409,
           `Task has no git execution state: ${taskId}`,
@@ -1486,7 +1486,7 @@ LIMIT 1
       );
       const task = taskResult.rows[0];
       if (!task) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
       const workspacePaths = getWorkspacePaths(workspaceName);
@@ -1534,7 +1534,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
       );
       emitTaskStatus(workspaceName, taskId, status, "task_created");
     } catch (error: unknown) {
-      throw new SalmonError("CREATE_TASK_FAILED", 400, errorMessage(error));
+      throw new PragmaError("CREATE_TASK_FAILED", 400, errorMessage(error));
     } finally {
       await db.close();
     }
@@ -1556,7 +1556,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
       await ensureConversationSchema(db);
       const orchestrator = await getAgentRow(db, DEFAULT_AGENT_ID);
       if (!orchestrator) {
-        throw new SalmonError(
+        throw new PragmaError(
           "ORCHESTRATOR_NOT_FOUND",
           400,
           `Orchestrator agent is missing: ${DEFAULT_AGENT_ID}`,
@@ -1567,12 +1567,12 @@ VALUES ($1, $2, $3, $4, $5, $6)
       if (body.recipient_agent_id) {
         requestedRecipientAgentId = body.recipient_agent_id;
         if (!requestedRecipientAgentId) {
-          throw new SalmonError("INVALID_RECIPIENT", 400, "recipient_agent_id cannot be empty.");
+          throw new PragmaError("INVALID_RECIPIENT", 400, "recipient_agent_id cannot be empty.");
         }
 
         const recipient = await getAgentRow(db, requestedRecipientAgentId);
         if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-          throw new SalmonError(
+          throw new PragmaError(
             "INVALID_RECIPIENT",
             400,
             `Invalid recipient agent id: ${requestedRecipientAgentId}`,
@@ -1608,10 +1608,10 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL)
         reasoningEffort,
       });
     } catch (error: unknown) {
-      if (error instanceof SalmonError) {
+      if (error instanceof PragmaError) {
         throw error;
       }
-      throw new SalmonError("CREATE_EXECUTE_TASK_FAILED", 400, errorMessage(error));
+      throw new PragmaError("CREATE_EXECUTE_TASK_FAILED", 400, errorMessage(error));
     } finally {
       await db.close();
     }
@@ -1639,10 +1639,10 @@ LIMIT 1
       );
       const task = taskResult.rows[0];
       if (!task) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
       if (task.status !== "waiting_for_recipient") {
-        throw new SalmonError(
+        throw new PragmaError(
           "TASK_NOT_WAITING_FOR_RECIPIENT",
           409,
           `Task is not waiting for recipient input: ${taskId}`,
@@ -1651,17 +1651,17 @@ LIMIT 1
 
       const recipient = await getAgentRow(db, recipientAgentId);
       if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-        throw new SalmonError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${recipientAgentId}`);
+        throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${recipientAgentId}`);
       }
 
       const thread = await getThreadByTaskId(db, taskId);
       if (!thread) {
-        throw new SalmonError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
+        throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
       }
 
       const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
       if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-        throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
+        throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
       }
 
       await db.query(
@@ -1716,10 +1716,10 @@ LIMIT 1
       );
       const task = taskResult.rows[0];
       if (!task) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
       if (task.status !== "orchestrating") {
-        throw new SalmonError(
+        throw new PragmaError(
           "TASK_NOT_ORCHESTRATING",
           409,
           `Task is not orchestrating: ${taskId}`,
@@ -1728,7 +1728,7 @@ LIMIT 1
 
       const recipient = await getAgentRow(db, selectedAgentId);
       if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-        throw new SalmonError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${selectedAgentId}`);
+        throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${selectedAgentId}`);
       }
 
       await db.query(
@@ -1774,10 +1774,10 @@ LIMIT 1
         );
         const task = taskResult.rows[0];
         if (!task) {
-          throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+          throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
         }
         if (task.status !== "running" && task.status !== "pending_review") {
-          throw new SalmonError(
+          throw new PragmaError(
             "TASK_NOT_ACCEPTING_TEST_COMMANDS",
             409,
             `Task cannot accept test commands in status: ${task.status}`,
@@ -1786,7 +1786,7 @@ LIMIT 1
 
         const normalizedCommands = normalizeTaskTestCommands(body.commands);
         if (normalizedCommands.length === 0) {
-          throw new SalmonError(
+          throw new PragmaError(
             "INVALID_TEST_COMMANDS",
             400,
             "No valid test commands were provided.",
@@ -1797,7 +1797,7 @@ LIMIT 1
           isDisallowedHumanOnlyTestCommand(entry.command),
         );
         if (disallowed) {
-          throw new SalmonError(
+          throw new PragmaError(
             "INVALID_TEST_COMMAND_POLICY",
             400,
             `Disallowed command for task window: ${disallowed.command}`,
@@ -1868,10 +1868,10 @@ LIMIT 1
       emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "worker_ask_question");
       const task = taskResult.rows[0];
       if (!task) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
       if (task.status !== "running") {
-        throw new SalmonError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
+        throw new PragmaError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
       }
 
       await db.query(
@@ -1925,10 +1925,10 @@ LIMIT 1
       );
       const task = taskResult.rows[0];
       if (!task) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
       if (task.status !== "running") {
-        throw new SalmonError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
+        throw new PragmaError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
       }
 
       await db.query(
@@ -1993,20 +1993,20 @@ LIMIT 1
       );
       const task = taskResult.rows[0];
       if (!task) {
-        throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
       if (
         task.status !== "waiting_for_question_response" &&
         task.status !== "waiting_for_help_response"
       ) {
-        throw new SalmonError(
+        throw new PragmaError(
           "TASK_NOT_WAITING_FOR_RESPONSE",
           409,
           `Task is not waiting for a human response: ${taskId}`,
         );
       }
       if (!task.assigned_to) {
-        throw new SalmonError(
+        throw new PragmaError(
           "TASK_MISSING_ASSIGNED_WORKER",
           409,
           `Task has no assigned worker to resume: ${taskId}`,
@@ -2014,7 +2014,7 @@ LIMIT 1
       }
       const resumeWorker = await getAgentRow(db, task.assigned_to);
       if (!resumeWorker || resumeWorker.id === DEFAULT_AGENT_ID) {
-        throw new SalmonError(
+        throw new PragmaError(
           "TASK_INVALID_ASSIGNED_WORKER",
           409,
           `Assigned worker is invalid for task resume: ${taskId}`,
@@ -2023,12 +2023,12 @@ LIMIT 1
 
       const thread = await getThreadByTaskId(db, taskId);
       if (!thread) {
-        throw new SalmonError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
+        throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
       }
 
       const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
       if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-        throw new SalmonError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
+        throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
       }
 
       await insertMessage(db, {
@@ -2116,14 +2116,14 @@ LIMIT 1
 
       const turn = turnResult.rows[0];
       if (!turn) {
-        throw new SalmonError(
+        throw new PragmaError(
           "TURN_NOT_FOUND",
           404,
           `Conversation turn not found: ${turnId}`,
         );
       }
       if (turn.mode !== "plan") {
-        throw new SalmonError(
+        throw new PragmaError(
           "TURN_NOT_PLAN_MODE",
           409,
           `Turn is not in plan mode: ${turnId}`,
@@ -2189,14 +2189,14 @@ LIMIT 1
 
       const turn = turnResult.rows[0];
       if (!turn) {
-        throw new SalmonError(
+        throw new PragmaError(
           "TURN_NOT_FOUND",
           404,
           `Conversation turn not found: ${turnId}`,
         );
       }
       if (turn.mode !== "plan") {
-        throw new SalmonError(
+        throw new PragmaError(
           "TURN_NOT_PLAN_MODE",
           409,
           `Turn is not in plan mode: ${turnId}`,
@@ -2299,7 +2299,7 @@ WHERE id = $1
       await ensureConversationSchema(db);
       const data = await getThreadWithDetails(db, threadId);
       if (!data.thread) {
-        throw new SalmonError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
       }
 
       const events = data.events.map((event) => ({
@@ -2333,7 +2333,7 @@ WHERE id = $1
       if (requestedRecipientAgentId) {
         const recipient = await getAgentRow(db, requestedRecipientAgentId);
         if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-          throw new SalmonError(
+          throw new PragmaError(
             "INVALID_RECIPIENT",
             400,
             `Invalid recipient agent id: ${requestedRecipientAgentId}`,
@@ -2358,11 +2358,11 @@ WHERE id = $1
       }
 
       if (!thread) {
-        throw new SalmonError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
+        throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
       }
 
       if (thread.harness !== body.harness) {
-        throw new SalmonError(
+        throw new PragmaError(
           "THREAD_HARNESS_MISMATCH",
           409,
           "Thread harness does not match the requested harness.",
@@ -2374,12 +2374,12 @@ WHERE id = $1
           await reopenThread(db, thread.id);
           thread = await getThreadById(db, thread.id);
         } else {
-          throw new SalmonError("THREAD_CLOSED", 409, "Conversation thread is already closed.");
+          throw new PragmaError("THREAD_CLOSED", 409, "Conversation thread is already closed.");
         }
       }
 
       if (!thread) {
-        throw new SalmonError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
       }
 
       const turnId = `turn_${randomUUID().slice(0, 12)}`;
@@ -2438,7 +2438,7 @@ WHERE id = $1
           body.mode === "plan" ? await listPlanWorkerCandidates(db) : [];
         const workspaceIsEmpty =
           body.mode === "plan" ? await isDirectoryEmpty(paths.codeDir) : false;
-        const prompt = buildPrompt(body.mode, message, reasoningEffort, salmonCliCommand, {
+        const prompt = buildPrompt(body.mode, message, reasoningEffort, pragmaCliCommand, {
           planCandidates: planPromptCandidates.map((candidate) => ({
             id: candidate.id,
             name: candidate.name,
@@ -2455,7 +2455,7 @@ WHERE id = $1
           cwd: paths.codeDir,
           env: buildConversationAgentEnv({
             apiUrl,
-            salmonCliCommand,
+            pragmaCliCommand,
             workspaceName,
             threadId,
             turnId,
@@ -2513,20 +2513,20 @@ WHERE id = $1
           body.mode === "plan" &&
           (!declaredPlanSummary || planSummarySubmissionCount < 1)
         ) {
-          throw new SalmonError(
+          throw new PragmaError(
             "PLAN_SUMMARY_REQUIRED",
             409,
-            "Plan mode requires at least one `salmon task plan-summary` CLI submission.",
+            "Plan mode requires at least one `pragma task plan-summary` CLI submission.",
           );
         }
         if (
           body.mode === "plan" &&
           (!selectedPlanRecipientAgentId || planRecipientSelectionCount < 1)
         ) {
-          throw new SalmonError(
+          throw new PragmaError(
             "PLAN_RECIPIENT_REQUIRED",
             409,
-            "Plan mode requires at least one `salmon task plan-select-recipient` CLI submission.",
+            "Plan mode requires at least one `pragma task plan-select-recipient` CLI submission.",
           );
         }
         const planSummary = body.mode === "plan" ? declaredPlanSummary : null;
@@ -2623,19 +2623,19 @@ WHERE id = $1
 
       const thread = await getThreadById(db, threadId);
       if (!thread) {
-        throw new SalmonError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
       }
 
       const latestPlanTurn = await getLatestCompletedPlanTurn(db, threadId);
       if (!latestPlanTurn) {
-        throw new SalmonError("NO_PLAN_FOUND", 409, "No completed plan turn found.");
+        throw new PragmaError("NO_PLAN_FOUND", 409, "No completed plan turn found.");
       }
 
       const parsedSummary = latestPlanTurn.plan_summary
         ? safeParseJson(latestPlanTurn.plan_summary)
         : null;
       if (!isPlanSummaryRecord(parsedSummary)) {
-        throw new SalmonError("PLAN_SUMMARY_INVALID", 409, "Plan summary is missing or invalid.");
+        throw new PragmaError("PLAN_SUMMARY_INVALID", 409, "Plan summary is missing or invalid.");
       }
       const normalizedSummary = normalizePlanSummary(parsedSummary);
       const planTitle = normalizedSummary.title;
@@ -2648,15 +2648,15 @@ WHERE id = $1
           : null;
       requestedRecipientAgentId = body.recipient_agent_id ?? plannedRecipientAgentId;
       if (!requestedRecipientAgentId) {
-        throw new SalmonError(
+        throw new PragmaError(
           "PLAN_RECIPIENT_MISSING",
           409,
-          "Plan is missing a selected recipient. Submit `salmon task plan-select-recipient` in plan mode.",
+          "Plan is missing a selected recipient. Submit `pragma task plan-select-recipient` in plan mode.",
         );
       }
       const executeRecipient = await getAgentRow(db, requestedRecipientAgentId);
       if (!executeRecipient || executeRecipient.id === DEFAULT_AGENT_ID) {
-        throw new SalmonError(
+        throw new PragmaError(
           "INVALID_RECIPIENT",
           400,
           `Invalid recipient agent id: ${requestedRecipientAgentId}`,
@@ -2726,7 +2726,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     const folderName = normalizeCodeFolderName(deriveCodeFolderNameFromGitUrl(body.git_url));
     const targetPath = join(paths.codeDir, folderName);
     if (await pathExists(targetPath)) {
-      throw new SalmonError(
+      throw new PragmaError(
         "CODE_FOLDER_EXISTS",
         409,
         `Code folder already exists: ${folderName}`,
@@ -2741,7 +2741,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
         env: process.env,
       });
     } catch (error: unknown) {
-      throw new SalmonError("CLONE_CODE_REPO_FAILED", 400, errorMessage(error));
+      throw new PragmaError("CLONE_CODE_REPO_FAILED", 400, errorMessage(error));
     }
 
     const folders = await listCodeFolders(paths.codeDir);
@@ -2750,7 +2750,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
 
   app.post("/code/folders/pick-local", async (c) => {
     if (process.platform !== "darwin") {
-      throw new SalmonError(
+      throw new PragmaError(
         "FOLDER_PICKER_UNSUPPORTED",
         400,
         "Folder picker is currently supported on macOS only. Paste a local path manually.",
@@ -2777,7 +2777,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
       if (/user canceled/i.test(message)) {
         return c.json({ ok: true, cancelled: true, path: "" });
       }
-      throw new SalmonError("PICK_LOCAL_CODE_FOLDER_FAILED", 400, message);
+      throw new PragmaError("PICK_LOCAL_CODE_FOLDER_FAILED", 400, message);
     }
   });
 
@@ -2787,19 +2787,19 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     const body = c.req.valid("json");
 
     if (body.local_path.includes("\0")) {
-      throw new SalmonError("INVALID_LOCAL_CODE_PATH", 400, "Local path is invalid.");
+      throw new PragmaError("INVALID_LOCAL_CODE_PATH", 400, "Local path is invalid.");
     }
 
     const sourcePath = resolve(body.local_path.trim());
     const sourceInfo = await stat(sourcePath).catch(() => null);
     if (!sourceInfo?.isDirectory()) {
-      throw new SalmonError("LOCAL_CODE_PATH_NOT_FOUND", 404, "Local folder was not found.");
+      throw new PragmaError("LOCAL_CODE_PATH_NOT_FOUND", 404, "Local folder was not found.");
     }
 
     const folderName = normalizeCodeFolderName(basename(sourcePath));
     const targetPath = join(paths.codeDir, folderName);
     if (await pathExists(targetPath)) {
-      throw new SalmonError(
+      throw new PragmaError(
         "CODE_FOLDER_EXISTS",
         409,
         `Code folder already exists: ${folderName}`,
@@ -2815,7 +2815,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
       });
     } catch (error: unknown) {
       await rm(targetPath, { recursive: true, force: true });
-      throw new SalmonError("COPY_LOCAL_CODE_FAILED", 400, errorMessage(error));
+      throw new PragmaError("COPY_LOCAL_CODE_FAILED", 400, errorMessage(error));
     }
 
     const folders = await listCodeFolders(paths.codeDir);
@@ -2830,21 +2830,21 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     try {
       formData = await c.req.formData();
     } catch (error: unknown) {
-      throw new SalmonError("INVALID_CODE_IMPORT", 400, errorMessage(error));
+      throw new PragmaError("INVALID_CODE_IMPORT", 400, errorMessage(error));
     }
 
     const fileEntries = formData.getAll("files");
     const pathEntries = formData.getAll("paths");
     if (fileEntries.length === 0) {
-      throw new SalmonError("INVALID_CODE_IMPORT", 400, "No files were selected.");
+      throw new PragmaError("INVALID_CODE_IMPORT", 400, "No files were selected.");
     }
     if (fileEntries.length !== pathEntries.length) {
-      throw new SalmonError("INVALID_CODE_IMPORT", 400, "Import payload is inconsistent.");
+      throw new PragmaError("INVALID_CODE_IMPORT", 400, "Import payload is inconsistent.");
     }
 
     const normalizedPaths = pathEntries.map((entry) => {
       if (typeof entry !== "string") {
-        throw new SalmonError("INVALID_CODE_IMPORT", 400, "Import path metadata is invalid.");
+        throw new PragmaError("INVALID_CODE_IMPORT", 400, "Import path metadata is invalid.");
       }
       return normalizeImportedPath(entry);
     });
@@ -2854,7 +2854,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     const folderName = normalizeCodeFolderName(requestedRootName);
     const targetRoot = join(paths.codeDir, folderName);
     if (await pathExists(targetRoot)) {
-      throw new SalmonError(
+      throw new PragmaError(
         "CODE_FOLDER_EXISTS",
         409,
         `Code folder already exists: ${folderName}`,
@@ -2868,7 +2868,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
       for (let index = 0; index < fileEntries.length; index += 1) {
         const fileEntry = fileEntries[index];
         if (!isUploadedFile(fileEntry)) {
-          throw new SalmonError("INVALID_CODE_IMPORT", 400, "One or more imported files are invalid.");
+          throw new PragmaError("INVALID_CODE_IMPORT", 400, "One or more imported files are invalid.");
         }
 
         const uploadPath = normalizedPaths[index];
@@ -2883,7 +2883,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
 
         const destinationPath = resolve(targetRoot, stripped);
         if (!isWithinRoot(targetRoot, destinationPath)) {
-          throw new SalmonError("INVALID_CODE_IMPORT", 400, "Import path is out of bounds.");
+          throw new PragmaError("INVALID_CODE_IMPORT", 400, "Import path is out of bounds.");
         }
 
         await mkdir(dirname(destinationPath), { recursive: true });
@@ -2893,15 +2893,15 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
       }
     } catch (error: unknown) {
       await rm(targetRoot, { recursive: true, force: true });
-      if (error instanceof SalmonError) {
+      if (error instanceof PragmaError) {
         throw error;
       }
-      throw new SalmonError("IMPORT_CODE_FOLDER_FAILED", 400, errorMessage(error));
+      throw new PragmaError("IMPORT_CODE_FOLDER_FAILED", 400, errorMessage(error));
     }
 
     if (copiedFileCount === 0) {
       await rm(targetRoot, { recursive: true, force: true });
-      throw new SalmonError("INVALID_CODE_IMPORT", 400, "No importable files were found.");
+      throw new PragmaError("INVALID_CODE_IMPORT", 400, "No importable files were found.");
     }
 
     const folders = await listCodeFolders(paths.codeDir);
@@ -2928,9 +2928,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     } catch (error: unknown) {
       const message = errorMessage(error);
       if (message.includes("EEXIST")) {
-        throw new SalmonError("CONTEXT_FOLDER_EXISTS", 409, "Folder already exists.");
+        throw new PragmaError("CONTEXT_FOLDER_EXISTS", 409, "Folder already exists.");
       }
-      throw new SalmonError("CREATE_CONTEXT_FOLDER_FAILED", 400, message);
+      throw new PragmaError("CREATE_CONTEXT_FOLDER_FAILED", 400, message);
     }
 
     return c.json({ ok: true, folder: { name: folderName } }, 201);
@@ -2958,16 +2958,16 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     } catch (error: unknown) {
       const message = errorMessage(error);
       if (message.includes("EEXIST")) {
-        throw new SalmonError("CONTEXT_FILE_EXISTS", 409, "File already exists.");
+        throw new PragmaError("CONTEXT_FILE_EXISTS", 409, "File already exists.");
       }
       if (message.includes("ENOENT")) {
-        throw new SalmonError(
+        throw new PragmaError(
           "CONTEXT_FOLDER_NOT_FOUND",
           404,
           "Folder does not exist.",
         );
       }
-      throw new SalmonError("CREATE_CONTEXT_FILE_FAILED", 400, message);
+      throw new PragmaError("CREATE_CONTEXT_FILE_FAILED", 400, message);
     }
 
     return c.json({ ok: true, file: { path: relativePath } }, 201);
@@ -2985,16 +2985,16 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
     } catch (error: unknown) {
       const message = errorMessage(error);
       if (message.includes("ENOENT")) {
-        throw new SalmonError("CONTEXT_FILE_NOT_FOUND", 404, "File does not exist.");
+        throw new PragmaError("CONTEXT_FILE_NOT_FOUND", 404, "File does not exist.");
       }
-      throw new SalmonError("UPDATE_CONTEXT_FILE_FAILED", 400, message);
+      throw new PragmaError("UPDATE_CONTEXT_FILE_FAILED", 400, message);
     }
 
     return c.json({ ok: true });
   });
 
   app.onError((error, c) => {
-    if (error instanceof SalmonError) {
+    if (error instanceof PragmaError) {
       return c.newResponse(
         JSON.stringify({ error: error.code, message: error.message }),
         toKnownStatusCode(error.status),
@@ -3007,7 +3007,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL)
   });
 
   const server = serve({ fetch: app.fetch, port: options.port }, (info) => {
-    console.log(`Salmon API listening on http://127.0.0.1:${info.port}`);
+    console.log(`Pragma API listening on http://127.0.0.1:${info.port}`);
   });
 
   const shutdown = () => {
@@ -3333,7 +3333,7 @@ function isPlanSummaryRecord(value: unknown): value is PlanSummaryRecord {
 
 function buildConversationAgentEnv(input: {
   apiUrl: string;
-  salmonCliCommand: string;
+  pragmaCliCommand: string;
   workspaceName: string;
   threadId: string;
   turnId: string;
@@ -3341,16 +3341,16 @@ function buildConversationAgentEnv(input: {
   taskId?: string | null;
 }): Record<string, string> {
   const env: Record<string, string> = {
-    SALMON_API_URL: input.apiUrl,
-    SALMON_CLI_COMMAND: input.salmonCliCommand,
-    SALMON_WORKSPACE_NAME: input.workspaceName,
-    SALMON_THREAD_ID: input.threadId,
-    SALMON_TURN_ID: input.turnId,
-    SALMON_AGENT_ID: input.agentId,
+    PRAGMA_API_URL: input.apiUrl,
+    PRAGMA_CLI_COMMAND: input.pragmaCliCommand,
+    PRAGMA_WORKSPACE_NAME: input.workspaceName,
+    PRAGMA_THREAD_ID: input.threadId,
+    PRAGMA_TURN_ID: input.turnId,
+    PRAGMA_AGENT_ID: input.agentId,
   };
 
   if (input.taskId && input.taskId.trim()) {
-    env.SALMON_TASK_ID = input.taskId;
+    env.PRAGMA_TASK_ID = input.taskId;
   }
 
   return env;
@@ -3401,7 +3401,7 @@ LIMIT 1
 
   const row = result.rows[0];
   if (!row) {
-    throw new SalmonError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
   }
 
   return resolveTaskOutputsRoot(workspacePaths, taskId, row.output_dir);
@@ -3418,15 +3418,15 @@ async function resolveTaskOutputsRoot(
   );
 
   if (typeof storedOutputDir !== "string" || storedOutputDir.trim().length === 0) {
-    throw new SalmonError("TASK_OUTPUT_DIR_MISSING", 409, `Task output directory is missing: ${taskId}`);
+    throw new PragmaError("TASK_OUTPUT_DIR_MISSING", 409, `Task output directory is missing: ${taskId}`);
   }
 
   const absolute = resolve(storedOutputDir.trim());
   if (!isWithinRoot(mainRoot, absolute) && !isWithinRoot(worktreeRoot, absolute)) {
-    throw new SalmonError("TASK_OUTPUT_DIR_INVALID", 409, `Task output directory is invalid: ${taskId}`);
+    throw new PragmaError("TASK_OUTPUT_DIR_INVALID", 409, `Task output directory is invalid: ${taskId}`);
   }
   if (!(await isDirectory(absolute))) {
-    throw new SalmonError("TASK_OUTPUT_DIR_NOT_FOUND", 409, `Task output directory not found: ${taskId}`);
+    throw new PragmaError("TASK_OUTPUT_DIR_NOT_FOUND", 409, `Task output directory not found: ${taskId}`);
   }
   return absolute;
 }
@@ -3495,29 +3495,29 @@ function resolveOutputPath(
 ): { absolutePath: string; normalizedPath: string } {
   const value = requestedPath.trim();
   if (!value) {
-    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path is required.");
+    throw new PragmaError("INVALID_OUTPUT_PATH", 400, "Output path is required.");
   }
   if (value.includes("\0")) {
-    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path is invalid.");
+    throw new PragmaError("INVALID_OUTPUT_PATH", 400, "Output path is invalid.");
   }
   if (value.startsWith("/") || /^[A-Za-z]:/.test(value)) {
-    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path must be relative.");
+    throw new PragmaError("INVALID_OUTPUT_PATH", 400, "Output path must be relative.");
   }
 
   const normalized = value.replace(/\\/g, "/").replace(/^\.\/+/, "");
   const segments = normalized.split("/").filter(Boolean);
   if (segments.length === 0) {
-    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path is invalid.");
+    throw new PragmaError("INVALID_OUTPUT_PATH", 400, "Output path is invalid.");
   }
   if (segments.some((segment) => segment === "." || segment === "..")) {
-    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path cannot traverse directories.");
+    throw new PragmaError("INVALID_OUTPUT_PATH", 400, "Output path cannot traverse directories.");
   }
 
   const normalizedPath = segments.join("/");
   const root = resolve(outputsRoot);
   const absolutePath = resolve(root, normalizedPath);
   if (absolutePath !== root && !absolutePath.startsWith(`${root}${sep}`)) {
-    throw new SalmonError("INVALID_OUTPUT_PATH", 400, "Output path is out of bounds.");
+    throw new PragmaError("INVALID_OUTPUT_PATH", 400, "Output path is out of bounds.");
   }
 
   return { absolutePath, normalizedPath };
@@ -3536,13 +3536,13 @@ async function openFolder(targetPath: string): Promise<void> {
   const fullPath = resolve(targetPath);
   const fileInfo = await stat(fullPath).catch(() => null);
   if (!fileInfo) {
-    throw new SalmonError("OUTPUT_PATH_NOT_FOUND", 404, "Path does not exist.");
+    throw new PragmaError("OUTPUT_PATH_NOT_FOUND", 404, "Path does not exist.");
   }
 
   try {
     await open(fullPath, { wait: false });
   } catch (error: unknown) {
-    throw new SalmonError("OPEN_FOLDER_FAILED", 400, errorMessage(error));
+    throw new PragmaError("OPEN_FOLDER_FAILED", 400, errorMessage(error));
   }
 }
 
@@ -3554,7 +3554,7 @@ async function isDirectory(path: string): Promise<boolean> {
 async function requireActiveWorkspaceName(): Promise<string> {
   const activeWorkspace = await getActiveWorkspaceName();
   if (!activeWorkspace) {
-    throw new SalmonError(
+    throw new PragmaError(
       "NO_ACTIVE_WORKSPACE",
       409,
       "No active workspace. Create one or set an active workspace.",
@@ -3573,7 +3573,7 @@ function requireReasoningEffort(
   source: string,
 ): ReasoningEffort {
   if (!value) {
-    throw new SalmonError("MISSING_REASONING_EFFORT", 409, `Reasoning effort missing for ${source}.`);
+    throw new PragmaError("MISSING_REASONING_EFFORT", 409, `Reasoning effort missing for ${source}.`);
   }
   return value;
 }
@@ -3593,11 +3593,11 @@ function toKnownStatusCode(status: number): 400 | 404 | 409 | 422 {
 
 function validateContextPath(path: string): void {
   if (!path || path.trim().length === 0) {
-    throw new SalmonError("INVALID_CONTEXT_PATH", 400, "Path is required.");
+    throw new PragmaError("INVALID_CONTEXT_PATH", 400, "Path is required.");
   }
 
   if (!path.toLowerCase().endsWith(".md")) {
-    throw new SalmonError(
+    throw new PragmaError(
       "INVALID_CONTEXT_PATH",
       400,
       "Only markdown files can be updated.",
@@ -3609,7 +3609,7 @@ function validateContextPath(path: string): void {
     path.includes("..") ||
     path.includes("\0")
   ) {
-    throw new SalmonError(
+    throw new PragmaError(
       "INVALID_CONTEXT_PATH",
       400,
       "Invalid context path.",
@@ -3618,7 +3618,7 @@ function validateContextPath(path: string): void {
 
   const parts = path.split("/");
   if (parts.length > 2 || parts.some((part) => part.trim().length === 0)) {
-    throw new SalmonError(
+    throw new PragmaError(
       "INVALID_CONTEXT_PATH",
       400,
       "Only root files or one-level folder files are supported.",
@@ -3634,7 +3634,7 @@ function validateContextPath(path: string): void {
 function normalizeContextFileName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
-    throw new SalmonError("INVALID_CONTEXT_FILE", 400, "File name is required.");
+    throw new PragmaError("INVALID_CONTEXT_FILE", 400, "File name is required.");
   }
   if (
     trimmed.includes("/") ||
@@ -3642,10 +3642,10 @@ function normalizeContextFileName(name: string): string {
     trimmed.includes("..") ||
     trimmed.includes("\0")
   ) {
-    throw new SalmonError("INVALID_CONTEXT_FILE", 400, "Invalid file name.");
+    throw new PragmaError("INVALID_CONTEXT_FILE", 400, "Invalid file name.");
   }
   if (!trimmed.toLowerCase().endsWith(".md")) {
-    throw new SalmonError("INVALID_CONTEXT_FILE", 400, "File name must end with .md.");
+    throw new PragmaError("INVALID_CONTEXT_FILE", 400, "File name must end with .md.");
   }
   return trimmed;
 }
@@ -3653,7 +3653,7 @@ function normalizeContextFileName(name: string): string {
 function normalizeContextFolderName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
-    throw new SalmonError("INVALID_CONTEXT_FOLDER", 400, "Folder name is required.");
+    throw new PragmaError("INVALID_CONTEXT_FOLDER", 400, "Folder name is required.");
   }
   if (
     trimmed.includes("/") ||
@@ -3661,7 +3661,7 @@ function normalizeContextFolderName(name: string): string {
     trimmed.includes("..") ||
     trimmed.includes("\0")
   ) {
-    throw new SalmonError("INVALID_CONTEXT_FOLDER", 400, "Invalid folder name.");
+    throw new PragmaError("INVALID_CONTEXT_FOLDER", 400, "Invalid folder name.");
   }
   return trimmed;
 }
@@ -3785,21 +3785,21 @@ function normalizeTaskTestCommandCwd(value: string): string {
 async function resolveTaskCommandCwd(baseDir: string, requestedCwd: string): Promise<string> {
   const normalized = normalizeTaskTestCommandCwd(requestedCwd);
   if (!normalized) {
-    throw new SalmonError("INVALID_TEST_COMMAND_CWD", 400, "Test command cwd is invalid.");
+    throw new PragmaError("INVALID_TEST_COMMAND_CWD", 400, "Test command cwd is invalid.");
   }
 
   const candidate = resolve(
     normalized.startsWith("/") ? normalized : join(baseDir, normalized),
   );
   if (!isWithinRoot(baseDir, candidate)) {
-    throw new SalmonError(
+    throw new PragmaError(
       "INVALID_TEST_COMMAND_CWD",
       400,
       "Test command cwd must stay within the task workspace.",
     );
   }
   if (!(await isDirectory(candidate))) {
-    throw new SalmonError(
+    throw new PragmaError(
       "INVALID_TEST_COMMAND_CWD",
       400,
       `Test command cwd does not exist: ${requestedCwd}`,
@@ -3946,7 +3946,7 @@ function normalizeCodeFolderName(name: string): string {
     .replace(/^[-._]+|[-._]+$/g, "");
 
   if (!normalized || normalized === "." || normalized === "..") {
-    throw new SalmonError("INVALID_CODE_FOLDER", 400, "Code folder name is invalid.");
+    throw new PragmaError("INVALID_CODE_FOLDER", 400, "Code folder name is invalid.");
   }
 
   return normalized;
@@ -3971,15 +3971,15 @@ function normalizeImportedPath(path: string): string {
     .trim();
 
   if (!normalized) {
-    throw new SalmonError("INVALID_CODE_IMPORT", 400, "Import path is invalid.");
+    throw new PragmaError("INVALID_CODE_IMPORT", 400, "Import path is invalid.");
   }
   if (normalized.includes("\0")) {
-    throw new SalmonError("INVALID_CODE_IMPORT", 400, "Import path is invalid.");
+    throw new PragmaError("INVALID_CODE_IMPORT", 400, "Import path is invalid.");
   }
 
   const segments = normalized.split("/").filter(Boolean);
   if (segments.length === 0 || segments.some((segment) => segment === "." || segment === "..")) {
-    throw new SalmonError("INVALID_CODE_IMPORT", 400, "Import path is invalid.");
+    throw new PragmaError("INVALID_CODE_IMPORT", 400, "Import path is invalid.");
   }
 
   return segments.join("/");

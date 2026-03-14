@@ -46,7 +46,7 @@ import { SettingsView } from './components/SettingsView'
 import { Sidebar } from './components/Sidebar'
 import { iconForAgent } from './lib/agentIcon'
 
-const ORCHESTRATOR_AGENT_ID = 'salmon-orchestrator'
+const ORCHESTRATOR_AGENT_ID = 'pragma-orchestrator'
 
 function getPendingCount(tasks) {
   return tasks.filter((task) => {
@@ -456,7 +456,7 @@ function toTimestamp(value) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-const HIDDEN_CHATS_STORAGE_KEY = 'salmon.hidden_sidebar_chats.v1'
+const HIDDEN_CHATS_STORAGE_KEY = 'pragma.hidden_sidebar_chats.v1'
 
 function loadHiddenChatsByWorkspace() {
   if (typeof window === 'undefined') {

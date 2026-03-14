@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-export function resolveSalmonCliCommand(runtimeDir: string): string {
-  const fromEnv = normalizeCliCommand(process.env.SALMON_CLI_COMMAND);
+export function resolvePragmaCliCommand(runtimeDir: string): string {
+  const fromEnv = normalizeCliCommand(process.env.PRAGMA_CLI_COMMAND);
   if (fromEnv) {
     return fromEnv;
   }
@@ -18,7 +18,7 @@ export function resolveSalmonCliCommand(runtimeDir: string): string {
     return `node ${quoteShellArg(existing)}`;
   }
 
-  return "salmon";
+  return "pragma";
 }
 
 function normalizeCliCommand(value: string | undefined): string | null {
@@ -32,4 +32,3 @@ function normalizeCliCommand(value: string | undefined): string | null {
 function quoteShellArg(value: string): string {
   return `"${value.replace(/["\\$`]/g, "\\$&")}"`;
 }
-

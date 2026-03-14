@@ -1,10 +1,10 @@
 {
-  "name": "salmon",
+  "name": "pragma",
   "version": "0.1.0",
-  "description": "Very minimal salmon CLI",
+  "description": "Very minimal pragma CLI",
   "main": "dist/cli/index.js",
   "bin": {
-    "salmon": "dist/cli/index.js"
+    "pragma": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc && npm run ui:build",
