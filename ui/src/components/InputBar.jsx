@@ -127,6 +127,26 @@ export function InputBar({
     }
   }
 
+  function handlePaste(e) {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const imageFiles = []
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length === 0) return
+    e.preventDefault()
+    for (const file of imageFiles) {
+      const name = file.name && file.name !== 'image.png'
+        ? file.name
+        : `pasted-image-${Date.now()}.${file.type.split('/')[1] || 'png'}`
+      setAttachments((prev) => [...prev, { file, name }])
+    }
+  }
+
   function removeAttachment(index) {
     setAttachments((prev) => prev.filter((_, i) => i !== index))
   }
@@ -176,6 +196,7 @@ export function InputBar({
             e.target.style.height = 'auto'
             e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
           }}
+          onPaste={handlePaste}
           onKeyDown={(e) => {
             if (e.key === 'Tab' && e.shiftKey && !isModeLocked) {
               e.preventDefault()
