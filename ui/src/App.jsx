@@ -610,6 +610,7 @@ export default function App() {
     threadId: '',
     jobId: '',
     jobStatus: '',
+    jobTitle: '',
     harness: '',
     modelLabel: '',
     reasoningEffort: 'medium',
@@ -1460,6 +1461,7 @@ export default function App() {
       threadId: '',
       jobId: '',
       jobStatus: '',
+      jobTitle: '',
       harness: '',
       modelLabel: '',
       reasoningEffort: 'medium',
@@ -1830,6 +1832,7 @@ export default function App() {
         threadId: '',
         jobId,
         jobStatus: status,
+        jobTitle: title,
         harness: runtime.harness,
         modelLabel: runtime.model_label,
         reasoningEffort: 'medium',
@@ -1862,6 +1865,7 @@ export default function App() {
           threadId: '',
           jobId,
           jobStatus: status,
+          jobTitle: title,
           harness: runtime.harness,
           modelLabel: runtime.model_label,
           reasoningEffort: 'medium',
@@ -1889,6 +1893,7 @@ export default function App() {
         threadId: thread.id,
         jobId,
         jobStatus: status,
+        jobTitle: title,
         harness: thread.harness,
         modelLabel: thread.model_label,
         reasoningEffort: 'medium',
@@ -2063,6 +2068,7 @@ export default function App() {
               error={conversation.error}
               jobId={conversation.jobId}
               jobStatus={conversation.jobStatus}
+              jobTitle={conversation.jobTitle}
               headerAgentName={conversationHeaderAgent.name}
               headerAgentEmoji={conversationHeaderAgent.emoji}
               onReviewAction={(jobId, action) => handleReviewJob(jobId, action)}

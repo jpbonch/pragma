@@ -54,6 +54,7 @@ export function ConversationDrawer({
   onPromptSubmit,
   jobId,
   jobStatus,
+  jobTitle = '',
   headerAgentName = '',
   headerAgentEmoji = '',
   onReviewAction,
@@ -318,7 +319,7 @@ export function ConversationDrawer({
         <div className="conv-header">
           <div className="conv-header-left">
             <div className={`conv-mode-indicator ${mode}`} />
-            <span className="conv-header-title">{headerStatusLabel}</span>
+            <span className="conv-header-title">{jobTitle || headerStatusLabel}</span>
             {loading && <span className="conv-streaming-dot" />}
           </div>
           <div className="conv-header-right">

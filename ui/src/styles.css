@@ -959,6 +959,8 @@ select { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .conv-header-right {
@@ -981,6 +983,10 @@ select { cursor: pointer; }
   font-size: 13px;
   font-weight: 700;
   color: #37352f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .conv-header-agent {
