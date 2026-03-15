@@ -238,6 +238,41 @@ function DoneTaskRow({ task, onClick }) {
   )
 }
 
+function NeedsYouPlanCard({ plan, onClick }) {
+  const color = '#9B6DD7'
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <div
+      className="needs-you-card"
+      style={{ '--accent': color }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => onClick?.(plan.id)}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="needs-you-title">{plan.plan_title || 'New plan'}</div>
+        <div className="needs-you-subtitle">Plan ready for review</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        {plan.created_at && (
+          <span style={{ fontSize: 11, color: '#C4C3BF' }}>{getTimeAgo(plan.created_at)}</span>
+        )}
+        <button
+          className="needs-you-action"
+          style={{ background: color, opacity: hovered ? 1 : 0.88 }}
+          onClick={(e) => {
+            e.stopPropagation()
+            onClick?.(plan.id)
+          }}
+        >
+          Execute
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PlanRow({ plan, isActive, onClick }) {
   const isPlanning = plan.latest_turn_status === 'running'
   return (
@@ -280,6 +315,19 @@ export function FeedView({
     return recipientAgents.filter((agent) => agent && typeof agent.id === 'string')
   }, [recipientAgents])
 
+  const { readyPlans, remainingPlans } = useMemo(() => {
+    const readyPlans = []
+    const remainingPlans = []
+    for (const plan of plans) {
+      if (plan.has_completed_plan_turn && plan.latest_turn_status !== 'running') {
+        readyPlans.push(plan)
+      } else {
+        remainingPlans.push(plan)
+      }
+    }
+    return { readyPlans, remainingPlans }
+  }, [plans])
+
   const { needsYou, active, done } = useMemo(() => {
     const needsYou = []
     const active = []
@@ -310,11 +358,11 @@ export function FeedView({
       {loading && <div className="muted">Loading tasks...</div>}
       {error && <div className="error">Error: {error}</div>}
 
-      {!plansLoading && plans.length > 0 && (
+      {!plansLoading && remainingPlans.length > 0 && (
         <>
-          <SectionLabel count={plans.length}>Plans</SectionLabel>
+          <SectionLabel count={remainingPlans.length}>Plans</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {plans.map((plan) => (
+            {remainingPlans.map((plan) => (
               <PlanRow
                 key={plan.id}
                 plan={plan}
@@ -332,10 +380,17 @@ export function FeedView({
 
       {!loading && !error && tasks.length > 0 && (
         <>
-          {needsYou.length > 0 && (
+          {(needsYou.length > 0 || readyPlans.length > 0) && (
             <>
-              <SectionLabel count={needsYou.length} badge>Needs you</SectionLabel>
+              <SectionLabel count={needsYou.length + readyPlans.length} badge>Needs you</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {readyPlans.map((plan) => (
+                  <NeedsYouPlanCard
+                    key={plan.id}
+                    plan={plan}
+                    onClick={onOpenPlan}
+                  />
+                ))}
                 {needsYou.map((task) => (
                   <NeedsYouCard
                     key={task.id}
