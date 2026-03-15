@@ -48,6 +48,7 @@ export function ConversationDrawer({
   error,
   onClose,
   onExecute,
+  onDeletePlan,
   executeDisabled,
   recipientAgents = [],
   selectedRecipientAgentId = '',
@@ -543,9 +544,14 @@ export function ConversationDrawer({
                     ))}
                   </select>
                 </div>
-                <button className="conv-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
-                  Execute →
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="conv-delete-plan-btn" onClick={onDeletePlan} disabled={loading}>
+                    Delete Plan
+                  </button>
+                  <button className="conv-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
+                    Execute →
+                  </button>
+                </div>
               </div>
             )}
             <div className="conv-prompt-row">

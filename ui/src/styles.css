@@ -1534,6 +1534,27 @@ select { cursor: pointer; }
   cursor: default;
 }
 
+.conv-delete-plan-btn {
+  border: 1px solid #E03E3E;
+  background: transparent;
+  color: #E03E3E;
+  border-radius: 9px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+}
+.conv-delete-plan-btn:hover {
+  background: #E03E3E;
+  color: #fff;
+}
+.conv-delete-plan-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .conv-approve-btn {
   border: none;
   background: #2FA67E;

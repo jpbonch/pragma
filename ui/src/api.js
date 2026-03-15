@@ -474,6 +474,12 @@ export async function executeFromPlanThread(threadId, { recipient_agent_id, reas
   })
 }
 
+export async function deletePlanThread(threadId) {
+  return fetchJson(`/conversations/${encodeURIComponent(threadId)}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function setTaskRecipient(taskId, recipient_agent_id) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/recipient`, {
     method: 'POST',

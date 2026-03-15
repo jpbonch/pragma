@@ -9,6 +9,7 @@ import {
   createExecuteTask,
   createWorkspace,
   deleteWorkspace,
+  deletePlanThread,
   executeFromPlanThread,
   fetchAgents,
   fetchChats,
@@ -1795,6 +1796,25 @@ export default function App() {
     }
   }
 
+  async function handleDeletePlan() {
+    if (!conversation.threadId || conversation.mode !== 'plan') {
+      return
+    }
+
+    try {
+      const planThreadId = conversation.threadId
+      await deletePlanThread(planThreadId)
+      setSidebarPlans((prev) => prev.filter((plan) => plan.id !== planThreadId))
+      closeConversationDrawer()
+      await loadPlans()
+    } catch (error) {
+      setConversation((prev) => ({
+        ...prev,
+        error: errorText(error),
+      }))
+    }
+  }
+
   async function handleOpenChat(threadId) {
     if (!threadId) {
       return
@@ -2192,6 +2212,9 @@ export default function App() {
               onPromptSubmit={handleDrawerPromptSubmit}
               onExecute={() => {
                 void handleExecuteFromPlan()
+              }}
+              onDeletePlan={() => {
+                void handleDeletePlan()
               }}
               executeDisabled={!conversation.threadId || !conversation.planReady}
               onStop={handleStopStream}

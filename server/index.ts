@@ -2544,6 +2544,27 @@ WHERE id = $1
     }
   });
 
+  app.delete("/conversations/:threadId", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const threadId = c.req.param("threadId");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      await ensureConversationSchema(db);
+      const thread = await getThreadById(db, threadId);
+      if (!thread) {
+        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+      }
+      if (thread.mode !== "plan") {
+        throw new PragmaError("INVALID_OPERATION", 400, "Only plan threads can be deleted.");
+      }
+      await closeThread(db, threadId);
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
   app.post("/conversations/turns/stream", validateJson(conversationTurnSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const body = c.req.valid("json");
