@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import data from '@emoji-mart/data'
 import Picker from '@emoji-mart/react'
 import { iconForAgent } from '../lib/agentIcon'
+import { fetchAgentTemplates } from '../api'
 
 const AGENT_COLORS = ['#4B83D6', '#2383e2', '#E09B3D', '#7C6DD7', '#E06B5E', '#9B6DD7']
 const AGENT_AVATAR_BG = '#E09B3D12'
@@ -357,6 +358,118 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
   )
 }
 
+function AgentTemplatePicker({ open, onClose, onSelectTemplate }) {
+  const [templates, setTemplates] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    setLoading(true)
+    setError('')
+    setSearch('')
+    fetchAgentTemplates()
+      .then((t) => setTemplates(t))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false))
+  }, [open])
+
+  if (!open) return null
+
+  const query = search.toLowerCase()
+  const filtered = query
+    ? templates.filter(
+        (t) =>
+          t.name.toLowerCase().includes(query) ||
+          t.description.toLowerCase().includes(query) ||
+          t.category.toLowerCase().includes(query),
+      )
+    : templates
+
+  const grouped = {}
+  for (const t of filtered) {
+    if (!grouped[t.category]) grouped[t.category] = []
+    grouped[t.category].push(t)
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="template-picker-card" onClick={(e) => e.stopPropagation()}>
+        <button className="agent-profile-close" onClick={onClose}>×</button>
+        <div className="template-picker-header">
+          <h3 className="template-picker-title">Browse agent templates</h3>
+          <div className="template-picker-search-wrap">
+            <Search size={14} className="template-picker-search-icon" />
+            <input
+              className="template-picker-search"
+              type="text"
+              placeholder="Search templates..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="template-picker-body">
+          {loading && <div className="muted" style={{ padding: 20, textAlign: 'center' }}>Loading templates...</div>}
+          {error && <div className="error" style={{ padding: 20 }}>Error: {error}</div>}
+          {!loading && !error && filtered.length === 0 && (
+            <div className="muted" style={{ padding: 20, textAlign: 'center' }}>No templates found.</div>
+          )}
+          {!loading &&
+            !error &&
+            Object.entries(grouped).map(([category, items]) => (
+              <div key={category} className="template-picker-group">
+                <div className="template-picker-category">{category}</div>
+                {items.map((t, i) => (
+                  <div
+                    key={`${category}-${i}`}
+                    className="template-picker-item"
+                    onClick={() => onSelectTemplate(t)}
+                  >
+                    <span className="template-picker-emoji">{t.emoji}</span>
+                    <div className="template-picker-info">
+                      <div className="template-picker-name">{t.name}</div>
+                      <div className="template-picker-desc">{t.description}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AddAgentChooser({ open, onClose, onCreateFromScratch, onBrowseTemplates }) {
+  if (!open) return null
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="agent-chooser-card" onClick={(e) => e.stopPropagation()}>
+        <button className="agent-profile-close" onClick={onClose}>×</button>
+        <h3 className="agent-chooser-title">Add an agent</h3>
+        <div className="agent-chooser-options">
+          <button className="agent-chooser-option" onClick={onCreateFromScratch}>
+            <span className="agent-chooser-option-icon">✏️</span>
+            <div>
+              <div className="agent-chooser-option-label">Create from scratch</div>
+              <div className="agent-chooser-option-desc">Start with a blank agent configuration</div>
+            </div>
+          </button>
+          <button className="agent-chooser-option" onClick={onBrowseTemplates}>
+            <span className="agent-chooser-option-icon">📚</span>
+            <div>
+              <div className="agent-chooser-option-label">Browse templates</div>
+              <div className="agent-chooser-option-desc">Choose from pre-built agent definitions</div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function RightPanel({
   agents,
   loading,
@@ -367,7 +480,10 @@ export function RightPanel({
   onUpdateHumanEmoji,
   openOrchestratorConfigRequest = 0,
 }) {
+  const [isChooserOpen, setIsChooserOpen] = useState(false)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [isTemplatePickerOpen, setIsTemplatePickerOpen] = useState(false)
+  const [templatePrefill, setTemplatePrefill] = useState(null)
   const [createError, setCreateError] = useState('')
   const [createLoading, setCreateLoading] = useState(false)
 
@@ -565,12 +681,43 @@ export function RightPanel({
         className="add-agent-ghost"
         onClick={() => {
           setCreateError('')
-          setIsAddOpen(true)
+          setIsChooserOpen(true)
         }}
       >
         <Plus size={13} strokeWidth={2} />
         <span>Add agent</span>
       </button>
+
+      <AddAgentChooser
+        open={isChooserOpen}
+        onClose={() => setIsChooserOpen(false)}
+        onCreateFromScratch={() => {
+          setIsChooserOpen(false)
+          setTemplatePrefill(null)
+          setIsAddOpen(true)
+        }}
+        onBrowseTemplates={() => {
+          setIsChooserOpen(false)
+          setIsTemplatePickerOpen(true)
+        }}
+      />
+
+      <AgentTemplatePicker
+        open={isTemplatePickerOpen}
+        onClose={() => setIsTemplatePickerOpen(false)}
+        onSelectTemplate={(t) => {
+          setIsTemplatePickerOpen(false)
+          setTemplatePrefill({
+            name: t.name,
+            description: t.description,
+            emoji: t.emoji,
+            agent_file: t.content,
+            harness: 'claude_code',
+            model_label: 'Opus 4.6',
+          })
+          setIsAddOpen(true)
+        }}
+      />
 
       <AgentProfileModal
         open={isAddOpen}
@@ -578,8 +725,11 @@ export function RightPanel({
         error={createError}
         title="Add agent"
         subtitle="New agent"
-        agent={null}
-        onClose={() => setIsAddOpen(false)}
+        agent={templatePrefill}
+        onClose={() => {
+          setIsAddOpen(false)
+          setTemplatePrefill(null)
+        }}
         onSubmit={(agent) => {
           void handleSubmitCreate(agent)
         }}

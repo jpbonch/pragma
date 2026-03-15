@@ -2875,6 +2875,163 @@ select { cursor: pointer; }
   cursor: default;
 }
 
+/* ─── Add Agent Chooser ────────────────────────────── */
+.agent-chooser-card {
+  width: 100%;
+  max-width: 380px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px 24px 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.16);
+  position: relative;
+  animation: fadeIn 0.15s ease;
+}
+.agent-chooser-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #37352F;
+  margin: 0 0 16px;
+  text-align: center;
+}
+.agent-chooser-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-chooser-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid #ECEBE8;
+  background: #FAFAF8;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s;
+}
+.agent-chooser-option:hover {
+  border-color: #B0AFA8;
+  background: #F7F7F5;
+}
+.agent-chooser-option-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.agent-chooser-option-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #37352F;
+}
+.agent-chooser-option-desc {
+  font-size: 11px;
+  color: #91918E;
+  margin-top: 2px;
+}
+
+/* ─── Template Picker ──────────────────────────────── */
+.template-picker-card {
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.16);
+  position: relative;
+  animation: fadeIn 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.template-picker-header {
+  padding: 24px 24px 16px;
+  flex-shrink: 0;
+}
+.template-picker-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #37352F;
+  margin: 0 0 14px;
+  text-align: center;
+}
+.template-picker-search-wrap {
+  position: relative;
+}
+.template-picker-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #B0AFA8;
+  pointer-events: none;
+}
+.template-picker-search {
+  width: 100%;
+  padding: 8px 10px 8px 30px;
+  border-radius: 8px;
+  border: 1.5px solid #ECEBE8;
+  background: #FAFAF8;
+  font-size: 13px;
+  color: #37352F;
+  outline: none;
+  transition: border-color 0.12s;
+  box-sizing: border-box;
+}
+.template-picker-search:focus {
+  border-color: #B0AFA8;
+}
+.template-picker-body {
+  overflow-y: auto;
+  padding: 0 24px 20px;
+  flex: 1;
+}
+.template-picker-group {
+  margin-bottom: 12px;
+}
+.template-picker-category {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #C4C3BF;
+  padding: 8px 0 6px;
+}
+.template-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.template-picker-item:hover {
+  background: rgba(0,0,0,0.03);
+}
+.template-picker-emoji {
+  font-size: 22px;
+  flex-shrink: 0;
+  width: 32px;
+  text-align: center;
+}
+.template-picker-info {
+  flex: 1;
+  min-width: 0;
+}
+.template-picker-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #37352F;
+}
+.template-picker-desc {
+  font-size: 11px;
+  color: #91918E;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ─── Context View ──────────────────────────────────── */
 .context-view {
   flex: 1;

@@ -666,6 +666,100 @@ WHERE id = $1
     }
   });
 
+  // ── Agent Templates (GitHub catalog) ────────────────────────────────
+
+  let agentTemplatesCache: { data: unknown[]; expiry: number } | null = null;
+  const TEMPLATES_CACHE_TTL_MS = 10 * 60 * 1000;
+
+  app.get("/agents/templates", async (c) => {
+    const now = Date.now();
+    if (agentTemplatesCache && agentTemplatesCache.expiry > now) {
+      return c.json({ templates: agentTemplatesCache.data });
+    }
+
+    const EXCLUDED_PATHS = new Set(["README.md", "CONTRIBUTING.md", "LICENSE", "LICENSE.md"]);
+    const EXCLUDED_DIRS = new Set(["examples", "strategy", "scripts", "integrations", ".github"]);
+
+    try {
+      const treeRes = await fetch(
+        "https://api.github.com/repos/msitarzewski/agency-agents/git/trees/main?recursive=1",
+        { headers: { Accept: "application/vnd.github.v3+json", "User-Agent": "pragma-server" } },
+      );
+      if (!treeRes.ok) {
+        throw new PragmaError("GITHUB_API_ERROR", 502, `GitHub API returned ${treeRes.status}`);
+      }
+
+      const tree = (await treeRes.json()) as { tree: Array<{ path: string; type: string }> };
+      const mdFiles = tree.tree.filter((entry) => {
+        if (entry.type !== "blob" || !entry.path.endsWith(".md")) return false;
+        // Exclude root-level files
+        if (!entry.path.includes("/")) return false;
+        // Exclude files in excluded directories
+        const topDir = entry.path.split("/")[0];
+        if (EXCLUDED_DIRS.has(topDir)) return false;
+        // Exclude specific files at any level
+        const fileName = entry.path.split("/").pop() ?? "";
+        if (EXCLUDED_PATHS.has(fileName)) return false;
+        return true;
+      });
+
+      const templates: Array<{
+        name: string;
+        description: string;
+        emoji: string;
+        category: string;
+        content: string;
+      }> = [];
+
+      await Promise.all(
+        mdFiles.map(async (file) => {
+          try {
+            const rawRes = await fetch(
+              `https://raw.githubusercontent.com/msitarzewski/agency-agents/main/${file.path}`,
+              { headers: { "User-Agent": "pragma-server" } },
+            );
+            if (!rawRes.ok) return;
+            const text = await rawRes.text();
+
+            // Parse YAML frontmatter between --- markers
+            const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+            if (!fmMatch) return;
+
+            const frontmatter = fmMatch[1];
+            const body = text.slice(fmMatch[0].length).trim();
+
+            // Simple YAML field extraction
+            const getField = (key: string): string | undefined => {
+              const m = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+              return m ? m[1].trim().replace(/^["']|["']$/g, "") : undefined;
+            };
+
+            const name = getField("name");
+            const description = getField("description");
+            const emoji = getField("emoji");
+
+            if (!name || !description || !emoji) return;
+
+            const category = file.path.split("/")[0];
+            templates.push({ name, description, emoji, category, content: body });
+          } catch {
+            // Skip files that fail to fetch/parse
+          }
+        }),
+      );
+
+      // Sort by category then name
+      templates.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+
+      agentTemplatesCache = { data: templates, expiry: now + TEMPLATES_CACHE_TTL_MS };
+      return c.json({ templates });
+    } catch (error) {
+      if (error instanceof PragmaError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new PragmaError("TEMPLATES_FETCH_FAILED", 502, message);
+    }
+  });
+
   // ── Humans ──────────────────────────────────────────────────────────
 
   app.get("/humans", async (c) => {

@@ -364,6 +364,14 @@ export async function createAgent(agent) {
   })
 }
 
+export async function fetchAgentTemplates() {
+  const data = asObject(await fetchJson('/agents/templates'), 'Invalid templates response.')
+  if (!Array.isArray(data.templates)) {
+    throw invalidResponse('`templates` must be an array.')
+  }
+  return data.templates
+}
+
 export async function updateAgent(id, updates) {
   return fetchJson(`/agents/${encodeURIComponent(id)}`, {
     method: 'PUT',
