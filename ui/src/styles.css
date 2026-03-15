@@ -2583,6 +2583,54 @@ select { cursor: pointer; }
   background: rgba(0,0,0,0.03);
 }
 
+/* ─── Waitlist Modal ───────────────────────────────── */
+.waitlist-modal-card {
+  width: 100%;
+  max-width: 400px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.16);
+  position: relative;
+}
+.waitlist-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+.waitlist-modal-icon {
+  font-size: 36px;
+  margin-bottom: 4px;
+}
+.waitlist-modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #37352f;
+  margin: 0;
+}
+.waitlist-modal-text {
+  font-size: 13.5px;
+  color: #787774;
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+.waitlist-modal-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #e3e2de;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #37352f;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.waitlist-modal-input:focus {
+  border-color: #2383e2;
+}
+
 /* ─── Agent Profile Modal ──────────────────────────── */
 .agent-profile-card {
   width: 100%;

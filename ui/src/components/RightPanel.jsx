@@ -68,6 +68,99 @@ function EmojiPickerPopover({ open, onClose, onSelect }) {
   )
 }
 
+function WaitlistModal({ open, onClose }) {
+  const [email, setEmail] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    setEmail('')
+    setSubmitting(false)
+    setSubmitted(false)
+    setError('')
+  }, [open])
+
+  if (!open) return null
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!email.trim()) {
+      setError('Please enter your email.')
+      return
+    }
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch('https://api.web3forms.com/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access_key: '1d5191e9-598a-4499-8e92-8d29f9ab5041',
+          email,
+          subject: 'Pragma Multiplayer Waitlist',
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setSubmitted(true)
+      } else {
+        setError('Something went wrong. Please try again.')
+      }
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="waitlist-modal-card" onClick={(e) => e.stopPropagation()}>
+        <button className="agent-profile-close" onClick={onClose}>×</button>
+        {submitted ? (
+          <div className="waitlist-modal-body">
+            <div className="waitlist-modal-icon">🎉</div>
+            <h3 className="waitlist-modal-title">You're on the list!</h3>
+            <p className="waitlist-modal-text">
+              We'll notify you when multiplayer is ready.
+            </p>
+            <div className="agent-profile-actions">
+              <button className="agent-profile-save" onClick={onClose}>Done</button>
+            </div>
+          </div>
+        ) : (
+          <form className="waitlist-modal-body" onSubmit={handleSubmit}>
+            <div className="waitlist-modal-icon">👥</div>
+            <h3 className="waitlist-modal-title">Multiplayer is coming soon</h3>
+            <p className="waitlist-modal-text">
+              The multiplayer version of Pragma is coming soon. Register for the waitlist to get early access.
+            </p>
+            <input
+              className="waitlist-modal-input"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoFocus
+            />
+            {error && <div className="error" style={{ padding: 0, fontSize: 13 }}>{error}</div>}
+            <div className="agent-profile-actions">
+              <button type="button" className="agent-profile-cancel" onClick={onClose} disabled={submitting}>
+                Cancel
+              </button>
+              <button type="submit" className="agent-profile-save" disabled={submitting}>
+                {submitting ? 'Joining...' : 'Join waitlist'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function HumanProfileModal({ open, human, onClose, onSave }) {
   const [emoji, setEmoji] = useState('🌿')
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -284,6 +377,7 @@ export function RightPanel({
   const lastOpenOrchestratorRequestRef = useRef(0)
 
   const [editingHuman, setEditingHuman] = useState(null)
+  const [waitlistOpen, setWaitlistOpen] = useState(false)
 
   const sortedAgents = useMemo(() => {
     return [...agents].sort((a, b) => {
@@ -424,6 +518,14 @@ export function RightPanel({
         </div>
       ))}
 
+      <button
+        className="add-agent-ghost"
+        onClick={() => setWaitlistOpen(true)}
+      >
+        <Plus size={13} strokeWidth={2} />
+        <span>Add teammate</span>
+      </button>
+
       <div className="right-section-title" style={{ paddingTop: 20 }}>Agents</div>
 
       {loading && <div className="muted">Loading agents...</div>}
@@ -503,6 +605,11 @@ export function RightPanel({
         onSave={async (id, emoji) => {
           await onUpdateHumanEmoji?.(id, emoji)
         }}
+      />
+
+      <WaitlistModal
+        open={waitlistOpen}
+        onClose={() => setWaitlistOpen(false)}
       />
     </aside>
   )
