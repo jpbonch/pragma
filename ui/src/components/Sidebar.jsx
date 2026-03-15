@@ -76,7 +76,7 @@ export function Sidebar({
     <aside className="sidebar">
       <div style={{ position: 'relative' }} ref={workspaceMenuRef}>
         <button className="workspace-btn" onClick={() => setWsOpen(!wsOpen)}>
-          <span className="workspace-logo">S</span>
+          <span className="workspace-logo">{workspaceLabel.charAt(0).toUpperCase()}</span>
           <span className="workspace-name">{workspaceLabel}</span>
           <ChevronDown size={12} className={`workspace-chevron-icon ${wsOpen ? 'open' : ''}`} />
         </button>
