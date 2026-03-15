@@ -533,6 +533,15 @@ select { cursor: pointer; }
   background: #EB5757;
   color: #fff;
 }
+.section-label-action {
+  margin-left: auto;
+  font-size: 12px;
+  color: #9B9A97;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
 
 /* Needs-you cards */
 .needs-you-card {

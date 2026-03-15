@@ -90,12 +90,15 @@ function isDone(status) {
   return status === 'completed' || status === 'failed' || status === 'cancelled'
 }
 
-function SectionLabel({ children, count, badge }) {
+function SectionLabel({ children, count, badge, actionLabel, onAction }) {
   return (
     <div className="section-label">
       <span className="section-label-text">{children}</span>
       {count > 0 && (
         <span className={`section-count${badge ? ' badge' : ''}`}>{count}</span>
+      )}
+      {actionLabel && (
+        <button className="section-label-action" onClick={onAction}>{actionLabel}</button>
       )}
     </div>
   )
@@ -306,7 +309,9 @@ export function FeedView({
   onPickTaskRecipient,
   onCancelTask,
 }) {
+  const DONE_DISPLAY_LIMIT = 5
   const [pickerTaskId, setPickerTaskId] = useState('')
+  const [showAllDone, setShowAllDone] = useState(false)
 
   const recipients = useMemo(() => {
     if (!Array.isArray(recipientAgents)) {
@@ -424,9 +429,13 @@ export function FeedView({
 
           {done.length > 0 && (
             <>
-              <SectionLabel count={done.length}>Done</SectionLabel>
+              <SectionLabel
+                count={done.length}
+                actionLabel={done.length > DONE_DISPLAY_LIMIT ? (showAllDone ? 'Show less' : 'View all') : undefined}
+                onAction={() => setShowAllDone((v) => !v)}
+              >Done</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                {done.map((task) => (
+                {(showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
                   <DoneTaskRow
                     key={task.id}
                     task={task}
