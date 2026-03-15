@@ -2869,15 +2869,16 @@ WHERE id = $1
         );
       }
 
-      executePrompt = [
-        `Implement this plan: ${planTitle}`,
-        planSummaryText,
-        planSteps.length > 0
-          ? `Steps:\\n${planSteps.map((step, index) => `${index + 1}. ${step}`).join("\\n")}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\\n\\n");
+      executePrompt = latestPlanTurn.assistant_message?.trim() ||
+        [
+          `Implement this plan: ${planTitle}`,
+          planSummaryText,
+          planSteps.length > 0
+            ? `Steps:\\n${planSteps.map((step, index) => `${index + 1}. ${step}`).join("\\n")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\\n\\n");
 
       await db.query(
         `
