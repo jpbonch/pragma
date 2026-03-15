@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, X, Sparkles, User, Wrench, Info, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { OutputPanel } from './OutputPanel'
-import { fetchTaskTestCommands, runTaskTestCommand, updateTaskTestCommands } from '../api'
+import { fetchTaskPlan, fetchTaskTestCommands, runTaskTestCommand, updateTaskTestCommands } from '../api'
 
 const HEADER_STATUS_LABELS = {
   pending_review: 'Review',
@@ -75,6 +75,9 @@ export function ConversationDrawer({
   const [testCommandsLoading, setTestCommandsLoading] = useState(false)
   const [testCommandsError, setTestCommandsError] = useState('')
   const [runningTestCommand, setRunningTestCommand] = useState('')
+  const [planData, setPlanData] = useState(null)
+  const [planLoading, setPlanLoading] = useState(false)
+  const [planError, setPlanError] = useState('')
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const showOutputPanel = Boolean(taskId) && mode === 'chat'
@@ -108,6 +111,9 @@ export function ConversationDrawer({
       setTestCommandsLoading(false)
       setTestCommandsError('')
       setRunningTestCommand('')
+      setPlanData(null)
+      setPlanLoading(false)
+      setPlanError('')
       setDeleteConfirming(false)
       setDeleteLoading(false)
     }
@@ -146,6 +152,39 @@ export function ConversationDrawer({
       cancelled = true
     }
   }, [open, taskId, showOutputPanel, entries.length, taskStatus])
+
+  useEffect(() => {
+    if (!open || !taskId || !showOutputPanel) {
+      return
+    }
+
+    let cancelled = false
+    setPlanLoading(true)
+    setPlanError('')
+    void fetchTaskPlan(taskId)
+      .then((data) => {
+        if (cancelled) {
+          return
+        }
+        setPlanData(data?.plan ?? null)
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return
+        }
+        setPlanData(null)
+        setPlanError(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPlanLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, taskId, showOutputPanel])
 
   function submitPrompt() {
     if (loading) {
@@ -398,6 +437,9 @@ export function ConversationDrawer({
                   runningTestCommand={runningTestCommand}
                   onRunTestCommand={handleRunTestCommand}
                   onUpdateTestCommand={handleUpdateTestCommand}
+                  planData={planData}
+                  planLoading={planLoading}
+                  planError={planError}
                   runtimeService={runtimeService}
                   runtimeServiceLogs={runtimeServiceLogs}
                   runtimeServiceError={runtimeServiceError}

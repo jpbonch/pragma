@@ -1259,6 +1259,38 @@ LIMIT 1
     }
   });
 
+  app.get("/tasks/:taskId/plan", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const taskId = c.req.param("taskId");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const thread = await getThreadByTaskId(db, taskId);
+      if (!thread) {
+        return c.json({ plan: null });
+      }
+
+      const sourceThreadId = thread.source_thread_id;
+      if (!sourceThreadId) {
+        return c.json({ plan: null });
+      }
+
+      const planTurn = await getLatestCompletedPlanTurn(db, sourceThreadId);
+      if (!planTurn?.plan_summary) {
+        return c.json({ plan: null });
+      }
+
+      const parsed = safeParseJson(planTurn.plan_summary);
+      if (!isPlanSummaryRecord(parsed)) {
+        return c.json({ plan: null });
+      }
+
+      return c.json({ plan: normalizePlanSummary(parsed) });
+    } finally {
+      await db.close();
+    }
+  });
+
   app.get("/tasks/:taskId/test-commands", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const taskId =c.req.param("taskId");

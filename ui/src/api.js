@@ -274,6 +274,10 @@ export async function openTaskOutputFolder(taskId, path = '') {
   })
 }
 
+export async function fetchTaskPlan(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/plan`)
+}
+
 export async function fetchTaskTestCommands(taskId) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/test-commands`)
 }

@@ -185,6 +185,9 @@ export function OutputPanel({
   runningTestCommand = '',
   onRunTestCommand,
   onUpdateTestCommand,
+  planData = null,
+  planLoading = false,
+  planError = '',
   runtimeService = null,
   runtimeServiceLogs = [],
   runtimeServiceError = '',
@@ -380,6 +383,14 @@ export function OutputPanel({
         >
           Changes
         </button>
+        {planData && (
+          <button
+            className={`output-tab-btn ${tab === 'plan' ? 'active' : ''}`}
+            onClick={() => setTab('plan')}
+          >
+            Plan
+          </button>
+        )}
       </div>
 
       {tab === 'changes' && (
@@ -602,6 +613,26 @@ export function OutputPanel({
           {!testCommandsLoading && testCommands.length === 0 && !filesLoading && files.length === 0 &&
             !(runtimeService && runtimeService.task_id === taskId) && (
             <div className="muted">No outputs yet.</div>
+          )}
+        </div>
+      )}
+
+      {tab === 'plan' && (
+        <div className="output-tab-body">
+          {planLoading && <div className="muted">Loading plan...</div>}
+          {planError && <div className="error">Error: {planError}</div>}
+          {!planLoading && !planError && planData && (
+            <>
+              <h3 className="output-plan-title">{planData.title}</h3>
+              <p className="output-plan-summary">{planData.summary}</p>
+              {Array.isArray(planData.steps) && planData.steps.length > 0 && (
+                <ol className="output-plan-steps">
+                  {planData.steps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              )}
+            </>
           )}
         </div>
       )}
