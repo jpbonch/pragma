@@ -568,6 +568,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       const result = await db.query<{
         id: string;
         name: string;
+        description: string | null;
         status: string;
         agent_file: string | null;
         emoji: string | null;
@@ -575,7 +576,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         model_label: string;
         model_id: string;
       }>(`
-SELECT id, name, status, agent_file, emoji, harness, model_label, model_id
+SELECT id, name, description, status, agent_file, emoji, harness, model_label, model_id
 FROM agents
 ORDER BY name ASC
 `);
@@ -598,12 +599,13 @@ ORDER BY name ASC
       const agentId = await generateNextAgentId(db, body.name);
       await db.query(
         `
-INSERT INTO agents (id, name, status, agent_file, emoji, harness, model_label, model_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO agents (id, name, description, status, agent_file, emoji, harness, model_label, model_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `,
         [
           agentId,
           body.name,
+          body.description ?? null,
           "idle",
           body.agent_file,
           body.emoji,
@@ -634,16 +636,18 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `
 UPDATE agents
 SET name = $2,
-    agent_file = $3,
-    emoji = $4,
-    harness = $5,
-    model_label = $6,
-    model_id = $7
+    description = $3,
+    agent_file = $4,
+    emoji = $5,
+    harness = $6,
+    model_label = $7,
+    model_id = $8
 WHERE id = $1
 `,
         [
           id,
           body.name,
+          body.description ?? null,
           body.agent_file,
           body.emoji,
           body.harness,
@@ -2538,6 +2542,7 @@ WHERE id = $1
           planCandidates: planPromptCandidates.map((candidate) => ({
             id: candidate.id,
             name: candidate.name,
+            description: candidate.description,
             harness: candidate.harness,
             modelLabel: candidate.model_label,
           })),
@@ -3251,17 +3256,19 @@ async function listPlanWorkerCandidates(
 ): Promise<Array<{
   id: string;
   name: string;
+  description: string | null;
   harness: HarnessId;
   model_label: string;
 }>> {
   const result = await db.query<{
     id: string;
     name: string;
+    description: string | null;
     harness: HarnessId;
     model_label: string;
   }>(
     `
-SELECT id, name, harness, model_label
+SELECT id, name, description, harness, model_label
 FROM agents
 WHERE id <> $1
 ORDER BY name ASC

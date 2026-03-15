@@ -36,6 +36,7 @@ export const setActiveWorkspaceSchema = z
 export const createAgentSchema = z
   .object({
     name: nonEmptyString,
+    description: z.string().optional(),
     agent_file: z.string(),
     emoji: nonEmptyString,
     harness: harnessSchema,
@@ -46,6 +47,7 @@ export const createAgentSchema = z
 export const updateAgentSchema = z
   .object({
     name: nonEmptyString,
+    description: z.string().optional(),
     agent_file: z.string(),
     emoji: nonEmptyString,
     harness: harnessSchema,

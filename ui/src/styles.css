@@ -2699,6 +2699,21 @@ select { cursor: pointer; }
   color: #D3D1CC;
 }
 
+.agent-profile-description-input {
+  border: none;
+  background: transparent;
+  text-align: center;
+  font-size: 13px;
+  color: #787774;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  max-width: 320px;
+}
+.agent-profile-description-input::placeholder {
+  color: #D3D1CC;
+}
+
 .agent-profile-subtitle {
   font-size: 12px;
   color: #B0AFA8;

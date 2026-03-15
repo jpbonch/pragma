@@ -39,6 +39,7 @@ type EnqueueExecuteInput = {
 type AgentRow = {
   id: string;
   name: string;
+  description: string | null;
   agent_file: string | null;
   harness: HarnessId;
   model_label: string;
@@ -304,6 +305,7 @@ WHERE id = $1
         candidates: workers.map((worker) => ({
           id: worker.id,
           name: worker.name,
+          description: worker.description,
           harness: worker.harness,
           modelLabel: worker.model_label,
         })),
@@ -669,7 +671,7 @@ async function getAgentById(
 ): Promise<AgentRow | null> {
   const result = await db.query<AgentRow>(
     `
-SELECT id, name, agent_file, harness, model_label, model_id
+SELECT id, name, description, agent_file, harness, model_label, model_id
 FROM agents
 WHERE id = $1
 LIMIT 1
@@ -686,7 +688,7 @@ async function listWorkerAgents(
 ): Promise<AgentRow[]> {
   const result = await db.query<AgentRow>(
     `
-SELECT id, name, agent_file, harness, model_label, model_id
+SELECT id, name, description, agent_file, harness, model_label, model_id
 FROM agents
 WHERE id <> $1
 ORDER BY name ASC

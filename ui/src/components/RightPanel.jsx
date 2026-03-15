@@ -131,6 +131,7 @@ function HumanProfileModal({ open, human, onClose, onSave }) {
 
 function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClose, onSubmit }) {
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [emoji, setEmoji] = useState('🤖')
   const [agentFile, setAgentFile] = useState('')
   const [harness, setHarness] = useState('claude_code')
@@ -144,12 +145,14 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
         throw new Error('Agent payload is missing harness or model_label.')
       }
       setName(agent.name ?? '')
+      setDescription(agent.description ?? '')
       setEmoji(agent.emoji ?? '🤖')
       setAgentFile(agent.agent_file ?? '')
       setHarness(agent.harness)
       setModelLabel(agent.model_label)
     } else {
       setName('')
+      setDescription('')
       setEmoji('🤖')
       setAgentFile('')
       setHarness('claude_code')
@@ -188,6 +191,12 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Agent name"
+          />
+          <input
+            className="agent-profile-description-input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Short description of this agent"
           />
           {subtitle && <div className="agent-profile-subtitle">{subtitle}</div>}
         </div>
@@ -243,7 +252,7 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
           <button
             className="agent-profile-save"
             onClick={() =>
-              onSubmit({ name, emoji, agent_file: agentFile, harness, model_label: modelLabel })
+              onSubmit({ name, description, emoji, agent_file: agentFile, harness, model_label: modelLabel })
             }
             disabled={loading}
           >
@@ -322,6 +331,7 @@ export function RightPanel({
     try {
       await onCreateAgent({
         name: agent.name.trim(),
+        description: agent.description || undefined,
         emoji: agent.emoji.trim(),
         agent_file: agent.agent_file ?? '',
         harness: agent.harness,
@@ -363,6 +373,7 @@ export function RightPanel({
     try {
       await onUpdateAgent(editingAgent.id, {
         name: updates.name.trim(),
+        description: updates.description || undefined,
         emoji: updates.emoji.trim(),
         agent_file: updates.agent_file ?? '',
         harness: updates.harness,

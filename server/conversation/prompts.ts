@@ -4,6 +4,7 @@ import type { ReasoningEffort } from "./types";
 type WorkerCandidate = {
   id: string;
   name: string;
+  description: string | null;
   harness: string;
   modelLabel: string;
 };
@@ -40,7 +41,8 @@ export function buildPrompt(
     const listAgentsCommand = `${cli} list-agents`;
     const candidates = Array.isArray(options.planCandidates) ? options.planCandidates : [];
     const candidateLines = candidates.map((candidate, index) => {
-      return `${index + 1}. id=${candidate.id}; name=${candidate.name}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
+      const desc = candidate.description ? `; description=${candidate.description}` : "";
+      return `${index + 1}. id=${candidate.id}; name=${candidate.name}${desc}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
     });
     const workspaceInstruction = options.workspaceIsEmpty
       ? "Workspace appears empty. Skip exploratory probing and immediately produce recipient selection + plan summary CLI submissions."
@@ -95,7 +97,8 @@ export function buildOrchestratorPrompt(input: {
   const cli = input.pragmaCliCommand?.trim() || "pragma";
   const selectRecipientCommand = `${cli} task select-recipient --agent-id <candidate_id> --reason "<one sentence reason>"`;
   const candidateLines = input.candidates.map((candidate, index) => {
-    return `${index + 1}. id=${candidate.id}; name=${candidate.name}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
+    const desc = candidate.description ? `; description=${candidate.description}` : "";
+    return `${index + 1}. id=${candidate.id}; name=${candidate.name}${desc}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
   });
 
   return [

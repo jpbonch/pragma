@@ -72,6 +72,7 @@ Your task is to:
 type DefaultAgentSeed = {
   id: string;
   name: string;
+  description: string;
   status: string;
   agent_file: string;
   emoji: string;
@@ -84,6 +85,7 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
   {
     id: DEFAULT_AGENT_ID,
     name: "Orchestrator",
+    description: "Plans tasks, spawns specialized agents, and coordinates progress across the team.",
     status: "active",
     agent_file: DEFAULT_AGENT_FILE,
     emoji: "🧭",
@@ -94,6 +96,7 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
   {
     id: "pragma-coder",
     name: "Coder",
+    description: "Turns requirements into working code with focused, minimal diffs.",
     status: "idle",
     agent_file: CODER_AGENT_FILE,
     emoji: "💻",
@@ -104,6 +107,7 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
   {
     id: "pragma-researcher",
     name: "Researcher",
+    description: "Investigates requirements, compares options, and delivers actionable findings.",
     status: "idle",
     agent_file: RESEARCHER_AGENT_FILE,
     emoji: "🔎",
@@ -114,6 +118,7 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
   {
     id: "pragma-reviewer",
     name: "Reviewer",
+    description: "Reviews code for correctness, security, and performance issues.",
     status: "idle",
     agent_file: REVIEWER_AGENT_FILE,
     emoji: "🛡️",
@@ -424,6 +429,7 @@ async function ensureRequiredSchema(db: PGlite): Promise<void> {
 CREATE TABLE IF NOT EXISTS agents (
   id VARCHAR(64) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
+  description TEXT,
   status VARCHAR(32) NOT NULL DEFAULT 'idle',
   agent_file TEXT,
   emoji VARCHAR(32),
@@ -431,6 +437,11 @@ CREATE TABLE IF NOT EXISTS agents (
   model_label VARCHAR(128) NOT NULL DEFAULT 'Opus 4.6',
   model_id VARCHAR(128) NOT NULL DEFAULT 'opus'
 );
+`);
+
+  await db.exec(`
+ALTER TABLE agents
+ADD COLUMN IF NOT EXISTS description TEXT
 `);
 
   await db.exec(`
@@ -551,10 +562,11 @@ async function ensureDefaultAgents(db: PGlite): Promise<void> {
   const orchestrator = DEFAULT_AGENT_SEEDS[0];
   await db.query(
     `
-INSERT INTO agents (id, name, status, agent_file, emoji, harness, model_label, model_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO agents (id, name, description, status, agent_file, emoji, harness, model_label, model_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
+    description = EXCLUDED.description,
     status = EXCLUDED.status,
     agent_file = EXCLUDED.agent_file,
     emoji = EXCLUDED.emoji,
@@ -565,6 +577,7 @@ SET name = EXCLUDED.name,
     [
       orchestrator.id,
       orchestrator.name,
+      orchestrator.description,
       orchestrator.status,
       orchestrator.agent_file,
       orchestrator.emoji,
@@ -577,13 +590,14 @@ SET name = EXCLUDED.name,
   for (const agent of DEFAULT_AGENT_SEEDS.slice(1)) {
     await db.query(
       `
-INSERT INTO agents (id, name, status, agent_file, emoji, harness, model_label, model_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO agents (id, name, description, status, agent_file, emoji, harness, model_label, model_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (id) DO NOTHING
 `,
       [
         agent.id,
         agent.name,
+        agent.description,
         agent.status,
         agent.agent_file,
         agent.emoji,
