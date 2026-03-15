@@ -270,6 +270,28 @@ export async function mergeApprovedTask(input: {
   return { mergedRepos, conflicts };
 }
 
+export async function saveDiffSnapshot(input: {
+  workspacePaths: WorkspacePathsLike;
+  taskId: string;
+  gitState: TaskGitState;
+}): Promise<void> {
+  const repoDiffs = await buildRepoDiffEntries(input);
+
+  const combinedDiff = repoDiffs
+    .filter((entry) => entry.diff.trim().length > 0)
+    .map((entry) => {
+      if (repoDiffs.length === 1) {
+        return entry.diff;
+      }
+      return `# repo: ${entry.repo_path}\n${entry.diff}`;
+    })
+    .join("\n\n");
+
+  const outputDir = getTaskMainOutputDir(input.workspacePaths, input.taskId);
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(join(outputDir, ".changes.diff"), combinedDiff, "utf-8");
+}
+
 export async function deleteTaskWorktree(input: {
   workspacePaths: WorkspacePathsLike;
   taskId: string;

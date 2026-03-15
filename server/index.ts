@@ -30,6 +30,7 @@ import {
   getTaskMainOutputDir,
   mergeApprovedTask,
   parseTaskGitState,
+  saveDiffSnapshot,
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
 import { buildPrompt } from "./conversation/prompts";
@@ -989,9 +990,9 @@ FROM tasks j
     const db = await openDatabase(workspaceName);
 
     try {
-      const taskResult = await db.query<{ id: string; git_state_json: string | null }>(
+      const taskResult = await db.query<{ id: string; status: string; git_state_json: string | null }>(
         `
-SELECT id, git_state_json
+SELECT id, status, git_state_json
 FROM tasks
 WHERE id = $1
 LIMIT 1
@@ -1003,6 +1004,22 @@ LIMIT 1
         throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
+      const workspacePaths = getWorkspacePaths(workspaceName);
+
+      if (task.status === "completed" || task.status === "cancelled") {
+        const snapshotPath = join(getTaskMainOutputDir(workspacePaths, taskId), ".changes.diff");
+        try {
+          const savedDiff = await readFile(snapshotPath, "utf-8");
+          return c.json({
+            roots: [join(workspacePaths.worktreesDir, taskId, "workspace")],
+            repos: [],
+            diff: savedDiff,
+          });
+        } catch {
+          // Snapshot not found, fall through to live diff
+        }
+      }
+
       const gitState = parseTaskGitState(task.git_state_json);
       if (!gitState) {
         throw new PragmaError(
@@ -1012,7 +1029,6 @@ LIMIT 1
         );
       }
 
-      const workspacePaths = getWorkspacePaths(workspaceName);
       const repoDiffs = await buildRepoDiffEntries({
         workspacePaths,
         taskId,
@@ -1422,6 +1438,7 @@ WHERE id = $1
           [taskId, nextStatus, mergedOutputDir],
         );
         emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+        await saveDiffSnapshot({ workspacePaths, taskId, gitState });
         await deleteTaskWorktree({ workspacePaths, taskId });
 
         if (pushAfterMerge) {
