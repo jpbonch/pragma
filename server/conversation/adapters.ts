@@ -309,7 +309,7 @@ function buildClaudeArgs(input: AdapterSendTurnInput, sandboxRoot: string): stri
     args.push("--resume", input.sessionId);
   }
 
-  args.push(prompt);
+  args.push("--", prompt);
   return args;
 }
 
