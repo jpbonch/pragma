@@ -4,6 +4,8 @@ export type HarnessId = "codex" | "claude_code";
 export type ReasoningEffort = "low" | "medium" | "high" | "extra_high";
 
 export const TASK_STATUS_VALUES = [
+  "planning",
+  "planned",
   "queued",
   "orchestrating",
   "running",

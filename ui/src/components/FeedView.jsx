@@ -83,7 +83,7 @@ function isNeedsYou(status) {
 }
 
 function isActive(status) {
-  return status === 'running' || status === 'queued'
+  return status === 'running' || status === 'queued' || status === 'planning'
 }
 
 function isDone(status) {

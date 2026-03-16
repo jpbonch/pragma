@@ -46,6 +46,7 @@ import {
   createTurn,
   ensureConversationSchema,
   getLatestCompletedPlanTurn,
+  getLatestPlanTurn,
   getFirstExecuteTurn,
   getLatestExecuteTurn,
   getThreadByTaskId,
@@ -2125,9 +2126,11 @@ LIMIT 1
       if (!task) {
         throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
-      if (task.status !== "running") {
+      if (task.status !== "running" && task.status !== "planning") {
         throw new PragmaError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
       }
+
+      const previousStatus = task.status;
 
       await db.query(
         `
@@ -2141,16 +2144,19 @@ WHERE id = $1
 
       const thread = await getThreadByTaskId(db, taskId);
       if (thread) {
-        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+        const latestTurn = thread.mode === "plan"
+          ? await getLatestPlanTurn(db, thread.id)
+          : await getLatestExecuteTurn(db, thread.id);
         await insertEvent(db, {
           id: `evt_${randomUUID().slice(0, 12)}`,
           threadId: thread.id,
-          turnId: body.turn_id || latestExecuteTurn?.id || null,
+          turnId: body.turn_id || latestTurn?.id || null,
           eventName: "worker_question_requested",
           payload: {
             question: body.question,
             details: body.details ?? null,
             agent_id: body.agent_id ?? task.assigned_to ?? null,
+            previous_status: previousStatus,
           },
         });
       }
@@ -2262,71 +2268,101 @@ LIMIT 1
           `Task is not waiting for a human response: ${taskId}`,
         );
       }
-      if (!task.assigned_to) {
-        throw new PragmaError(
-          "TASK_MISSING_ASSIGNED_WORKER",
-          409,
-          `Task has no assigned worker to resume: ${taskId}`,
-        );
-      }
-      const resumeWorker = await getAgentRow(db, task.assigned_to);
-      if (!resumeWorker || resumeWorker.id === DEFAULT_AGENT_ID) {
-        throw new PragmaError(
-          "TASK_INVALID_ASSIGNED_WORKER",
-          409,
-          `Assigned worker is invalid for task resume: ${taskId}`,
-        );
-      }
 
       const thread = await getThreadByTaskId(db, taskId);
       if (!thread) {
         throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
       }
 
-      const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
-      if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-        throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
-      }
+      // Plan threads: transition back to planning — frontend will start a new streaming turn
+      if (thread.mode === "plan") {
+        await insertMessage(db, {
+          id: `msg_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: null,
+          role: "user",
+          content: body.message,
+        });
 
-      await insertMessage(db, {
-        id: `msg_${randomUUID().slice(0, 12)}`,
-        threadId: thread.id,
-        turnId: null,
-        role: "user",
-        content: body.message,
-      });
+        await insertEvent(db, {
+          id: `evt_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: null,
+          eventName: "human_response_received",
+          payload: {
+            message: body.message,
+            responded_to_status: task.status,
+          },
+        });
 
-      await insertEvent(db, {
-        id: `evt_${randomUUID().slice(0, 12)}`,
-        threadId: thread.id,
-        turnId: latestExecuteTurn.id,
-        eventName: "human_response_received",
-        payload: {
-          message: body.message,
-          responded_to_status: task.status,
-        },
-      });
+        await db.query(
+          `UPDATE tasks SET status = 'planning' WHERE id = $1`,
+          [taskId],
+        );
+        emitTaskStatus(workspaceName, taskId, "planning", "plan_question_responded");
+      } else {
+        // Execute threads: requeue via executeRunner
+        if (!task.assigned_to) {
+          throw new PragmaError(
+            "TASK_MISSING_ASSIGNED_WORKER",
+            409,
+            `Task has no assigned worker to resume: ${taskId}`,
+          );
+        }
+        const resumeWorker = await getAgentRow(db, task.assigned_to);
+        if (!resumeWorker || resumeWorker.id === DEFAULT_AGENT_ID) {
+          throw new PragmaError(
+            "TASK_INVALID_ASSIGNED_WORKER",
+            409,
+            `Assigned worker is invalid for task resume: ${taskId}`,
+          );
+        }
 
-      await db.query(
-        `
+        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+        if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
+          throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
+        }
+
+        await insertMessage(db, {
+          id: `msg_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: null,
+          role: "user",
+          content: body.message,
+        });
+
+        await insertEvent(db, {
+          id: `evt_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: latestExecuteTurn.id,
+          eventName: "human_response_received",
+          payload: {
+            message: body.message,
+            responded_to_status: task.status,
+          },
+        });
+
+        await db.query(
+          `
 UPDATE tasks
 SET status = 'queued'
 WHERE id = $1
 `,
-        [taskId],
-      );
+          [taskId],
+        );
 
-      requeue = {
-        threadId: thread.id,
-        prompt: latestExecuteTurn.user_message,
-        recipientAgentId: resumeWorker.id,
-        reasoningEffort: requireReasoningEffort(
-          latestExecuteTurn.reasoning_effort,
-          `latest execute turn for task ${taskId}`,
-        ),
-        resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
-        followUpMessage: body.message,
-      };
+        requeue = {
+          threadId: thread.id,
+          prompt: latestExecuteTurn.user_message,
+          recipientAgentId: resumeWorker.id,
+          reasoningEffort: requireReasoningEffort(
+            latestExecuteTurn.reasoning_effort,
+            `latest execute turn for task ${taskId}`,
+          ),
+          resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
+          followUpMessage: body.message,
+        };
+      }
     } finally {
       await db.close();
     }
@@ -2344,7 +2380,7 @@ WHERE id = $1
       });
     }
 
-    return c.json({ ok: true, status: "queued" });
+    return c.json({ ok: true, status: requeue ? "queued" : "planning" });
   });
 
   app.post(
@@ -2572,6 +2608,29 @@ WHERE id = $1
         throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
       }
 
+      // Create a task row when a plan thread starts so ask-question works
+      if (body.mode === "plan" && isNewThread) {
+        const planTaskId = `task_${randomUUID().slice(0, 8)}`;
+        const planTitle = truncateChatText(
+          body.message.replace(/\s+/g, " ").trim() || "Plan",
+          80,
+        );
+        await db.query(
+          `
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
+VALUES ($1, $2, 'planning', NULL, NULL, NULL)
+`,
+          [planTaskId, planTitle],
+        );
+        emitTaskStatus(workspaceName, planTaskId, "planning", "plan_created");
+        await setThreadTaskId(db, threadId, planTaskId);
+        thread = await getThreadById(db, threadId);
+      }
+
+      if (!thread) {
+        throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
+      }
+
       if (thread.harness !== body.harness) {
         throw new PragmaError(
           "THREAD_HARNESS_MISMATCH",
@@ -2743,6 +2802,21 @@ WHERE id = $1
           content: finalAssistantText,
         });
 
+        // Transition task from planning → planned when plan turn completes
+        if (body.mode === "plan" && thread!.task_id) {
+          await db.query(
+            `
+UPDATE tasks
+SET status = 'planned',
+    plan = $2,
+    assigned_to = $3
+WHERE id = $1
+`,
+            [thread!.task_id, finalAssistantText, selectedPlanRecipientAgentId],
+          );
+          emitTaskStatus(workspaceName, thread!.task_id, "planned", "plan_completed");
+        }
+
         if (body.mode === "chat") {
           // Only generate a title on the first turn (when no title exists yet)
           const existing = await db.query<{ chat_title: string | null }>(
@@ -2831,7 +2905,7 @@ WHERE id = $1
     const body = c.req.valid("json");
     const reasoningEffort = body.reasoning_effort;
     const db = await openDatabase(workspaceName);
-    let taskId =`task_${randomUUID().slice(0, 8)}`;
+    let taskId = "";
     let executeThreadId = `thread_${randomUUID().slice(0, 12)}`;
     let executePrompt = "";
     let requestedRecipientAgentId: string | null = null;
@@ -2853,10 +2927,6 @@ WHERE id = $1
       if (!planText) {
         throw new PragmaError("PLAN_EMPTY", 409, "Plan turn has no assistant message.");
       }
-      const planTitle = truncateChatText(
-        latestPlanTurn.user_message?.replace(/\s+/g, " ").trim() || "Task",
-        80,
-      );
       const plannedRecipientAgentId =
         typeof latestPlanTurn.selected_agent_id === "string" &&
         latestPlanTurn.selected_agent_id.trim().length > 0
@@ -2881,14 +2951,31 @@ WHERE id = $1
 
       executePrompt = planText;
 
-      await db.query(
-        `
+      // Use existing task from the plan thread if available, otherwise create a new one
+      if (thread.task_id) {
+        taskId = thread.task_id;
+        await db.query(
+          `
+UPDATE tasks
+SET status = 'running',
+    assigned_to = $2,
+    plan = $3
+WHERE id = $1
+`,
+          [taskId, executeRecipient.id, planText],
+        );
+        emitTaskStatus(workspaceName, taskId, "running", "execute_from_plan");
+      } else {
+        taskId = `task_${randomUUID().slice(0, 8)}`;
+        await db.query(
+          `
 INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan)
 VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 `,
-        [taskId, planTitle, executeRecipient.id, planText],
-      );
-      emitTaskStatus(workspaceName, taskId, "queued", "execute_from_plan_created");
+          [taskId, truncateChatText(latestPlanTurn.user_message?.replace(/\s+/g, " ").trim() || "Task", 80), executeRecipient.id, planText],
+        );
+        emitTaskStatus(workspaceName, taskId, "queued", "execute_from_plan_created");
+      }
 
       await createThread(db, {
         id: executeThreadId,

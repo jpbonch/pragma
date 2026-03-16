@@ -71,7 +71,7 @@ function isWaitingForHumanResponse(status) {
 
 function isTaskActivelyRunning(status) {
   const normalized = typeof status === 'string' ? status.trim().toLowerCase() : ''
-  return normalized === 'running' || normalized === 'orchestrating' || normalized === 'queued'
+  return normalized === 'running' || normalized === 'orchestrating' || normalized === 'queued' || normalized === 'planning'
 }
 
 function hasRunningTurn(turns) {
