@@ -185,15 +185,9 @@ export async function checkpointTaskRepos(input: {
 
     await runGit(taskRepoPath, ["add", "-A"]);
     if (await hasStagedChanges(taskRepoPath)) {
-      await runGit(taskRepoPath, [
-        "-c",
-        "user.name=Pragma",
-        "-c",
-        "user.email=pragma@local",
-        "commit",
-        "-m",
-        input.commitMessage,
-      ]);
+      const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, repo.relative_path);
+      const identity = await getUserGitIdentity(sourceRepoPath);
+      await runGit(taskRepoPath, buildCommitArgs(identity, input.commitMessage));
     }
   }
 }
@@ -230,15 +224,8 @@ export async function mergeApprovedTask(input: {
       ]);
 
       if (await hasStagedChanges(sourceRepoPath)) {
-        await runGit(sourceRepoPath, [
-          "-c",
-          "user.name=Pragma",
-          "-c",
-          "user.email=pragma@local",
-          "commit",
-          "-m",
-          commitMessage,
-        ]);
+        const identity = await getUserGitIdentity(sourceRepoPath);
+        await runGit(sourceRepoPath, buildCommitArgs(identity, commitMessage));
       }
 
       mergedRepos.push(repo.relative_path);
@@ -552,16 +539,11 @@ async function ensureDefaultCodeRepo(codeDir: string): Promise<void> {
   }
 
   await runGit(defaultRepoDir, ["add", "-A"]);
-  await runGit(defaultRepoDir, [
-    "-c",
-    "user.name=Pragma",
-    "-c",
-    "user.email=pragma@local",
-    "commit",
-    "--allow-empty",
-    "-m",
-    "pragma: initialize default code repo",
-  ]);
+  const identity = await getUserGitIdentity(defaultRepoDir);
+  await runGit(
+    defaultRepoDir,
+    buildCommitArgs(identity, "pragma: initialize default code repo", ["--allow-empty"]),
+  );
 }
 
 async function commitIfNeeded(repoPath: string, message: string): Promise<void> {
@@ -569,15 +551,8 @@ async function commitIfNeeded(repoPath: string, message: string): Promise<void> 
   if (!(await hasStagedChanges(repoPath))) {
     return;
   }
-  await runGit(repoPath, [
-    "-c",
-    "user.name=Pragma",
-    "-c",
-    "user.email=pragma@local",
-    "commit",
-    "-m",
-    message,
-  ]);
+  const identity = await getUserGitIdentity(repoPath);
+  await runGit(repoPath, buildCommitArgs(identity, message));
 }
 
 async function hasAnyCommits(repoPath: string): Promise<boolean> {
@@ -778,6 +753,42 @@ async function runGitCapture(cwd: string, args: string[]): Promise<string> {
     cwd,
     env: process.env,
   });
+}
+
+type GitIdentity = { name: string; email: string };
+
+async function getUserGitIdentity(repoPath: string): Promise<GitIdentity | null> {
+  try {
+    const name = (await runGitCapture(repoPath, ["config", "user.name"])).trim();
+    const email = (await runGitCapture(repoPath, ["config", "user.email"])).trim();
+    if (name && email) {
+      return { name, email };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function buildCommitArgs(
+  identity: GitIdentity | null,
+  message: string,
+  extraFlags?: string[],
+): string[] {
+  const userIdentity = identity ?? { name: "Pragma", email: "pragma@local" };
+  const commitMessage = identity
+    ? `${message}\n\nCo-Authored-By: Pragma <pragma@local>`
+    : message;
+  return [
+    "-c",
+    `user.name=${userIdentity.name}`,
+    "-c",
+    `user.email=${userIdentity.email}`,
+    "commit",
+    ...(extraFlags ?? []),
+    "-m",
+    commitMessage,
+  ];
 }
 
 function errorMessage(error: unknown): string {
