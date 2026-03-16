@@ -3,6 +3,7 @@ import {
   ApiError,
   copyCodeFolderFromLocal,
   createAgent,
+  deleteAgent,
   cloneCodeRepo,
   createContextFile,
   createContextFolder,
@@ -1580,6 +1581,11 @@ export default function App() {
     await loadAgents()
   }
 
+  async function handleDeleteAgent(id) {
+    await deleteAgent(id)
+    await loadAgents()
+  }
+
   async function loadContext() {
     setContextLoading(true)
     setContextError('')
@@ -2578,6 +2584,7 @@ export default function App() {
           error={agentsError}
           onCreateAgent={handleCreateAgent}
           onUpdateAgent={handleUpdateAgent}
+          onDeleteAgent={handleDeleteAgent}
           humans={humans}
           onUpdateHumanEmoji={handleUpdateHumanEmoji}
           openOrchestratorConfigRequest={openOrchestratorConfigRequest}

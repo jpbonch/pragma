@@ -699,6 +699,27 @@ WHERE id = $1
     }
   });
 
+  app.delete("/agents/:id", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const id = c.req.param("id");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const deleted = await db.query(
+        `DELETE FROM agents WHERE id = $1`,
+        [id],
+      );
+
+      if ((deleted.affectedRows ?? 0) === 0) {
+        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${id}`);
+      }
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
   // ── Agent Templates (GitHub catalog) ────────────────────────────────
 
   let agentTemplatesCache: { data: unknown[]; expiry: number } | null = null;

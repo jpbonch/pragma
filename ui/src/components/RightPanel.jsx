@@ -223,7 +223,7 @@ function HumanProfileModal({ open, human, onClose, onSave }) {
   )
 }
 
-function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClose, onSubmit }) {
+function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClose, onSubmit, onDelete }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [emoji, setEmoji] = useState('🤖')
@@ -231,9 +231,13 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
   const [harness, setHarness] = useState('claude_code')
   const [modelLabel, setModelLabel] = useState('Opus 4.6')
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!open) return
+    setConfirmDelete(false)
+    setDeleting(false)
     if (agent) {
       if (!agent.harness || !agent.model_label) {
         throw new Error('Agent payload is missing harness or model_label.')
@@ -340,7 +344,38 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
 
         {/* Actions */}
         <div className="agent-profile-actions">
-          <button className="agent-profile-cancel" onClick={onClose} disabled={loading}>
+          {onDelete && (
+            <button
+              className="agent-profile-delete"
+              onClick={async () => {
+                if (!confirmDelete) {
+                  setConfirmDelete(true)
+                  return
+                }
+                setDeleting(true)
+                try {
+                  await onDelete()
+                } catch {
+                  setDeleting(false)
+                  setConfirmDelete(false)
+                }
+              }}
+              disabled={loading || deleting}
+              style={{
+                marginRight: 'auto',
+                background: 'none',
+                border: 'none',
+                color: confirmDelete ? '#dc3545' : '#888',
+                cursor: 'pointer',
+                fontSize: 13,
+                padding: '6px 10px',
+                borderRadius: 6,
+              }}
+            >
+              {deleting ? 'Deleting...' : confirmDelete ? 'Confirm delete' : 'Delete'}
+            </button>
+          )}
+          <button className="agent-profile-cancel" onClick={onClose} disabled={loading || deleting}>
             Cancel
           </button>
           <button
@@ -348,7 +383,7 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
             onClick={() =>
               onSubmit({ name, description, emoji, agent_file: agentFile, harness, model_label: modelLabel })
             }
-            disabled={loading}
+            disabled={loading || deleting}
           >
             {loading ? 'Saving...' : title === 'Add agent' ? 'Create' : 'Save'}
           </button>
@@ -476,6 +511,7 @@ export function RightPanel({
   error,
   onCreateAgent,
   onUpdateAgent,
+  onDeleteAgent,
   humans = [],
   onUpdateHumanEmoji,
   openOrchestratorConfigRequest = 0,
@@ -746,6 +782,10 @@ export function RightPanel({
         onSubmit={(updates) => {
           void handleSubmitEdit(updates)
         }}
+        onDelete={editingAgent ? async () => {
+          await onDeleteAgent(editingAgent.id)
+          setEditingAgent(null)
+        } : undefined}
       />
 
       <HumanProfileModal

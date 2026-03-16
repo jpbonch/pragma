@@ -392,6 +392,12 @@ export async function updateAgent(id, updates) {
   })
 }
 
+export async function deleteAgent(id) {
+  return fetchJson(`/agents/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function fetchContextFiles() {
   const data = asObject(await fetchJson('/context'), 'Invalid context response.')
   const context = asObject(data.context, '`context` must be an object.')
