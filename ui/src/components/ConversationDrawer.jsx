@@ -118,9 +118,11 @@ export function ConversationDrawer({
   const [planError, setPlanError] = useState('')
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const [hasChanges, setHasChanges] = useState(null)
   const showOutputPanel = Boolean(taskId) && (mode === 'chat' || mode === 'execute')
-  const canApprove = showOutputPanel && taskStatus === 'pending_review'
-  const canReopenCompleted = showOutputPanel && taskStatus === 'completed'
+  const isPendingReview = showOutputPanel && taskStatus === 'pending_review'
+  const canApprove = isPendingReview && hasChanges === true
+  const canMarkCompleted = (isPendingReview && hasChanges === false) || (showOutputPanel && taskStatus === 'completed')
   const isCompletedTask = showOutputPanel && taskStatus === 'completed'
   const headerStatusLabel = useMemo(
     () => getHeaderStatusLabel({ taskStatus, mode, loading, planReady }),
@@ -154,6 +156,7 @@ export function ConversationDrawer({
       setPlanError('')
       setDeleteConfirming(false)
       setDeleteLoading(false)
+      setHasChanges(null)
     }
   }, [open])
 
@@ -441,7 +444,7 @@ export function ConversationDrawer({
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder={
                       isCompletedTask
-                        ? 'Task is completed. Mark it as not completed to continue.'
+                        ? 'Task is completed.'
                         : 'Continue this conversation...'
                     }
                     disabled={loading || isCompletedTask}
@@ -482,6 +485,7 @@ export function ConversationDrawer({
                   runningTestCommand={runningTestCommand}
                   onRunTestCommand={handleRunTestCommand}
                   onUpdateTestCommand={handleUpdateTestCommand}
+                  onChangesLoaded={setHasChanges}
                   planData={planData}
                   planLoading={planLoading}
                   planError={planError}
@@ -555,14 +559,14 @@ export function ConversationDrawer({
                     {approveLoading ? 'Approving...' : 'Approve & Push'}
                   </button>
                 )}
-                {canReopenCompleted && (
+                {canMarkCompleted && (
                   <button
-                    className="conv-reopen-btn"
-                    onClick={() => { void submitReviewAction('reopen') }}
+                    className="conv-approve-btn"
+                    onClick={() => { void submitReviewAction('mark_completed') }}
                     disabled={approveLoading}
-                    title="Reopen task and send follow-up messages"
+                    title="Mark task as completed"
                   >
-                    {approveLoading ? 'Reopening...' : 'Reopen'}
+                    {approveLoading ? 'Completing...' : 'Mark Task Completed'}
                   </button>
                 )}
               </div>

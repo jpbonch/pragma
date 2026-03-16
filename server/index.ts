@@ -1552,6 +1552,46 @@ WHERE id = $1
         });
       }
 
+      if (body.action === "mark_completed") {
+        if (task.status === "completed") {
+          return c.json({
+            ok: true,
+            status: "completed",
+            merge_state: "no_changes",
+          });
+        }
+
+        if (task.status !== "pending_review") {
+          throw new PragmaError(
+            "TASK_NOT_PENDING_REVIEW",
+            409,
+            `Task is not pending review: ${taskId}`,
+          );
+        }
+
+        const nextStatus: TaskStatus = "completed";
+        const workspacePaths = getWorkspacePaths(workspaceName);
+        const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
+        await db.query(
+          `
+UPDATE tasks
+SET status = $2,
+    output_dir = $3,
+    completed_at = CURRENT_TIMESTAMP
+WHERE id = $1
+`,
+          [taskId, nextStatus, mergedOutputDir],
+        );
+        emitTaskStatus(workspaceName, taskId, nextStatus, "review_mark_completed");
+        await deleteTaskWorktree({ workspacePaths, taskId });
+
+        return c.json({
+          ok: true,
+          status: nextStatus,
+          merge_state: "no_changes",
+        });
+      }
+
       if (task.status !== "pending_review") {
         throw new PragmaError(
           "TASK_NOT_PENDING_REVIEW",

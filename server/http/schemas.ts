@@ -142,7 +142,7 @@ export const taskRespondSchema = z
 
 export const reviewTaskSchema = z
   .object({
-    action: z.enum(["approve", "approve_and_push", "reopen"]),
+    action: z.enum(["approve", "approve_and_push", "reopen", "mark_completed"]),
     message: nonEmptyString.optional(),
   })
   .strict();

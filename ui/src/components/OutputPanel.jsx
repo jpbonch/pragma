@@ -186,6 +186,7 @@ export function OutputPanel({
   runningTestCommand = '',
   onRunTestCommand,
   onUpdateTestCommand,
+  onChangesLoaded,
   planData = null,
   planLoading = false,
   planError = '',
@@ -292,10 +293,13 @@ export function OutputPanel({
 
     try {
       const data = await fetchTaskOutputChanges(targetTaskId)
-      setChanges(typeof data.diff === 'string' ? data.diff : '')
+      const diff = typeof data.diff === 'string' ? data.diff : ''
+      setChanges(diff)
+      onChangesLoaded?.(Boolean(diff.trim()))
     } catch (error) {
       setChangesError(error instanceof Error ? error.message : String(error))
       setChanges('')
+      onChangesLoaded?.(false)
     } finally {
       setChangesLoading(false)
     }
