@@ -381,20 +381,28 @@ select { cursor: pointer; }
 .sidebar-new-chat-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   border: none;
   background: transparent;
   font-family: inherit;
-  font-size: 11px;
-  color: #7A7972;
+  font-size: 13px;
+  font-weight: 500;
+  color: #91918E;
   cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  width: 100%;
+  text-align: left;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
+.sidebar-new-chat-icon {
+  flex-shrink: 0;
+  stroke-width: 1.75;
+}
+
 .sidebar-new-chat-btn:hover {
-  background: #F0EFEC;
+  background: rgba(0, 0, 0, 0.04);
   color: #37352F;
 }
 

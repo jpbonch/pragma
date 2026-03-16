@@ -6,6 +6,7 @@ import {
   Settings,
   ChevronDown,
   Plus,
+  CirclePlus,
   Check,
   X,
   Code2,
@@ -186,16 +187,16 @@ export function Sidebar({
       <section className="sidebar-chats">
         <div className="sidebar-chats-header">
           <div className="sidebar-chats-title">Chats</div>
+        </div>
+        <div className="sidebar-chats-list">
           <button
             className="sidebar-new-chat-btn"
             onClick={() => onNewChat?.()}
             title="New chat"
           >
-            <Plus size={12} />
+            <CirclePlus size={14} className="sidebar-new-chat-icon" />
             New chat
           </button>
-        </div>
-        <div className="sidebar-chats-list">
           {chatsLoading && <div className="sidebar-chat-empty">Loading chats...</div>}
           {!chatsLoading && chats.length === 0 && (
             <div className="sidebar-chat-empty">No chats yet</div>
