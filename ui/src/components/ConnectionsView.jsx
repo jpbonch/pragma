@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
-import { AlertCircle, Check, Download, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlertCircle, Check, Download, Trash2, Plus, X } from 'lucide-react'
 import {
   fetchSkillRegistry,
   fetchInstalledSkills,
   installRegistrySkill,
   deleteSkill,
+  fetchAgents,
+  fetchAgentSkills,
+  assignAgentSkill,
+  unassignAgentSkill,
 } from '../api'
 
 const PROVIDER_LABELS = {
@@ -15,22 +19,56 @@ const PROVIDER_LABELS = {
 export function ConnectionsView() {
   const [registry, setRegistry] = useState([])
   const [installed, setInstalled] = useState([])
+  const [agents, setAgents] = useState([])
+  // Map of skill_id -> [{ id, name, emoji }]
+  const [skillAgents, setSkillAgents] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [installing, setInstalling] = useState(null)
   const [removing, setRemoving] = useState(null)
   const [actionError, setActionError] = useState('')
+  // Track which skill card has the agent-assign dropdown open
+  const [assigningSkill, setAssigningSkill] = useState(null)
+  const [assignBusy, setAssignBusy] = useState(false)
+
+  async function loadAgentSkillMap(agentList, skills) {
+    // Build skill -> agents map by querying each agent's skills
+    const map = {}
+    for (const s of skills) {
+      map[s.id] = []
+    }
+    await Promise.all(
+      agentList.map(async (agent) => {
+        try {
+          const agentSkills = await fetchAgentSkills(agent.id)
+          for (const s of agentSkills) {
+            if (map[s.id]) {
+              map[s.id].push({ id: agent.id, name: agent.name, emoji: agent.emoji })
+            }
+          }
+        } catch {
+          // ignore per-agent errors
+        }
+      }),
+    )
+    return map
+  }
 
   async function loadData() {
     setLoading(true)
     setError('')
     try {
-      const [reg, inst] = await Promise.all([
+      const [reg, inst, agentList] = await Promise.all([
         fetchSkillRegistry(),
         fetchInstalledSkills(),
+        fetchAgents(),
       ])
       setRegistry(reg)
       setInstalled(inst)
+      setAgents(agentList)
+
+      const map = await loadAgentSkillMap(agentList, inst)
+      setSkillAgents(map)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -38,9 +76,24 @@ export function ConnectionsView() {
     }
   }
 
+  const contentRef = useRef(null)
+
   useEffect(() => {
     loadData()
   }, [])
+
+  // Close agent-assign dropdown on outside click
+  useEffect(() => {
+    if (!assigningSkill) return
+    function onPointerDown(e) {
+      const wrap = contentRef.current?.querySelector('.cn-agent-add-wrap .cn-agent-dropdown')
+      if (wrap && !wrap.contains(e.target) && !e.target.closest('.cn-agent-add-btn')) {
+        setAssigningSkill(null)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [assigningSkill])
 
   const installedNames = new Set(installed.map((s) => s.name))
 
@@ -55,8 +108,14 @@ export function ConnectionsView() {
         repo: skill.repo,
         skill_path: skill.skill_path,
       })
-      const inst = await fetchInstalledSkills()
+      const [inst, agentList] = await Promise.all([
+        fetchInstalledSkills(),
+        fetchAgents(),
+      ])
       setInstalled(inst)
+      setAgents(agentList)
+      const map = await loadAgentSkillMap(agentList, inst)
+      setSkillAgents(map)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -72,10 +131,49 @@ export function ConnectionsView() {
       await deleteSkill(skill.id)
       const inst = await fetchInstalledSkills()
       setInstalled(inst)
+      setSkillAgents((prev) => {
+        const next = { ...prev }
+        delete next[skill.id]
+        return next
+      })
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err))
     } finally {
       setRemoving(null)
+    }
+  }
+
+  async function handleAssignSkill(skillId, agentId) {
+    setAssignBusy(true)
+    setActionError('')
+    try {
+      await assignAgentSkill(agentId, skillId)
+      const agent = agents.find((a) => a.id === agentId)
+      setSkillAgents((prev) => ({
+        ...prev,
+        [skillId]: [
+          ...(prev[skillId] || []),
+          { id: agent.id, name: agent.name, emoji: agent.emoji },
+        ],
+      }))
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAssignBusy(false)
+      setAssigningSkill(null)
+    }
+  }
+
+  async function handleUnassignSkill(skillId, agentId) {
+    setActionError('')
+    try {
+      await unassignAgentSkill(agentId, skillId)
+      setSkillAgents((prev) => ({
+        ...prev,
+        [skillId]: (prev[skillId] || []).filter((a) => a.id !== agentId),
+      }))
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -93,7 +191,7 @@ export function ConnectionsView() {
         </div>
       </div>
 
-      <div className="cn-content">
+      <div className="cn-content" ref={contentRef}>
         {loading && (
           <div className="cn-loading">
             <div className="cn-spinner" />
@@ -122,31 +220,91 @@ export function ConnectionsView() {
               <div className="cn-section">
                 <h2 className="cn-section-title">Installed</h2>
                 <div className="cn-grid">
-                  {installed.map((skill) => (
-                    <div key={skill.id} className="cn-card cn-card--installed">
-                      <div className="cn-card-header">
-                        <span className="cn-card-name">{skill.name}</span>
-                        <span className="cn-badge cn-badge--installed">Installed</span>
+                  {installed.map((skill) => {
+                    const assigned = skillAgents[skill.id] || []
+                    const assignedIds = new Set(assigned.map((a) => a.id))
+                    const available = agents.filter((a) => !assignedIds.has(a.id))
+                    return (
+                      <div key={skill.id} className="cn-card cn-card--installed">
+                        <div className="cn-card-header">
+                          <span className="cn-card-name">{skill.name}</span>
+                          <span className="cn-badge cn-badge--installed">Installed</span>
+                        </div>
+                        {skill.description && (
+                          <p className="cn-card-desc">{skill.description}</p>
+                        )}
+
+                        <div className="cn-agents-section">
+                          <div className="cn-agents-label">Agents</div>
+                          <div className="cn-agents-list">
+                            {assigned.map((agent) => (
+                              <span key={agent.id} className="cn-agent-chip">
+                                <span className="cn-agent-chip-emoji">{agent.emoji || '🤖'}</span>
+                                <span className="cn-agent-chip-name">{agent.name}</span>
+                                <button
+                                  className="cn-agent-chip-remove"
+                                  title={`Remove ${agent.name}`}
+                                  onClick={() => handleUnassignSkill(skill.id, agent.id)}
+                                >
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ))}
+                            {assigned.length === 0 && (
+                              <span className="cn-agents-none">No agents assigned</span>
+                            )}
+                            {available.length > 0 && (
+                              <div className="cn-agent-add-wrap">
+                                <button
+                                  className="cn-agent-add-btn"
+                                  onClick={() =>
+                                    setAssigningSkill(
+                                      assigningSkill === skill.id ? null : skill.id,
+                                    )
+                                  }
+                                  disabled={assignBusy}
+                                >
+                                  <Plus size={12} />
+                                </button>
+                                {assigningSkill === skill.id && (
+                                  <div className="cn-agent-dropdown">
+                                    {available.map((agent) => (
+                                      <button
+                                        key={agent.id}
+                                        className="cn-agent-dropdown-item"
+                                        onClick={() => handleAssignSkill(skill.id, agent.id)}
+                                        disabled={assignBusy}
+                                      >
+                                        <span className="cn-agent-chip-emoji">
+                                          {agent.emoji || '🤖'}
+                                        </span>
+                                        {agent.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="cn-card-footer">
+                          <button
+                            className="cn-remove-btn"
+                            onClick={() => handleRemove(skill)}
+                            disabled={removing === skill.id}
+                          >
+                            {removing === skill.id ? (
+                              <div className="cn-spinner-sm" />
+                            ) : (
+                              <Trash2 size={13} />
+                            )}
+                            <span>{removing === skill.id ? 'Removing...' : 'Remove'}</span>
+                          </button>
+                        </div>
                       </div>
-                      {skill.description && (
-                        <p className="cn-card-desc">{skill.description}</p>
-                      )}
-                      <div className="cn-card-footer">
-                        <button
-                          className="cn-remove-btn"
-                          onClick={() => handleRemove(skill)}
-                          disabled={removing === skill.id}
-                        >
-                          {removing === skill.id ? (
-                            <div className="cn-spinner-sm" />
-                          ) : (
-                            <Trash2 size={13} />
-                          )}
-                          <span>{removing === skill.id ? 'Removing...' : 'Remove'}</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}

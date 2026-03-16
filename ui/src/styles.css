@@ -4572,6 +4572,65 @@ select { cursor: pointer; }
   font-size: 12px; color: #059669; font-weight: 500;
 }
 
+/* Agent skill assignment */
+.cn-agents-section {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid #e8e7e4;
+}
+.cn-agents-label {
+  font-size: 11px; font-weight: 600; color: #9b9a97;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.cn-agents-list {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+}
+.cn-agents-none {
+  font-size: 12px; color: #b4b3af; font-style: italic;
+}
+.cn-agent-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: #f0f0ee; border: 1px solid #e0dfdc;
+  border-radius: 12px; padding: 2px 6px 2px 4px;
+  font-size: 12px; color: #37352f; line-height: 1;
+}
+.cn-agent-chip-emoji { font-size: 12px; }
+.cn-agent-chip-name { font-weight: 500; }
+.cn-agent-chip-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer;
+  color: #9b9a97; padding: 0; margin-left: 1px;
+  border-radius: 50%; transition: color 0.15s;
+}
+.cn-agent-chip-remove:hover { color: #dc2626; }
+
+.cn-agent-add-wrap { position: relative; }
+.cn-agent-add-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 1px dashed #c8c7c3; background: none;
+  color: #9b9a97; cursor: pointer; transition: all 0.15s;
+}
+.cn-agent-add-btn:hover:not(:disabled) {
+  border-color: #2383e2; color: #2383e2; background: #f0f7ff;
+}
+.cn-agent-add-btn:disabled { opacity: 0.6; cursor: default; }
+
+.cn-agent-dropdown {
+  position: absolute; top: 100%; left: 0; margin-top: 4px;
+  background: #fff; border: 1px solid #e0dfdc;
+  border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  min-width: 160px; z-index: 20; overflow: hidden;
+}
+.cn-agent-dropdown-item {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 7px 12px; border: none; background: none;
+  font-size: 13px; color: #37352f; cursor: pointer;
+  text-align: left; font-family: inherit; transition: background 0.1s;
+}
+.cn-agent-dropdown-item:hover:not(:disabled) { background: #f5f5f4; }
+.cn-agent-dropdown-item:disabled { opacity: 0.6; cursor: default; }
+
 @media (max-width: 980px) {
   .right-panel {
     display: none;

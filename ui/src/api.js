@@ -684,4 +684,30 @@ export async function deleteSkill(id) {
   })
 }
 
+export async function fetchAgentSkills(agentId) {
+  const data = asObject(
+    await fetchJson(`/agents/${encodeURIComponent(agentId)}/skills`),
+    'Invalid agent skills response.',
+  )
+  if (!Array.isArray(data.skills)) {
+    throw invalidResponse('`skills` must be an array.')
+  }
+  return data.skills
+}
+
+export async function assignAgentSkill(agentId, skillId) {
+  return fetchJson(`/agents/${encodeURIComponent(agentId)}/skills`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ skill_id: skillId }),
+  })
+}
+
+export async function unassignAgentSkill(agentId, skillId) {
+  return fetchJson(
+    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`,
+    { method: 'DELETE' },
+  )
+}
+
 export { API_URL }
