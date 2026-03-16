@@ -68,7 +68,7 @@ function getPendingCount(tasks) {
 }
 
 function isWaitingForHumanResponse(status) {
-  return status === 'waiting_for_question_response' || status === 'waiting_for_help_response'
+  return status === 'waiting_for_question_response' || status === 'waiting_for_help_response' || status === 'pending_review'
 }
 
 function isTaskActivelyRunning(status) {

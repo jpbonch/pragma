@@ -2377,7 +2377,8 @@ LIMIT 1
       }
       if (
         task.status !== "waiting_for_question_response" &&
-        task.status !== "waiting_for_help_response"
+        task.status !== "waiting_for_help_response" &&
+        task.status !== "pending_review"
       ) {
         throw new PragmaError(
           "TASK_NOT_WAITING_FOR_RESPONSE",
