@@ -1379,6 +1379,9 @@ export default function App() {
       } else {
         await loadRuntimeServices()
       }
+      if (selectedServiceId === serviceId) {
+        setSelectedServiceId('')
+      }
     } catch (error) {
       setWorkspaceError(errorText(error))
     }
