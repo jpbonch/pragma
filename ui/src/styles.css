@@ -438,6 +438,9 @@ select { cursor: pointer; }
 
 .sidebar-footer-settings {
   margin-top: auto;
+  margin-left: 10px;
+  margin-right: 10px;
+  margin-bottom: 10px;
 }
 
 /* ─── Avatar ────────────────────────────────────────── */
