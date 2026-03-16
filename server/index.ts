@@ -25,9 +25,9 @@ import {
   setupPragma,
   updateTaskTitle,
 } from "./db";
-import { getConversationAdapter } from "./conversation/adapters";
 import { generateTitle } from "./conversation/titleGenerator";
 import { ExecuteRunner } from "./conversation/executeRunner";
+import { TurnRunner } from "./conversation/turnRunner";
 import {
   buildRepoDiffEntries,
   deleteTaskWorktree,
@@ -39,7 +39,6 @@ import {
   saveDiffSnapshot,
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
-import { buildPrompt } from "./conversation/prompts";
 import { resolvePragmaCliCommand } from "./conversation/pragmaCli";
 import {
   closeThread,
@@ -53,6 +52,7 @@ import {
   getThreadByTaskId,
   getThreadById,
   getThreadWithDetails,
+  getEventsSince,
   insertEvent,
   insertMessage,
   listChatThreads,
@@ -482,6 +482,31 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       source,
     });
   };
+
+  const turnRunner = new TurnRunner({
+    apiUrl,
+    pragmaCliCommand,
+    onThreadUpdated: (input) => {
+      publishThreadUpdated(input.workspaceName, input.threadId, input.source);
+    },
+    onTaskStatusChanged: (input) => {
+      publishTaskStatus(input.workspaceName, {
+        task_id: input.taskId,
+        thread_id: input.threadId,
+        status: input.status as TaskStatus,
+        changed_at: new Date().toISOString(),
+        source: input.source,
+      });
+    },
+    getAgentRow,
+    listPlanWorkerCandidates,
+    isDirectoryEmpty,
+    getStoredPlanRecipientForTurn,
+    deriveChatTitle,
+    truncateChatText,
+    buildConversationAgentEnv,
+    emitTaskStatus,
+  });
 
   app.get("/health", (c) => c.json({ ok: true }));
 
@@ -1077,6 +1102,9 @@ FROM tasks j
     });
   });
 
+  // Read-only SSE event stream for a conversation thread.
+  // Replays missed events using Last-Event-ID (the seq number),
+  // then tails new events via the in-memory pub/sub.
   app.get("/conversations/:threadId/stream", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const threadId = c.req.param("threadId");
@@ -1092,6 +1120,16 @@ FROM tasks j
       await db.close();
     }
 
+    // Parse Last-Event-ID for reconnection replay
+    const lastEventId = c.req.header("last-event-id");
+    let lastSeq = 0;
+    if (lastEventId) {
+      const parsed = parseInt(lastEventId, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        lastSeq = parsed;
+      }
+    }
+
     c.header("cache-control", "no-store");
     c.header("connection", "keep-alive");
 
@@ -1100,20 +1138,55 @@ FROM tasks j
       const writeEvent = async (
         eventName: string,
         payload: Record<string, unknown>,
+        seq?: number,
       ): Promise<void> => {
-        if (closed) {
-          return;
+        if (closed) return;
+        try {
+          await stream.writeSSE({
+            event: eventName,
+            data: JSON.stringify(payload),
+            ...(seq != null ? { id: String(seq) } : {}),
+          });
+        } catch {
+          closed = true;
         }
-        await stream.writeSSE({
-          event: eventName,
-          data: JSON.stringify(payload),
-        });
       };
+
+      // Replay missed events from the DB
+      const replayDb = await openDatabase(workspaceName);
+      try {
+        await ensureConversationSchema(replayDb);
+        const missedEvents = await getEventsSince(replayDb, threadId, lastSeq);
+        for (const evt of missedEvents) {
+          const payload = JSON.parse(evt.payload_json);
+          await writeEvent(evt.event_name, payload, evt.seq);
+          lastSeq = evt.seq;
+        }
+      } finally {
+        await replayDb.close();
+      }
 
       await writeEvent("ready", { thread_id: threadId, ts: new Date().toISOString() });
 
-      const unsubscribe = subscribeThreadUpdates(workspaceName, threadId, (event) => {
-        void writeEvent("thread_updated", event);
+      // Subscribe to live thread updates and forward new events
+      const drainNewEvents = async (): Promise<void> => {
+        if (closed) return;
+        const eventDb = await openDatabase(workspaceName);
+        try {
+          await ensureConversationSchema(eventDb);
+          const events = await getEventsSince(eventDb, threadId, lastSeq);
+          for (const evt of events) {
+            lastSeq = evt.seq;
+            const payload = JSON.parse(evt.payload_json);
+            await writeEvent(evt.event_name, payload, evt.seq);
+          }
+        } finally {
+          await eventDb.close();
+        }
+      };
+
+      const unsubscribe = subscribeThreadUpdates(workspaceName, threadId, () => {
+        void drainNewEvents();
       });
 
       const pingTimer = setInterval(() => {
@@ -2609,15 +2682,15 @@ WHERE id = $1
     }
   });
 
-  app.post("/conversations/turns/stream", validateJson(conversationTurnSchema), async (c) => {
+  // Fire-and-forget turn creation. No SSE — the UI subscribes via
+  // GET /conversations/:threadId/stream to watch events.
+  app.post("/conversations/turns", validateJson(conversationTurnSchema), async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const body = c.req.valid("json");
     const modelId = resolveModelId(body.harness, body.model_label);
     const reasoningEffort = body.reasoning_effort;
     const db = await openDatabase(workspaceName);
     await ensureConversationSchema(db);
-    const paths = getWorkspacePaths(workspaceName);
-    const adapter = getConversationAdapter(body.harness);
     try {
       const requestedRecipientAgentId =
         body.mode === "plan" ? (body.recipient_agent_id ?? null) : null;
@@ -2717,259 +2790,242 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
         content: message,
       });
 
-      await insertEvent(db, {
-        id: `evt_${randomUUID().slice(0, 12)}`,
+      // Kick off the turn in the background — no blocking, no SSE.
+      turnRunner.execute({
+        workspaceName,
         threadId,
         turnId,
-        eventName: "user_message_saved",
-        payload: { message_id: userMessageId },
+        userMessageId,
+        isNewThread,
+        message,
+        mode: body.mode,
+        harness: body.harness,
+        modelLabel: body.model_label,
+        modelId,
+        reasoningEffort,
+        requestedRecipientAgentId,
       });
 
-      return streamSSE(c, async (stream) => {
-      const turnAbort = new AbortController();
-      const shouldAbortOnClientDisconnect = false;
-      let streamDisconnected = false;
-      const writeSSE = async (event: string, data: unknown): Promise<void> => {
-        if (streamDisconnected) {
-          return;
-        }
-        try {
-          await stream.writeSSE({
-            event,
-            data: JSON.stringify(data),
-          });
-        } catch (error) {
-          streamDisconnected = true;
-          if (shouldAbortOnClientDisconnect) {
-            throw error;
-          }
-        }
-      };
-      const onClientDisconnect = () => {
-        streamDisconnected = true;
-        if (shouldAbortOnClientDisconnect) {
-          turnAbort.abort();
-        }
-      };
-      c.req.raw.signal.addEventListener("abort", onClientDisconnect, { once: true });
-      stream.onAbort(onClientDisconnect);
+      return c.json({ turn_id: turnId, thread_id: threadId });
+    } finally {
+      await db.close();
+    }
+  });
 
-      try {
-        if (isNewThread) {
-          const startedPayload = { thread_id: threadId };
-          await insertEvent(db, {
-            id: `evt_${randomUUID().slice(0, 12)}`,
-            threadId,
-            turnId,
-            eventName: "thread_started",
-            payload: startedPayload,
-          });
-          await writeSSE("thread_started", startedPayload);
-        }
-
-        await writeSSE("user_message_saved", { message_id: userMessageId });
-
-        let assistantText = "";
-        const planPromptCandidates =
-          body.mode === "plan" ? await listPlanWorkerCandidates(db) : [];
-        const workspaceIsEmpty =
-          body.mode === "plan" ? await isDirectoryEmpty(paths.codeDir) : false;
-        const chatCodeRepos =
-          body.mode === "chat"
-            ? (await readdir(paths.codeDir, { withFileTypes: true }).catch(() => []))
-                .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-                .map((e) => e.name)
-                .sort()
-            : [];
-        const prompt = buildPrompt(body.mode, message, reasoningEffort, pragmaCliCommand, {
-          planCandidates: planPromptCandidates.map((candidate) => ({
-            id: candidate.id,
-            name: candidate.name,
-            description: candidate.description,
-            harness: candidate.harness,
-            modelLabel: candidate.model_label,
-          })),
-          workspaceIsEmpty,
-          workspaceDir: paths.workspaceDir,
-          codeRepos: chatCodeRepos,
-        });
-
-        const result = await adapter.sendTurn({
-          prompt,
-          modelId,
-          sessionId: thread.harness_session_id,
-          cwd: paths.codeDir,
-          env: buildConversationAgentEnv({
-            apiUrl,
-            pragmaCliCommand,
-            workspaceName,
-            threadId,
-            turnId,
-            agentId: DEFAULT_AGENT_ID,
-            taskId: thread.task_id,
-          }),
-          mode: body.mode,
-          reasoningEffort,
-          abortSignal: turnAbort.signal,
-          onEvent: async (event) => {
-            if (turnAbort.signal.aborted) return;
-            if (event.type === "assistant_text") {
-              assistantText = assistantText ? `${assistantText}\n${event.delta}` : event.delta;
-              await insertEvent(db, {
-                id: `evt_${randomUUID().slice(0, 12)}`,
-                threadId,
-                turnId,
-                eventName: "assistant_text",
-                payload: event,
-              });
-              await writeSSE("assistant_text", { delta: event.delta, turn_id: turnId });
-              return;
-            }
-
-            await insertEvent(db, {
-              id: `evt_${randomUUID().slice(0, 12)}`,
-              threadId,
-              turnId,
-              eventName: "tool_event",
-              payload: event,
-            });
-            await writeSSE("tool_event", {
-              name: event.name,
-              payload: event.payload,
-              turn_id: turnId,
-            });
-          },
-        });
-
-        if (result.aborted) {
-          const partialText = (result.finalText || assistantText || "").trim();
-          await failTurn(db, turnId, "Turn aborted by client.");
-          if (partialText) {
-            await insertMessage(db, {
-              id: `msg_${randomUUID().slice(0, 12)}`,
-              threadId,
-              turnId,
-              role: "assistant",
-              content: partialText,
-            });
-          }
-          return;
-        }
-
-        const finalAssistantText = (result.finalText || assistantText || "").trim();
-        const assistantMessageId = `msg_${randomUUID().slice(0, 12)}`;
-        const selectedPlanRecipientAgentId =
-          body.mode === "plan" ? await getStoredPlanRecipientForTurn(db, turnId) : null;
-        await completeTurn(db, {
-          turnId,
-          assistantMessage: finalAssistantText,
-          selectedAgentId: selectedPlanRecipientAgentId,
-          selectionStatus: body.mode === "plan"
-            ? (selectedPlanRecipientAgentId ? "auto_selected" : "recipient_required")
-            : null,
-        });
-
-        await insertMessage(db, {
-          id: assistantMessageId,
-          threadId,
-          turnId,
-          role: "assistant",
-          content: finalAssistantText,
-        });
-
-        // Transition task from planning → planned when plan turn completes
-        if (body.mode === "plan" && thread!.task_id) {
-          if (selectedPlanRecipientAgentId) {
-            await db.query(
-              `UPDATE tasks SET status = 'planned', plan = $2, assigned_to = $3 WHERE id = $1`,
-              [thread!.task_id, finalAssistantText, selectedPlanRecipientAgentId],
-            );
-          } else {
-            await db.query(
-              `UPDATE tasks SET status = 'planned', plan = $2 WHERE id = $1`,
-              [thread!.task_id, finalAssistantText],
-            );
-          }
-          emitTaskStatus(workspaceName, thread!.task_id, "planned", "plan_completed");
-        }
-
-        if (body.mode === "chat") {
-          // Only generate a title on the first turn (when no title exists yet)
-          const existing = await db.query<{ chat_title: string | null }>(
-            `SELECT chat_title FROM conversation_threads WHERE id = $1 LIMIT 1`,
-            [threadId],
+  // Backwards-compat: keep the old streaming endpoint alive but redirect
+  // to the new fire-and-forget endpoint. Clients should migrate to
+  // POST /conversations/turns + GET /conversations/:threadId/stream.
+  app.post("/conversations/turns/stream", validateJson(conversationTurnSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const body = c.req.valid("json");
+    const modelId = resolveModelId(body.harness, body.model_label);
+    const reasoningEffort = body.reasoning_effort;
+    const db = await openDatabase(workspaceName);
+    await ensureConversationSchema(db);
+    try {
+      const requestedRecipientAgentId =
+        body.mode === "plan" ? (body.recipient_agent_id ?? null) : null;
+      if (requestedRecipientAgentId) {
+        const recipient = await getAgentRow(db, requestedRecipientAgentId);
+        if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+          throw new PragmaError(
+            "INVALID_RECIPIENT",
+            400,
+            `Invalid recipient agent id: ${requestedRecipientAgentId}`,
           );
-          const hasTitle = existing.rows[0]?.chat_title && existing.rows[0].chat_title !== "";
-
-          if (!hasTitle) {
-            // Set a quick placeholder from the user's message so the sidebar isn't blank
-            const placeholder = deriveChatTitle(message, finalAssistantText);
-            await updateChatThreadMetadata(db, {
-              threadId,
-              title: placeholder,
-              lastMessageAt: new Date().toISOString(),
-            });
-
-            // Fire AI title generation and overwrite the placeholder when ready
-            generateTitle(db, message, finalAssistantText).then((aiTitle) => {
-              updateChatThreadMetadata(db, {
-                threadId,
-                title: aiTitle,
-                lastMessageAt: new Date().toISOString(),
-                force: true,
-              }).catch(() => {});
-            }).catch(() => {});
-          } else {
-            await updateChatThreadMetadata(db, {
-              threadId,
-              lastMessageAt: new Date().toISOString(),
-            });
-          }
         }
+      }
 
-        await updateThreadSession(db, {
-          threadId,
-          sessionId: result.sessionId,
+      let threadId = body.thread_id ?? `thread_${randomUUID().slice(0, 12)}`;
+      let thread = await getThreadById(db, threadId);
+      let isNewThread = false;
+
+      if (!thread) {
+        isNewThread = true;
+        await createThread(db, {
+          id: threadId,
+          mode: body.mode,
+          harness: body.harness,
+          modelLabel: body.model_label,
+          modelId,
         });
+        thread = await getThreadById(db, threadId);
+      }
 
-        const turnCompletedPayload = {
-          turn_id: turnId,
-          assistant_message_id: assistantMessageId,
+      if (!thread) {
+        throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
+      }
+
+      if (body.mode === "plan" && isNewThread) {
+        const planTaskId = `task_${randomUUID().slice(0, 8)}`;
+        const planTitle = truncateChatText(
+          body.message.replace(/\s+/g, " ").trim() || "Plan",
+          80,
+        );
+        await db.query(
+          `
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
+VALUES ($1, $2, 'planning', NULL, NULL, NULL)
+`,
+          [planTaskId, planTitle],
+        );
+        emitTaskStatus(workspaceName, planTaskId, "planning", "plan_created");
+        await setThreadTaskId(db, threadId, planTaskId);
+        thread = await getThreadById(db, threadId);
+      }
+
+      if (!thread) {
+        throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
+      }
+
+      if (thread.harness !== body.harness) {
+        throw new PragmaError(
+          "THREAD_HARNESS_MISMATCH",
+          409,
+          "Thread harness does not match the requested harness.",
+        );
+      }
+
+      if (thread.status === "closed") {
+        if (thread.mode === "execute" || thread.mode === "plan") {
+          await reopenThread(db, thread.id);
+          thread = await getThreadById(db, thread.id);
+        } else {
+          throw new PragmaError("THREAD_CLOSED", 409, "Conversation thread is already closed.");
+        }
+      }
+
+      if (!thread) {
+        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+      }
+
+      const turnId = `turn_${randomUUID().slice(0, 12)}`;
+      const userMessageId = `msg_${randomUUID().slice(0, 12)}`;
+      const message = body.message;
+
+      await createTurn(db, {
+        id: turnId,
+        threadId,
+        mode: body.mode,
+        userMessage: message,
+        reasoningEffort,
+        requestedRecipientAgentId,
+      });
+
+      await insertMessage(db, {
+        id: userMessageId,
+        threadId,
+        turnId,
+        role: "user",
+        content: message,
+      });
+
+      // Kick off the turn in the background
+      turnRunner.execute({
+        workspaceName,
+        threadId,
+        turnId,
+        userMessageId,
+        isNewThread,
+        message,
+        mode: body.mode,
+        harness: body.harness,
+        modelLabel: body.model_label,
+        modelId,
+        reasoningEffort,
+        requestedRecipientAgentId,
+      });
+
+      // Stream events from DB to the client until the turn completes or fails
+      return streamSSE(c, async (stream) => {
+        let lastSeq = 0;
+        let closed = false;
+
+        const writeEvent = async (
+          eventName: string,
+          payload: Record<string, unknown>,
+          seq?: number,
+        ): Promise<void> => {
+          if (closed) return;
+          try {
+            await stream.writeSSE({
+              event: eventName,
+              data: JSON.stringify(payload),
+              ...(seq != null ? { id: String(seq) } : {}),
+            });
+          } catch {
+            closed = true;
+          }
         };
 
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId,
-          turnId,
-          eventName: "turn_completed",
-          payload: turnCompletedPayload,
+        const drainEvents = async (): Promise<boolean> => {
+          const eventDb = await openDatabase(workspaceName);
+          try {
+            await ensureConversationSchema(eventDb);
+            const events = await getEventsSince(eventDb, threadId, lastSeq);
+            for (const evt of events) {
+              lastSeq = evt.seq;
+              const payload = JSON.parse(evt.payload_json);
+              await writeEvent(evt.event_name, payload, evt.seq);
+              if (evt.event_name === "turn_completed" || evt.event_name === "error" || evt.event_name === "turn_failed") {
+                return true; // done
+              }
+            }
+          } finally {
+            await eventDb.close();
+          }
+          return false;
+        };
+
+        // Replay any events already written
+        if (await drainEvents()) return;
+
+        // Subscribe to live updates
+        const unsubscribe = subscribeThreadUpdates(workspaceName, threadId, () => {
+          void drainEvents().then((done) => {
+            if (done) {
+              closed = true;
+            }
+          });
         });
 
-        await writeSSE("turn_completed", turnCompletedPayload);
-      } catch (error: unknown) {
-        const messageText = errorMessage(error);
+        const pingTimer = setInterval(() => {
+          void writeEvent("ping", { ts: new Date().toISOString() });
+        }, 15000);
 
-        await failTurn(db, turnId, messageText);
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId,
-          turnId,
-          eventName: "error",
-          payload: { code: "TURN_ERROR", message: messageText },
+        const abortSignal = c.req.raw.signal;
+        await new Promise<void>((resolve) => {
+          const check = () => { if (closed) resolve(); };
+          const interval = setInterval(check, 500);
+          const closeStream = () => {
+            clearInterval(interval);
+            resolve();
+          };
+          if (abortSignal.aborted || closed) {
+            clearInterval(interval);
+            resolve();
+            return;
+          }
+          abortSignal.addEventListener("abort", closeStream, { once: true });
         });
 
-        if (!streamDisconnected) {
-          await writeSSE("error", { code: "TURN_ERROR", message: messageText });
-        }
-      } finally {
-        c.req.raw.signal.removeEventListener("abort", onClientDisconnect);
-        await db.close();
-      }
+        clearInterval(pingTimer);
+        unsubscribe();
       });
     } catch (error) {
       await db.close();
       throw error;
     }
+  });
+
+  // Abort an in-progress turn
+  app.post("/conversations/turns/:turnId/abort", async (c) => {
+    const turnId = c.req.param("turnId");
+    const aborted = turnRunner.abort(turnId);
+    if (aborted) {
+      return c.json({ ok: true, turn_id: turnId, aborted: true });
+    }
+    return c.json({ ok: true, turn_id: turnId, aborted: false, message: "Turn not found or already completed." });
   });
 
   app.post("/conversations/:threadId/execute", validateJson(executeFromThreadSchema), async (c) => {

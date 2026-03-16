@@ -95,6 +95,7 @@ export type ConversationMessage = {
 
 export type ConversationEvent = {
   id: string;
+  seq?: number;
   thread_id: string;
   turn_id: string | null;
   event_name: string;

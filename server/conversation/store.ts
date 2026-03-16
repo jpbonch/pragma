@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 
 CREATE TABLE IF NOT EXISTS conversation_events (
   id VARCHAR(64) PRIMARY KEY,
+  seq SERIAL,
   thread_id VARCHAR(64) NOT NULL REFERENCES conversation_threads(id) ON DELETE CASCADE,
   turn_id VARCHAR(64) REFERENCES conversation_turns(id) ON DELETE SET NULL,
   event_name VARCHAR(64) NOT NULL,
@@ -72,6 +73,25 @@ CREATE INDEX IF NOT EXISTS idx_conversation_events_thread ON conversation_events
 
   await db.exec(`
 CREATE INDEX IF NOT EXISTS idx_conversation_chat_mode_sort ON conversation_threads(mode, chat_last_message_at DESC, updated_at DESC);
+`);
+
+  // Migration: add seq column to conversation_events if it doesn't exist
+  await db.exec(`
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'conversation_events' AND column_name = 'seq'
+  ) THEN
+    ALTER TABLE conversation_events ADD COLUMN seq SERIAL;
+    CREATE INDEX idx_conversation_events_seq ON conversation_events(thread_id, seq ASC);
+  END IF;
+END $$;
+`);
+
+  // Ensure index exists for seq-based queries even on fresh DBs
+  await db.exec(`
+CREATE INDEX IF NOT EXISTS idx_conversation_events_seq ON conversation_events(thread_id, seq ASC);
 `);
 }
 
@@ -440,14 +460,34 @@ export async function insertEvent(
     eventName: string;
     payload: unknown;
   },
-): Promise<void> {
-  await db.query(
+): Promise<number> {
+  const result = await db.query<{ seq: number }>(
     `
 INSERT INTO conversation_events (id, thread_id, turn_id, event_name, payload_json)
 VALUES ($1, $2, $3, $4, $5)
+RETURNING seq
 `,
     [input.id, input.threadId, input.turnId, input.eventName, JSON.stringify(input.payload ?? null)],
   );
+  return result.rows[0]?.seq ?? 0;
+}
+
+export async function getEventsSince(
+  db: PGlite,
+  threadId: string,
+  afterSeq: number,
+): Promise<Array<ConversationEvent & { seq: number }>> {
+  const result = await db.query<ConversationEvent & { seq: number }>(
+    `
+SELECT id, seq, thread_id, turn_id, event_name, payload_json, created_at
+FROM conversation_events
+WHERE thread_id = $1
+  AND seq > $2
+ORDER BY seq ASC
+`,
+    [threadId, afterSeq],
+  );
+  return result.rows;
 }
 
 export async function setThreadTaskId(db: PGlite, threadId: string, taskId: string): Promise<void> {
@@ -665,12 +705,12 @@ ORDER BY created_at ASC
 `,
       [threadId],
     ),
-    db.query<ConversationEvent>(
+    db.query<ConversationEvent & { seq: number }>(
       `
-SELECT id, thread_id, turn_id, event_name, payload_json, created_at
+SELECT id, seq, thread_id, turn_id, event_name, payload_json, created_at
 FROM conversation_events
 WHERE thread_id = $1
-ORDER BY created_at ASC
+ORDER BY seq ASC
 `,
       [threadId],
     ),

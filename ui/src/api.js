@@ -649,6 +649,27 @@ export async function streamConversationTurn(payload, { onEvent, signal } = {}) 
   }
 }
 
+/**
+ * Fire-and-forget turn creation. Returns { turn_id, thread_id } immediately.
+ * The caller should subscribe to GET /conversations/:threadId/stream to watch events.
+ */
+export async function createConversationTurn(payload) {
+  return fetchJson('/conversations/turns', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+/**
+ * Abort an in-progress turn.
+ */
+export async function abortConversationTurn(turnId) {
+  return fetchJson(`/conversations/turns/${encodeURIComponent(turnId)}/abort`, {
+    method: 'POST',
+  })
+}
+
 export async function fetchHumans() {
   const data = asObject(await fetchJson('/humans'), 'Invalid humans response.')
   if (!Array.isArray(data.humans)) {
