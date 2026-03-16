@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Plus,
   Check,
-  User,
   X,
   Code2,
   Folder,
@@ -20,7 +19,6 @@ const ITEMS = [
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'context', icon: BookOpen, label: 'Context' },
   { id: 'connections', icon: Link2, label: 'Connections' },
-  { id: 'settings', icon: Settings, label: 'Settings' },
 ]
 
 export function Sidebar({
@@ -215,12 +213,13 @@ export function Sidebar({
         </div>
       </section>
 
-      <div className="sidebar-footer">
-        <div className="sidebar-footer-avatar">
-          <User size={13} strokeWidth={2} />
-        </div>
-        <span className="sidebar-footer-name">You</span>
-      </div>
+      <button
+        className={`sidebar-item sidebar-footer-settings ${activeTab === 'settings' ? 'active' : ''}`}
+        onClick={() => onChange('settings')}
+      >
+        <Settings size={15} strokeWidth={1.75} />
+        <span>Settings</span>
+      </button>
     </aside>
   )
 }
