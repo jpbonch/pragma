@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase, updateTaskTitle } from "../db";
+import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
 import { getConversationAdapter } from "./adapters";
-import { generateTitle } from "./titleGenerator";
 import {
   checkpointTaskRepos,
   parseTaskGitState,
@@ -603,15 +602,6 @@ WHERE id = $1
     });
 
     await closeThread(db, input.threadId);
-
-    // Generate an AI title from prompt + worker response before final status update
-    // so the frontend picks up the nice title on refetch.
-    try {
-      const aiTitle = await generateTitle(db, task, finalWorkerText);
-      await updateTaskTitle(db, input.taskId, aiTitle);
-    } catch {
-      // Keep the existing fallback title if generation fails.
-    }
 
     const statusResult = await db.query<{ status: TaskStatus }>(
       `

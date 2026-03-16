@@ -1811,6 +1811,11 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL)
       );
       emitTaskStatus(workspaceName, taskId, "queued", "execute_created");
 
+      // Fire-and-forget: generate an AI title from the prompt
+      generateTitle(db, prompt, "").then((aiTitle) => {
+        updateTaskTitle(db, taskId, aiTitle);
+      }).catch(() => {});
+
       await createThread(db, {
         id: threadId,
         mode: "execute",
@@ -2711,25 +2716,30 @@ WHERE id = $1
         });
 
         if (body.mode === "chat") {
-          const previewSource = finalAssistantText || message;
           const chatTitle = deriveChatTitle(finalAssistantText, message);
           await updateChatThreadMetadata(db, {
             threadId,
             title: chatTitle,
-            preview: truncateChatText(previewSource, 140),
             lastMessageAt: new Date().toISOString(),
           });
 
-          // Fire-and-forget: overwrite with AI-generated title
-          generateTitle(db, message, finalAssistantText).then((aiTitle) => {
-            updateChatThreadMetadata(db, {
-              threadId,
-              title: aiTitle,
-              preview: truncateChatText(previewSource, 140),
-              lastMessageAt: new Date().toISOString(),
-              force: true,
+          // Only generate an AI title on the first turn (when no title exists yet)
+          const existing = await db.query<{ chat_title: string | null }>(
+            `SELECT chat_title FROM conversation_threads WHERE id = $1 LIMIT 1`,
+            [threadId],
+          );
+          const hasTitle = existing.rows[0]?.chat_title && existing.rows[0].chat_title !== "";
+
+          if (!hasTitle) {
+            generateTitle(db, message, finalAssistantText).then((aiTitle) => {
+              updateChatThreadMetadata(db, {
+                threadId,
+                title: aiTitle,
+                lastMessageAt: new Date().toISOString(),
+                force: true,
+              }).catch(() => {});
             }).catch(() => {});
-          }).catch(() => {});
+          }
         }
 
         await updateThreadSession(db, {

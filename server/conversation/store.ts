@@ -253,7 +253,6 @@ export async function updateChatThreadMetadata(
   input: {
     threadId: string;
     title?: string | null;
-    preview: string | null;
     lastMessageAt?: string | null;
     force?: boolean;
   },
@@ -274,12 +273,11 @@ export async function updateChatThreadMetadata(
     `
 UPDATE conversation_threads
 SET ${titleSql},
-    chat_preview = $3::text,
-    chat_last_message_at = COALESCE($4::timestamptz, CURRENT_TIMESTAMP),
+    chat_last_message_at = COALESCE($3::timestamptz, CURRENT_TIMESTAMP),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 `,
-    [input.threadId, input.title ?? null, input.preview ?? null, input.lastMessageAt ?? null],
+    [input.threadId, input.title ?? null, input.lastMessageAt ?? null],
   );
 }
 
