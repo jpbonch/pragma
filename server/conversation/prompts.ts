@@ -87,6 +87,7 @@ export function buildOrchestratorPrompt(input: {
   forcedRecipientAgentId?: string | null;
   reasoningEffort?: ReasoningEffort;
   pragmaCliCommand?: string;
+  skills?: Array<{ name: string; description: string | null }>;
 }): string {
   const forced = input.forcedRecipientAgentId?.trim() || "";
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
@@ -97,7 +98,7 @@ export function buildOrchestratorPrompt(input: {
     return `${index + 1}. id=${candidate.id}; name=${candidate.name}${desc}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
   });
 
-  return [
+  const parts = [
     "You are an Orchestrator.",
     "Your only task is to pick the best worker agent for the task below.",
     "Do not execute the task.",
@@ -118,7 +119,14 @@ export function buildOrchestratorPrompt(input: {
     "Candidate workers:",
     candidateLines.length > 0 ? candidateLines.join("\n") : "(none)",
     "After the command succeeds, return a concise plain-text confirmation.",
-  ].join("\n\n");
+  ];
+
+  const skillIndex = formatSkillIndex(input.skills, cli);
+  if (skillIndex) {
+    parts.push(skillIndex);
+  }
+
+  return parts.join("\n\n");
 }
 
 export function buildWorkerPrompt(input: {
@@ -129,6 +137,7 @@ export function buildWorkerPrompt(input: {
   pragmaCliCommand?: string;
   preferredCodePath?: string | null;
   taskWorkspaceDir?: string;
+  skills?: Array<{ name: string; description: string | null }>;
 }): string {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
@@ -150,7 +159,7 @@ export function buildWorkerPrompt(input: {
     ? `- Active task workspace root (write boundary): \`${taskWorkspaceDir}/\`.`
     : "- Active task workspace root (write boundary): current working directory.";
 
-  return [
+  const parts = [
     `You are ${input.workerName}.`,
     "Follow your agent instructions exactly, then execute the task.",
     "Use exploratory probing as needed to gather context before making changes.",
@@ -178,10 +187,31 @@ export function buildWorkerPrompt(input: {
     reasoningLine,
     "Agent instructions:",
     agentFile || "(No agent file provided. Use pragmatic software engineering judgement.)",
-    "Task:",
-    task,
-    "Return a concise final result.",
-  ].join("\n\n");
+  ];
+
+  const skillIndex = formatSkillIndex(input.skills, cli);
+  if (skillIndex) {
+    parts.push(skillIndex);
+  }
+
+  parts.push("Task:", task, "Return a concise final result.");
+
+  return parts.join("\n\n");
+}
+
+function formatSkillIndex(
+  skills: Array<{ name: string; description: string | null }> | undefined,
+  cli: string,
+): string | null {
+  if (!skills || skills.length === 0) {
+    return null;
+  }
+
+  const lines = skills.map((s) => `- ${s.name}: ${s.description || "(no description)"}`);
+  return [
+    `Available skills (use \`${cli} agent get-skill --name "<name>"\` to read full instructions):`,
+    ...lines,
+  ].join("\n");
 }
 
 function formatReasoningInstruction(reasoningEffort: ReasoningEffort): string {

@@ -251,6 +251,28 @@ export const updateHumanSchema = z
   })
   .strict();
 
+export const createSkillSchema = z
+  .object({
+    name: nonEmptyString,
+    description: z.string().optional(),
+    content: nonEmptyString,
+  })
+  .strict();
+
+export const updateSkillSchema = z
+  .object({
+    name: nonEmptyString.optional(),
+    description: z.string().optional(),
+    content: nonEmptyString.optional(),
+  })
+  .strict();
+
+export const assignAgentSkillSchema = z
+  .object({
+    skill_id: nonEmptyString,
+  })
+  .strict();
+
 export type Harness = z.infer<typeof harnessSchema>;
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;

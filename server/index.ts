@@ -89,6 +89,9 @@ import {
   updateAgentSchema,
   updateContextFileSchema,
   updateHumanSchema,
+  createSkillSchema,
+  updateSkillSchema,
+  assignAgentSkillSchema,
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
@@ -3154,6 +3157,232 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
 
     return c.json({ ok: true });
+  });
+
+  // ── Skills CRUD ────────────────────────────────────────────────────
+
+  app.get("/skills", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const result = await db.query<{
+        id: string;
+        name: string;
+        description: string | null;
+      }>(`SELECT id, name, description FROM skills ORDER BY name ASC`);
+
+      return c.json({ skills: result.rows });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.post("/skills", validateJson(createSkillSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const body = c.req.valid("json");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const skillId = `skill_${randomUUID().slice(0, 12)}`;
+      await db.query(
+        `INSERT INTO skills (id, name, description, content) VALUES ($1, $2, $3, $4)`,
+        [skillId, body.name, body.description ?? null, body.content],
+      );
+
+      return c.json({ ok: true, id: skillId }, 201);
+    } catch (error: unknown) {
+      const message = errorMessage(error);
+      if (message.includes("unique") || message.includes("duplicate")) {
+        throw new PragmaError("SKILL_NAME_EXISTS", 409, `A skill with this name already exists.`);
+      }
+      throw new PragmaError("CREATE_SKILL_FAILED", 400, message);
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.put("/skills/:id", validateJson(updateSkillSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const existing = await db.query<{ id: string }>(
+        `SELECT id FROM skills WHERE id = $1 LIMIT 1`,
+        [id],
+      );
+      if (existing.rows.length === 0) {
+        throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${id}`);
+      }
+
+      const sets: string[] = [];
+      const params: unknown[] = [id];
+      let paramIndex = 2;
+
+      if (body.name !== undefined) {
+        sets.push(`name = $${paramIndex++}`);
+        params.push(body.name);
+      }
+      if (body.description !== undefined) {
+        sets.push(`description = $${paramIndex++}`);
+        params.push(body.description);
+      }
+      if (body.content !== undefined) {
+        sets.push(`content = $${paramIndex++}`);
+        params.push(body.content);
+      }
+
+      if (sets.length > 0) {
+        await db.query(`UPDATE skills SET ${sets.join(", ")} WHERE id = $1`, params);
+      }
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.delete("/skills/:id", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const id = c.req.param("id");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query(`DELETE FROM skills WHERE id = $1`, [id]);
+      if ((result.affectedRows ?? 0) === 0) {
+        throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${id}`);
+      }
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // ── Agent-Skill Assignments ────────────────────────────────────────
+
+  app.get("/agents/:id/skills", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const agentId = c.req.param("id");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const agent = await db.query<{ id: string }>(
+        `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
+        [agentId],
+      );
+      if (agent.rows.length === 0) {
+        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
+      }
+
+      const result = await db.query<{
+        id: string;
+        name: string;
+        description: string | null;
+      }>(
+        `SELECT s.id, s.name, s.description
+         FROM skills s
+         JOIN agent_skills as_rel ON as_rel.skill_id = s.id
+         WHERE as_rel.agent_id = $1
+         ORDER BY s.name ASC`,
+        [agentId],
+      );
+
+      return c.json({ skills: result.rows });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.post("/agents/:id/skills", validateJson(assignAgentSkillSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const agentId = c.req.param("id");
+    const body = c.req.valid("json");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const agent = await db.query<{ id: string }>(
+        `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
+        [agentId],
+      );
+      if (agent.rows.length === 0) {
+        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
+      }
+
+      const skill = await db.query<{ id: string }>(
+        `SELECT id FROM skills WHERE id = $1 LIMIT 1`,
+        [body.skill_id],
+      );
+      if (skill.rows.length === 0) {
+        throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${body.skill_id}`);
+      }
+
+      await db.query(
+        `INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [agentId, body.skill_id],
+      );
+
+      return c.json({ ok: true }, 201);
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.delete("/agents/:id/skills/:skillId", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const agentId = c.req.param("id");
+    const skillId = c.req.param("skillId");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query(
+        `DELETE FROM agent_skills WHERE agent_id = $1 AND skill_id = $2`,
+        [agentId, skillId],
+      );
+      if ((result.affectedRows ?? 0) === 0) {
+        throw new PragmaError(
+          "AGENT_SKILL_NOT_FOUND",
+          404,
+          `Skill assignment not found for agent ${agentId} and skill ${skillId}`,
+        );
+      }
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
+  app.get("/agents/:id/skills/:skillId/content", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const agentId = c.req.param("id");
+    const skillId = c.req.param("skillId");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query<{ content: string }>(
+        `SELECT s.content
+         FROM skills s
+         JOIN agent_skills as_rel ON as_rel.skill_id = s.id
+         WHERE as_rel.agent_id = $1 AND s.id = $2
+         LIMIT 1`,
+        [agentId, skillId],
+      );
+
+      if (result.rows.length === 0) {
+        throw new PragmaError(
+          "AGENT_SKILL_NOT_FOUND",
+          404,
+          `Skill not found or not assigned to agent ${agentId}`,
+        );
+      }
+
+      return c.text(result.rows[0].content);
+    } finally {
+      await db.close();
+    }
   });
 
   app.onError((error, c) => {

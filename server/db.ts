@@ -528,6 +528,23 @@ CREATE TABLE IF NOT EXISTS humans (
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS skills (
+  id VARCHAR(64) PRIMARY KEY,
+  name VARCHAR(255) UNIQUE NOT NULL,
+  description TEXT,
+  content TEXT NOT NULL
+);
+`);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS agent_skills (
+  agent_id VARCHAR(64) REFERENCES agents(id) ON DELETE CASCADE,
+  skill_id VARCHAR(64) REFERENCES skills(id) ON DELETE CASCADE,
+  PRIMARY KEY (agent_id, skill_id)
+);
+`);
 }
 
 async function ensureTaskStatusEnumType(db: PGlite): Promise<void> {

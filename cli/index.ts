@@ -338,6 +338,122 @@ taskCommand
     },
   );
 
+taskCommand
+  .command("plan-summary")
+  .description("Submit structured plan summary for the current plan turn")
+  .requiredOption("--title <text>", "Plan title")
+  .requiredOption("--summary <text>", "Plan summary")
+  .option(
+    "--step <text>",
+    "Plan step (repeat for multiple steps)",
+    (value: string, prev: string[]) => [...prev, value],
+    [],
+  )
+  .option("--thread-id <id>", "Conversation thread id")
+  .option("--turn-id <id>", "Conversation turn id")
+  .option("--api-url <url>", "Pragma API base URL")
+  .action(
+    async (options: {
+      title: string;
+      summary: string;
+      step: string[];
+      threadId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, threadId, turnId } = resolveThreadTurnCommandContext(options);
+      const steps = (Array.isArray(options.step) ? options.step : [])
+        .map((step) => step.trim())
+        .filter(Boolean);
+      if (steps.length === 0) {
+        throw new Error("At least one --step is required.");
+      }
+
+      await apiRequest(
+        apiUrl,
+        `/conversations/${encodeURIComponent(threadId)}/turns/${encodeURIComponent(turnId)}/agent/plan-summary`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: options.title.trim(),
+            summary: options.summary.trim(),
+            steps,
+          }),
+        },
+      );
+
+      console.log(`Plan summary submitted for turn ${turnId}.`);
+    },
+  );
+
+const agentCommand = program
+  .command("agent")
+  .description("Agent skill commands");
+
+agentCommand
+  .command("list-skills")
+  .description("List skills assigned to the current agent")
+  .option("--agent-id <id>", "Agent id")
+  .option("--api-url <url>", "Pragma API base URL")
+  .action(
+    async (options: {
+      agentId?: string;
+      apiUrl?: string;
+    }) => {
+      const apiUrl = resolveRequiredOptionOrEnv(options.apiUrl, "PRAGMA_API_URL", "--api-url");
+      const agentId = resolveRequiredOptionOrEnv(options.agentId, "PRAGMA_AGENT_ID", "--agent-id");
+      const result = await apiRequest<{
+        skills: Array<{ id: string; name: string; description: string | null }>;
+      }>(apiUrl, `/agents/${encodeURIComponent(agentId)}/skills`);
+
+      if (result.skills.length === 0) {
+        console.log("No skills assigned.");
+        return;
+      }
+
+      console.table(result.skills.map((s) => ({ name: s.name, description: s.description ?? "" })));
+    },
+  );
+
+agentCommand
+  .command("get-skill")
+  .description("Print the full content of a skill assigned to the current agent")
+  .requiredOption("--name <name>", "Skill name")
+  .option("--agent-id <id>", "Agent id")
+  .option("--api-url <url>", "Pragma API base URL")
+  .action(
+    async (options: {
+      name: string;
+      agentId?: string;
+      apiUrl?: string;
+    }) => {
+      const apiUrl = resolveRequiredOptionOrEnv(options.apiUrl, "PRAGMA_API_URL", "--api-url");
+      const agentId = resolveRequiredOptionOrEnv(options.agentId, "PRAGMA_AGENT_ID", "--agent-id");
+
+      const listResult = await apiRequest<{
+        skills: Array<{ id: string; name: string; description: string | null }>;
+      }>(apiUrl, `/agents/${encodeURIComponent(agentId)}/skills`);
+
+      const skill = listResult.skills.find(
+        (s) => s.name.toLowerCase() === options.name.toLowerCase(),
+      );
+      if (!skill) {
+        throw new Error(`Skill not found: ${options.name}`);
+      }
+
+      const response = await fetch(
+        `${apiUrl.replace(/\/$/, "")}/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skill.id)}/content`,
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to fetch skill content: HTTP ${response.status}`);
+      }
+
+      const content = await response.text();
+      console.log(content);
+    },
+  );
+
 program
   .command("server")
   .description("Start the Pragma API server")

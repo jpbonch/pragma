@@ -300,6 +300,8 @@ WHERE id = $1
         orchestrator_agent_id: orchestrator.id,
       });
 
+      const orchestratorSkills = await listAgentSkills(db, orchestrator.id);
+
       const orchestratorPrompt = buildOrchestratorPrompt({
         task,
         candidates: workers.map((worker) => ({
@@ -312,6 +314,7 @@ WHERE id = $1
         forcedRecipientAgentId: requestedRecipientId,
         reasoningEffort,
         pragmaCliCommand: options.pragmaCliCommand,
+        skills: orchestratorSkills,
       });
 
       const orchestratorAdapter = getConversationAdapter(orchestrator.harness);
@@ -497,6 +500,7 @@ WHERE id = $1
     });
 
     const workerAdapter = getConversationAdapter(selectedWorker.harness);
+    const workerSkills = await listAgentSkills(db, selectedWorker.id);
     const workerPrompt = buildWorkerPrompt({
       task,
       workerName: selectedWorker.name,
@@ -505,6 +509,7 @@ WHERE id = $1
       pragmaCliCommand: options.pragmaCliCommand,
       preferredCodePath,
       taskWorkspaceDir,
+      skills: workerSkills,
     });
 
     let workerText = "";
@@ -738,6 +743,22 @@ function buildAgentRuntimeEnv(input: {
     PRAGMA_TURN_ID: input.turnId,
     PRAGMA_AGENT_ID: input.agentId,
   };
+}
+
+async function listAgentSkills(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  agentId: string,
+): Promise<Array<{ name: string; description: string | null }>> {
+  const result = await db.query<{ name: string; description: string | null }>(
+    `SELECT s.name, s.description
+     FROM skills s
+     JOIN agent_skills as_rel ON as_rel.skill_id = s.id
+     WHERE as_rel.agent_id = $1
+     ORDER BY s.name ASC`,
+    [agentId],
+  );
+
+  return result.rows;
 }
 
 function resolvePreferredCodePath(gitState: TaskGitState): string | null {
