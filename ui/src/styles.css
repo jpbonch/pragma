@@ -3605,9 +3605,53 @@ select { cursor: pointer; }
 }
 
 /* ─── Settings View ─────────────────────────────────── */
+.settings-layout {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.settings-sidebar {
+  width: 180px;
+  flex-shrink: 0;
+  background: #F7F7F5;
+  border-right: 1px solid #ebe7df;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-sidebar-item {
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: #91918E;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+}
+.settings-sidebar-item:hover {
+  background: rgba(0,0,0,0.04);
+  color: #37352F;
+}
+.settings-sidebar-item.active {
+  background: rgba(0,0,0,0.05);
+  font-weight: 600;
+  color: #37352F;
+}
+
 .settings-view {
   flex: 1;
   padding: 24px;
+  overflow-y: auto;
 }
 
 .settings-card {
