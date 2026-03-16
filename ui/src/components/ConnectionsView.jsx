@@ -5,6 +5,7 @@ import {
   fetchInstalledSkills,
   fetchGlobalSkills,
   installRegistrySkill,
+  createCustomSkill,
   deleteSkill,
   fetchAgents,
   fetchAgentSkills,
@@ -34,6 +35,10 @@ export function ConnectionsView() {
   const [assignBusy, setAssignBusy] = useState(false)
   // Track which agent card has the skill-add dropdown open
   const [addingSkillToAgent, setAddingSkillToAgent] = useState(null)
+  // Create custom skill modal
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createForm, setCreateForm] = useState({ name: '', description: '', content: '' })
+  const [creating, setCreating] = useState(false)
 
   // Derive agent -> skills map from skillAgents
   const agentSkillsMap = useMemo(() => {
@@ -204,6 +209,34 @@ export function ConnectionsView() {
     }
   }
 
+  async function handleCreateSkill(e) {
+    e.preventDefault()
+    if (creating) return
+    setCreating(true)
+    setActionError('')
+    try {
+      await createCustomSkill({
+        name: createForm.name.trim(),
+        description: createForm.description.trim() || undefined,
+        content: createForm.content,
+      })
+      const [inst, agentList] = await Promise.all([
+        fetchInstalledSkills(),
+        fetchAgents(),
+      ])
+      setInstalled(inst)
+      setAgents(agentList)
+      const map = await loadAgentSkillMap(agentList, inst)
+      setSkillAgents(map)
+      setShowCreateModal(false)
+      setCreateForm({ name: '', description: '', content: '' })
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const anthropicSkills = registry.filter((s) => s.provider === 'anthropic')
   const openaiSkills = registry.filter((s) => s.provider === 'openai')
 
@@ -318,9 +351,18 @@ export function ConnectionsView() {
               </div>
             )}
 
-            {installed.length > 0 && (
-              <div className="cn-section">
+            <div className="cn-section">
+              <div className="cn-section-header">
                 <h2 className="cn-section-title">Installed</h2>
+                <button
+                  className="cn-create-skill-btn"
+                  onClick={() => setShowCreateModal(true)}
+                >
+                  <Plus size={14} />
+                  <span>New Skill</span>
+                </button>
+              </div>
+              {installed.length > 0 && (
                 <div className="cn-grid">
                   {installed.map((skill) => {
                     const assigned = skillAgents[skill.id] || []
@@ -408,8 +450,8 @@ export function ConnectionsView() {
                     )
                   })}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {globalSkills.length > 0 && (
               <div className="cn-section">
@@ -532,6 +574,63 @@ export function ConnectionsView() {
           </>
         )}
       </div>
+
+      {showCreateModal && (
+        <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>
+          <form
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleCreateSkill}
+          >
+            <h2>New Custom Skill</h2>
+            <p>Define a reusable skill that can be assigned to agents.</p>
+
+            <label className="modal-label">Name</label>
+            <input
+              className="modal-input"
+              placeholder="e.g. code-reviewer"
+              value={createForm.name}
+              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+              required
+              autoFocus
+            />
+
+            <label className="modal-label">Description</label>
+            <input
+              className="modal-input"
+              placeholder="Brief description (optional)"
+              value={createForm.description}
+              onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+            />
+
+            <label className="modal-label">Content</label>
+            <textarea
+              className="modal-textarea"
+              placeholder="Skill instructions / prompt content"
+              value={createForm.content}
+              onChange={(e) => setCreateForm({ ...createForm, content: e.target.value })}
+              required
+            />
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-cancel"
+                onClick={() => setShowCreateModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="modal-create"
+                disabled={!createForm.name.trim() || !createForm.content.trim() || creating}
+              >
+                {creating ? 'Creating...' : 'Create Skill'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   )
 }

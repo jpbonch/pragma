@@ -4560,7 +4560,33 @@ select { cursor: pointer; }
 .cn-empty-desc { font-size: 13px; color: #9b9a97; margin: 0; }
 
 .cn-section { margin-bottom: 24px; }
+.cn-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.cn-section-header .cn-section-title { margin-bottom: 0; }
 .cn-section-title { font-size: 15px; font-weight: 700; color: #37352f; margin: 0 0 4px; }
+.cn-create-skill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1.5px solid #ECEBE8;
+  border-radius: 8px;
+  background: #fff;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #37352f;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.cn-create-skill-btn:hover {
+  background: #f5f5f3;
+  border-color: #B0AFA8;
+}
 .cn-section-source {
   font-size: 12px; color: #9b9a97; margin: 0 0 10px;
   font-family: 'SF Mono', 'Menlo', monospace;

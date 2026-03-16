@@ -705,6 +705,14 @@ export async function installRegistrySkill({ name, provider, repo, skill_path })
   }, 30000)
 }
 
+export async function createCustomSkill({ name, description, content }) {
+  return fetchJson('/skills', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, description, content }),
+  })
+}
+
 export async function deleteSkill(id) {
   return fetchJson(`/skills/${encodeURIComponent(id)}`, {
     method: 'DELETE',
