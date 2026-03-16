@@ -3301,6 +3301,13 @@ select { cursor: pointer; }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-bottom: 4px;
+}
+
+.context-subtitle {
+  font-size: 11px;
+  color: #9b9a97;
+  line-height: 1.4;
   margin-bottom: 10px;
 }
 

@@ -181,6 +181,7 @@ export function ContextView({
             </button>
           </div>
         </div>
+        <div className="context-subtitle">Agents automatically add context here. You can also edit manually.</div>
 
         {loading && <div className="muted">Loading...</div>}
         {error && <div className="error">Error: {error}</div>}
