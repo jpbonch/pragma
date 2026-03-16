@@ -1773,7 +1773,14 @@ export default function App() {
       }
     }
 
-    if (mode === 'execute') {
+    const continueExistingExecute =
+      mode === 'execute' &&
+      conversation.open &&
+      !conversation.loading &&
+      conversation.mode === 'execute' &&
+      Boolean(conversation.threadId)
+
+    if (mode === 'execute' && !continueExistingExecute) {
       try {
         await createExecuteTask({
           prompt: finalMessage,
@@ -1823,7 +1830,9 @@ export default function App() {
       conversation.mode === 'chat' &&
       Boolean(conversation.threadId)
 
-    if (!forceContinueOpenChat && !orchestratorRuntime) {
+    const forceContinueExisting = forceContinueOpenChat || continueExistingExecute
+
+    if (!forceContinueExisting && !orchestratorRuntime) {
       const refreshedRuntime = await resolveOrchestratorRuntime()
       if (!refreshedRuntime) {
         setWorkspaceError('Orchestrator runtime is not available.')
@@ -1831,18 +1840,18 @@ export default function App() {
       }
     }
 
-    const runtime = forceContinueOpenChat
+    const runtime = forceContinueExisting
       ? null
       : orchestratorRuntime ?? (await resolveOrchestratorRuntime())
-    if (!forceContinueOpenChat && !runtime) {
+    if (!forceContinueExisting && !runtime) {
       setWorkspaceError('Orchestrator runtime is not available.')
       return
     }
 
-    const effectiveHarness = forceContinueOpenChat
+    const effectiveHarness = forceContinueExisting
       ? conversation.harness
       : runtime.harness
-    const effectiveModelLabel = forceContinueOpenChat
+    const effectiveModelLabel = forceContinueExisting
       ? conversation.modelLabel
       : runtime.model_label
 

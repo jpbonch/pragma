@@ -313,6 +313,7 @@ export async function reopenThread(db: PGlite, threadId: string): Promise<void> 
     `
 UPDATE conversation_threads
 SET status = 'open',
+    harness_session_id = NULL,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 `,

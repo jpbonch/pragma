@@ -2579,7 +2579,7 @@ WHERE id = $1
       }
 
       if (thread.status === "closed") {
-        if (thread.mode === "execute") {
+        if (thread.mode === "execute" || thread.mode === "plan") {
           await reopenThread(db, thread.id);
           thread = await getThreadById(db, thread.id);
         } else {
