@@ -6,6 +6,20 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ─── Global Scrollbar: transparent track ──────────── */
+* {
+  scrollbar-color: rgba(0,0,0,0.25) transparent;  /* thumb  track – Firefox */
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.25);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.35);
+}
+
 body, html, #root {
   width: 100%;
   height: 100%;
