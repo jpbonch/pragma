@@ -4120,7 +4120,21 @@ async function listCodeFolders(codeDir: string): Promise<CodeFolderSummary[]> {
     .map((entry) => entry.name)
     .sort((a, b) => a.localeCompare(b));
 
-  return Promise.all(folderNames.map((name) => buildCodeFolderSummary(codeDir, name)));
+  const summaries = await Promise.all(folderNames.map((name) => buildCodeFolderSummary(codeDir, name)));
+
+  return summaries.filter((folder) => {
+    if (folder.name !== "default") return true;
+    return !isEmptyDefaultRepo(folder);
+  });
+}
+
+function isEmptyDefaultRepo(folder: CodeFolderSummary): boolean {
+  if (!folder.is_git_repo) return false;
+  if (folder.git_dirty) return false;
+  return (
+    folder.git_last_commit_message === "pragma: initialize default code repo" &&
+    folder.git_unpushed_count === null
+  );
 }
 
 async function buildCodeFolderSummary(
