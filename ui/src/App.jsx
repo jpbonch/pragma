@@ -43,6 +43,7 @@ import {
 import { CodeView } from './components/CodeView'
 import { ContextView } from './components/ContextView'
 import { ConversationDrawer } from './components/ConversationDrawer'
+import { InlineChatView } from './components/InlineChatView'
 import { ConnectionsView } from './components/ConnectionsView'
 import { EmptyPane } from './components/EmptyPane'
 import { FeedView } from './components/FeedView'
@@ -2130,7 +2131,7 @@ export default function App() {
         error: '',
       })
 
-      setActiveTab('feed')
+      setActiveTab('active-chat')
     } catch (error) {
       setWorkspaceError(errorText(error))
       await loadChats()
@@ -2399,10 +2400,18 @@ export default function App() {
   }
 
   function handleNewChatSubmit(payload) {
-    setActiveTab('feed')
+    setActiveTab('active-chat')
     void handleInputSubmit({
       ...payload,
       mode: 'chat',
+    })
+  }
+
+  function handleInlineChatPromptSubmit(message) {
+    void handleInputSubmit({
+      message,
+      mode: 'chat',
+      reasoningEffort: conversation.reasoningEffort,
     })
   }
 
@@ -2430,7 +2439,7 @@ export default function App() {
         chatsLoading={sidebarChatsLoading}
         thinkingChatIds={thinkingChatIds}
         unreadChatIds={unreadChatIds}
-        activeChatId={conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''}
+        activeChatId={activeTab === 'active-chat' && conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''}
         services={visibleRuntimeServices}
         activeServiceId={selectedServiceId}
         onOpenChat={(threadId) => {
@@ -2478,7 +2487,7 @@ export default function App() {
               }}
             />
             <ConversationDrawer
-              open={conversation.open && (conversation.mode === 'chat' || conversation.mode === 'plan')}
+              open={conversation.open && (conversation.mode === 'plan' || (conversation.mode === 'chat' && Boolean(conversation.taskId)))}
               mode={conversation.mode}
               entries={conversation.entries}
               loading={conversation.loading}
@@ -2517,7 +2526,7 @@ export default function App() {
               executeDisabled={!conversation.threadId || !conversation.planReady}
               onStop={handleStopStream}
             />
-            {!(conversation.open && (conversation.mode === 'chat' || conversation.mode === 'plan')) && (
+            {!(conversation.open && (conversation.mode === 'plan' || (conversation.mode === 'chat' && Boolean(conversation.taskId)))) && (
               <InputBar
                 disabled={
                   conversation.loading ||
@@ -2560,6 +2569,26 @@ export default function App() {
               onSubmit={(payload) => {
                 void handleNewChatSubmit(payload)
               }}
+            />
+          </div>
+        )}
+
+        {activeTab === 'active-chat' && (
+          <div className="feed-page">
+            <div className="main-topbar">
+              <h1>{conversation.entries.find((e) => e.type === 'user')?.content?.slice(0, 60) || 'Chat'}</h1>
+            </div>
+            <InlineChatView
+              entries={conversation.entries}
+              loading={conversation.loading}
+              error={conversation.error}
+              onPromptSubmit={handleInlineChatPromptSubmit}
+              onStop={handleStopStream}
+              disabled={
+                workspacesLoading ||
+                agentsLoading ||
+                !activeWorkspaceName
+              }
             />
           </div>
         )}
