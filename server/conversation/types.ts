@@ -115,12 +115,14 @@ export type AdapterSendTurnInput = {
   mode: ConversationMode;
   reasoningEffort?: ReasoningEffort;
   onEvent: (event: AdapterEvent) => void | Promise<void>;
+  abortSignal?: AbortSignal;
 };
 
 export type AdapterSendTurnResult = {
   sessionId: string;
   finalText: string;
   rawSummary?: string;
+  aborted?: boolean;
 };
 
 export interface ConversationAdapter {

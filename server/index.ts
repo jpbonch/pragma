@@ -2664,6 +2664,11 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
       });
 
       return streamSSE(c, async (stream) => {
+      const turnAbort = new AbortController();
+      const onClientDisconnect = () => { turnAbort.abort(); };
+      c.req.raw.signal.addEventListener("abort", onClientDisconnect, { once: true });
+      stream.onAbort(() => { turnAbort.abort(); });
+
       try {
         if (isNewThread) {
           const startedPayload = { thread_id: threadId };
@@ -2726,7 +2731,9 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
           }),
           mode: body.mode,
           reasoningEffort,
+          abortSignal: turnAbort.signal,
           onEvent: async (event) => {
+            if (turnAbort.signal.aborted) return;
             if (event.type === "assistant_text") {
               assistantText = assistantText ? `${assistantText}\n${event.delta}` : event.delta;
               await insertEvent(db, {
@@ -2760,6 +2767,21 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
             });
           },
         });
+
+        if (result.aborted) {
+          const partialText = (result.finalText || assistantText || "").trim();
+          await failTurn(db, turnId, "Turn aborted by client.");
+          if (partialText) {
+            await insertMessage(db, {
+              id: `msg_${randomUUID().slice(0, 12)}`,
+              threadId,
+              turnId,
+              role: "assistant",
+              content: partialText,
+            });
+          }
+          return;
+        }
 
         const finalAssistantText = (result.finalText || assistantText || "").trim();
         const assistantMessageId = `msg_${randomUUID().slice(0, 12)}`;
@@ -2871,6 +2893,7 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
           data: JSON.stringify({ code: "TURN_ERROR", message: messageText }),
         });
       } finally {
+        c.req.raw.signal.removeEventListener("abort", onClientDisconnect);
         await db.close();
       }
       });

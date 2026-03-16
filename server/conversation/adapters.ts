@@ -23,6 +23,7 @@ const codexAdapter: ConversationAdapter = {
       args,
       cwd: input.cwd,
       env: input.env,
+      abortSignal: input.abortSignal,
       onJsonLine: async (line, state) => {
         const eventType = readString(line, "type");
         if (eventType === "thread.started") {
@@ -76,6 +77,7 @@ const claudeAdapter: ConversationAdapter = {
       args,
       cwd: input.cwd,
       env: input.env,
+      abortSignal: input.abortSignal,
       onJsonLine: async (line, state) => {
         const eventType = readString(line, "type");
 
@@ -140,6 +142,7 @@ type RunAdapterCommandInput = {
   args: string[];
   cwd: string;
   env?: Record<string, string>;
+  abortSignal?: AbortSignal;
   onJsonLine: (line: Record<string, unknown>, state: RunState) => Promise<void>;
 };
 
@@ -202,12 +205,29 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
   child.once("error", (error: unknown) => {
     spawnErrorMessage = error instanceof Error ? error.message : String(error);
   });
+
+  let aborted = false;
+  const onAbort = () => {
+    aborted = true;
+    child.kill("SIGTERM");
+  };
+  if (input.abortSignal) {
+    if (input.abortSignal.aborted) {
+      child.kill("SIGTERM");
+      aborted = true;
+    } else {
+      input.abortSignal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
   let result: Awaited<typeof child>;
   try {
     result = await child;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${input.command} failed to start: ${spawnErrorMessage || message}`);
+  } finally {
+    input.abortSignal?.removeEventListener("abort", onAbort);
   }
 
   if (stdoutBuffer.trim()) {
@@ -221,6 +241,14 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
 
   if (spawnErrorMessage) {
     throw new Error(`${input.command} failed to start: ${spawnErrorMessage}`);
+  }
+
+  if (aborted) {
+    return {
+      sessionId: state.sessionId ?? "",
+      finalText: state.finalText.trim(),
+      aborted: true,
+    };
   }
 
   if (state.commandError) {

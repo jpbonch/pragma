@@ -619,14 +619,27 @@ export async function streamConversationTurn(payload, { onEvent, signal } = {}) 
     },
   })
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      parser.reset({ consume: true })
-      break
-    }
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        break
+      }
+      const { done, value } = await reader.read()
+      if (done) {
+        parser.reset({ consume: true })
+        break
+      }
 
-    parser.feed(decoder.decode(value, { stream: true }))
+      parser.feed(decoder.decode(value, { stream: true }))
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      // Expected when abort() is called — silently stop reading.
+    } else {
+      throw error
+    }
+  } finally {
+    await reader.cancel().catch(() => {})
   }
 }
 
