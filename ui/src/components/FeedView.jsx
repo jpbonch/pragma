@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 
 function normalizeTaskTitle(title) {
@@ -304,6 +304,33 @@ export function FeedView({
     return recipientAgents.filter((agent) => agent && typeof agent.id === 'string')
   }, [recipientAgents])
 
+  const prevTaskIdsRef = useRef(null)
+  const [newTaskIds, setNewTaskIds] = useState(new Set())
+
+  useEffect(() => {
+    const currentIds = new Set(tasks.map((t) => t.id))
+    if (prevTaskIdsRef.current !== null) {
+      const added = new Set()
+      for (const id of currentIds) {
+        if (!prevTaskIdsRef.current.has(id)) {
+          added.add(id)
+        }
+      }
+      if (added.size > 0) {
+        setNewTaskIds(added)
+        const timer = setTimeout(() => setNewTaskIds(new Set()), 350)
+        return () => clearTimeout(timer)
+      }
+    }
+    prevTaskIdsRef.current = currentIds
+  }, [tasks])
+
+  useEffect(() => {
+    if (newTaskIds.size > 0) {
+      prevTaskIdsRef.current = new Set(tasks.map((t) => t.id))
+    }
+  }, [newTaskIds, tasks])
+
   const { readyPlans, remainingPlans } = useMemo(() => {
     const readyPlans = []
     const remainingPlans = []
@@ -381,15 +408,16 @@ export function FeedView({
                   />
                 ))}
                 {needsYou.map((task) => (
-                  <NeedsYouCard
-                    key={task.id}
-                    task={task}
-                    onClick={onOpenTaskConversation}
-                    onPickTaskRecipient={onPickTaskRecipient}
-                    recipientAgents={recipients}
-                    pickerTaskId={pickerTaskId}
-                    setPickerTaskId={setPickerTaskId}
-                  />
+                  <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+                    <NeedsYouCard
+                      task={task}
+                      onClick={onOpenTaskConversation}
+                      onPickTaskRecipient={onPickTaskRecipient}
+                      recipientAgents={recipients}
+                      pickerTaskId={pickerTaskId}
+                      setPickerTaskId={setPickerTaskId}
+                    />
+                  </div>
                 ))}
               </div>
             </>
@@ -400,11 +428,12 @@ export function FeedView({
               <SectionLabel count={active.length}>Working on</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 {active.map((task) => (
-                  <ActiveTaskRow
-                    key={task.id}
-                    task={task}
-                    onClick={onOpenTaskConversation}
-                  />
+                  <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+                    <ActiveTaskRow
+                      task={task}
+                      onClick={onOpenTaskConversation}
+                    />
+                  </div>
                 ))}
               </div>
             </>
@@ -419,11 +448,12 @@ export function FeedView({
               >Done</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
                 {(showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
-                  <DoneTaskRow
-                    key={task.id}
-                    task={task}
-                    onClick={onOpenTaskConversation}
-                  />
+                  <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+                    <DoneTaskRow
+                      task={task}
+                      onClick={onOpenTaskConversation}
+                    />
+                  </div>
                 ))}
               </div>
             </>
