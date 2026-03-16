@@ -10,6 +10,15 @@ const ACTIVE_WORKSPACE_FILE = join(PRAGMA_DIR, "active_workspace");
 const RESERVED_ROOT_NAMES = new Set(["db", "workspace", "worktrees"]);
 export const DEFAULT_AGENT_ID = "pragma-orchestrator";
 const OPEN_DATABASES = new Map<string, Promise<PGlite>>();
+
+const DEFAULT_HARNESS_MODELS: Record<string, { label: string; id: string }> = {
+  claude_code: { label: "Opus 4.6", id: "opus" },
+  codex: { label: "GPT-5", id: "gpt-5" },
+};
+
+function getDefaultModelForHarness(harness: string): { label: string; id: string } {
+  return DEFAULT_HARNESS_MODELS[harness] ?? DEFAULT_HARNESS_MODELS.claude_code;
+}
 const REAL_CLOSE = new WeakMap<PGlite, () => Promise<void>>();
 
 export const DEFAULT_AGENT_FILE = `# Orchestrator
@@ -153,7 +162,6 @@ export function getWorkspacePaths(name: string): {
   outputsDir: string;
   uploadsDir: string;
   worktreesDir: string;
-  goalFile: string;
 } {
   const rootDir = join(PRAGMA_DIR, name);
   const workspaceDir = join(rootDir, "workspace");
@@ -169,7 +177,6 @@ export function getWorkspacePaths(name: string): {
     outputsDir: join(workspaceDir, "outputs"),
     uploadsDir: join(workspaceDir, "uploads"),
     worktreesDir: join(rootDir, "worktrees"),
-    goalFile: join(contextDir, "goal.md"),
   };
 }
 
@@ -242,15 +249,12 @@ export async function setActiveWorkspaceName(name: string): Promise<void> {
 
 export async function createWorkspace(input: {
   name: string;
-  goal: string;
+  orchestrator_harness: string;
 }): Promise<void> {
   const name = input.name;
-  const goal = input.goal;
+  const orchestratorHarness = input.orchestrator_harness;
 
   validateWorkspaceName(name);
-  if (typeof goal !== "string" || goal.trim().length === 0) {
-    throw new PragmaError("INVALID_GOAL", 400, "Goal is required.");
-  }
 
   await setupPragma();
 
@@ -270,10 +274,7 @@ export async function createWorkspace(input: {
   await mkdir(paths.uploadsDir, { recursive: true });
   await mkdir(paths.worktreesDir, { recursive: true });
 
-  await initializeDatabase(name);
-
-  const goalContent = `# Workspace Goal\n\n## Goal\n${goal}\n`;
-  await writeFile(paths.goalFile, goalContent, "utf8");
+  await initializeDatabase(name, orchestratorHarness);
   await initializeWorkspaceGit(paths);
 
   await setActiveWorkspaceName(name);
@@ -317,12 +318,12 @@ export async function workspaceExists(name: string): Promise<boolean> {
   }
 }
 
-export async function initializeDatabase(workspaceName: string): Promise<void> {
+export async function initializeDatabase(workspaceName: string, orchestratorHarness?: string): Promise<void> {
   const db = await openDatabase(workspaceName);
 
   try {
     await ensureRequiredSchema(db);
-    await ensureDefaultAgents(db);
+    await ensureDefaultAgents(db, orchestratorHarness);
     await ensureDefaultHuman(db);
     await ensureConversationSchema(db);
   } finally {
@@ -580,8 +581,21 @@ CREATE TYPE task_status AS ENUM (
 `);
 }
 
-async function ensureDefaultAgents(db: PGlite): Promise<void> {
-  const orchestrator = DEFAULT_AGENT_SEEDS[0];
+async function ensureDefaultAgents(db: PGlite, orchestratorHarness?: string): Promise<void> {
+  const seeds = orchestratorHarness
+    ? DEFAULT_AGENT_SEEDS.map((seed) => {
+        const harness = orchestratorHarness;
+        const defaultModel = getDefaultModelForHarness(harness);
+        return {
+          ...seed,
+          harness,
+          model_label: defaultModel.label,
+          model_id: defaultModel.id,
+        };
+      })
+    : DEFAULT_AGENT_SEEDS;
+
+  const orchestrator = seeds[0];
   await db.query(
     `
 INSERT INTO agents (id, name, description, status, agent_file, emoji, harness, model_label, model_id)
@@ -609,7 +623,7 @@ SET name = EXCLUDED.name,
     ],
   );
 
-  for (const agent of DEFAULT_AGENT_SEEDS.slice(1)) {
+  for (const agent of seeds.slice(1)) {
     await db.query(
       `
 INSERT INTO agents (id, name, description, status, agent_file, emoji, harness, model_label, model_id)

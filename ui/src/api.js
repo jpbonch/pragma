@@ -145,12 +145,20 @@ export async function fetchActiveWorkspace() {
   return data.workspace
 }
 
-export async function createWorkspace({ name, goal }) {
+export async function createWorkspace({ name, orchestrator_harness }) {
   return fetchJson('/workspaces', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name, goal }),
+    body: JSON.stringify({ name, orchestrator_harness }),
   })
+}
+
+export async function fetchAvailableClis() {
+  const data = asObject(await fetchJson('/cli/available'), 'Invalid CLI response.')
+  if (!Array.isArray(data.clis)) {
+    throw invalidResponse('`clis` array is required in CLI response.')
+  }
+  return data.clis
 }
 
 export async function setActiveWorkspace(name) {

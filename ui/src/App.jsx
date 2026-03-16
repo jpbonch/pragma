@@ -9,6 +9,7 @@ import {
   createExecuteTask,
   createWorkspace,
   deleteWorkspace,
+  fetchAvailableClis,
   deletePlanThread,
   executeFromPlanThread,
   fetchAgents,
@@ -618,14 +619,38 @@ function saveHiddenChatsByWorkspace(value) {
   }
 }
 
+const CLI_LABELS = {
+  claude_code: 'Claude Code',
+  codex: 'Codex',
+}
+
 function OnboardingModal({ open, canClose, onClose, onSubmit, loading, error }) {
   const [name, setName] = useState('')
-  const [goal, setGoal] = useState('')
+  const [selectedHarness, setSelectedHarness] = useState('')
+  const [clis, setClis] = useState(null)
+  const [clisLoading, setClisLoading] = useState(false)
+  const [clisError, setClisError] = useState('')
 
   useEffect(() => {
     if (open) {
       setName('')
-      setGoal('')
+      setSelectedHarness('')
+      setClisLoading(true)
+      setClisError('')
+      fetchAvailableClis()
+        .then((result) => {
+          setClis(result)
+          const firstAvailable = result.find((cli) => cli.available)
+          if (firstAvailable) {
+            setSelectedHarness(firstAvailable.id)
+          }
+        })
+        .catch(() => {
+          setClisError('Failed to detect available CLIs.')
+        })
+        .finally(() => {
+          setClisLoading(false)
+        })
     }
   }, [open])
 
@@ -633,11 +658,15 @@ function OnboardingModal({ open, canClose, onClose, onSubmit, loading, error }) 
     return null
   }
 
+  const availableClis = clis ? clis.filter((cli) => cli.available) : []
+  const hasAnyCli = availableClis.length > 0
+  const canCreate = name.trim() && selectedHarness && hasAnyCli
+
   return (
     <div className="modal-backdrop">
       <div className="modal-card">
         <h2>Create workspace</h2>
-        <p>Pick a workspace name and define the initial goal.</p>
+        <p>Pick a workspace name and configure the orchestrator.</p>
 
         <label className="modal-label">Workspace Name</label>
         <input
@@ -647,14 +676,41 @@ function OnboardingModal({ open, canClose, onClose, onSubmit, loading, error }) 
           placeholder="e.g. Product Launch"
         />
 
-        <label className="modal-label">Goal</label>
-        <textarea
-          className="modal-textarea"
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          rows={4}
-          placeholder="Describe what this workspace should achieve"
-        />
+        <div className="orchestrator-config-section">
+          <label className="modal-label">Configure Orchestrator</label>
+          {clisLoading ? (
+            <div className="orchestrator-config-loading">Detecting available CLIs...</div>
+          ) : clisError ? (
+            <div className="error">{clisError}</div>
+          ) : clis ? (
+            <>
+              <div className="orchestrator-cli-options">
+                {clis.map((cli) => (
+                  <button
+                    key={cli.id}
+                    type="button"
+                    className={
+                      'orchestrator-cli-option' +
+                      (selectedHarness === cli.id ? ' orchestrator-cli-option--selected' : '') +
+                      (!cli.available ? ' orchestrator-cli-option--disabled' : '')
+                    }
+                    onClick={() => cli.available && setSelectedHarness(cli.id)}
+                    disabled={!cli.available}
+                  >
+                    <span className="orchestrator-cli-name">{CLI_LABELS[cli.id] || cli.command}</span>
+                    <span className="orchestrator-cli-command">{cli.command}</span>
+                    {!cli.available && <span className="orchestrator-cli-unavailable">not installed</span>}
+                  </button>
+                ))}
+              </div>
+              {!hasAnyCli && (
+                <div className="error">
+                  No supported CLI found. Install at least one of: claude, codex.
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
 
         {error && <div className="error">Error: {error}</div>}
 
@@ -666,8 +722,8 @@ function OnboardingModal({ open, canClose, onClose, onSubmit, loading, error }) 
           )}
           <button
             className="modal-create"
-            onClick={() => onSubmit({ name, goal })}
-            disabled={loading}
+            onClick={() => onSubmit({ name, orchestrator_harness: selectedHarness })}
+            disabled={loading || !canCreate}
           >
             {loading ? 'Creating...' : 'Create workspace'}
           </button>
@@ -1562,17 +1618,22 @@ export default function App() {
     }
   }
 
-  async function handleCreateWorkspace({ name, goal }) {
+  async function handleCreateWorkspace({ name, orchestrator_harness }) {
     setOnboardingError('')
 
-    if (!name || !name.trim() || !goal || !goal.trim()) {
-      setOnboardingError('Workspace name and goal are required.')
+    if (!name || !name.trim()) {
+      setOnboardingError('Workspace name is required.')
+      return
+    }
+
+    if (!orchestrator_harness) {
+      setOnboardingError('Select an orchestrator CLI.')
       return
     }
 
     setOnboardingLoading(true)
     try {
-      await createWorkspace({ name, goal })
+      await createWorkspace({ name, orchestrator_harness })
       await refreshWorkspaces()
       await loadWorkspaceData()
       setIsOnboardingOpen(false)

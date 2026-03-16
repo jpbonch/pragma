@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -480,6 +482,29 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
   app.get("/health", (c) => c.json({ ok: true }));
 
+  app.get("/cli/available", async (c) => {
+    const execFileAsync = promisify(execFile);
+    const whichCommand = process.platform === "win32" ? "where" : "which";
+
+    const clis: { id: string; command: string; available: boolean }[] = [
+      { id: "claude_code", command: "claude", available: false },
+      { id: "codex", command: "codex", available: false },
+    ];
+
+    await Promise.all(
+      clis.map(async (cli) => {
+        try {
+          await execFileAsync(whichCommand, [cli.command]);
+          cli.available = true;
+        } catch {
+          cli.available = false;
+        }
+      }),
+    );
+
+    return c.json({ clis });
+  });
+
   app.post("/setup", async (c) => {
     await setupPragma();
     return c.json({ ok: true });
@@ -541,7 +566,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   app.post("/workspaces", validateJson(createWorkspaceSchema), async (c) => {
     const body = c.req.valid("json");
 
-    await createWorkspace({ name: body.name, goal: body.goal });
+    await createWorkspace({ name: body.name, orchestrator_harness: body.orchestrator_harness });
 
     return c.json({
       ok: true,

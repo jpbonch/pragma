@@ -4362,6 +4362,70 @@ select { cursor: pointer; }
 .modal-create:hover {
   background: #1a1917;
 }
+.modal-create:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ─── Orchestrator Config ─────────────────────────── */
+.orchestrator-config-section {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.orchestrator-config-loading {
+  font-size: 13px;
+  color: #9b9a97;
+  padding: 12px 0;
+}
+
+.orchestrator-cli-options {
+  display: flex;
+  gap: 8px;
+}
+
+.orchestrator-cli-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 8px;
+  border: 1.5px solid #ecebe8;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.orchestrator-cli-option:hover:not(:disabled) {
+  border-color: #b0afa8;
+}
+.orchestrator-cli-option--selected {
+  border-color: #37352f;
+  background: #f7f6f3;
+}
+.orchestrator-cli-option--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.orchestrator-cli-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #37352f;
+}
+
+.orchestrator-cli-command {
+  font-size: 11px;
+  color: #9b9a97;
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+.orchestrator-cli-unavailable {
+  font-size: 10px;
+  color: #e16259;
+  margin-top: 2px;
+}
 
 @media (max-width: 980px) {
   .right-panel {

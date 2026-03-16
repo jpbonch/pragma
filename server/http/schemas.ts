@@ -23,7 +23,7 @@ const positiveIntegerString = z
 export const createWorkspaceSchema = z
   .object({
     name: nonEmptyString,
-    goal: nonEmptyString,
+    orchestrator_harness: harnessSchema,
   })
   .strict();
 
