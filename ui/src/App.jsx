@@ -72,6 +72,11 @@ function isTaskActivelyRunning(status) {
   return normalized === 'running' || normalized === 'orchestrating' || normalized === 'queued'
 }
 
+function hasRunningTurn(turns) {
+  if (!Array.isArray(turns)) return false
+  return turns.some((t) => t && typeof t.status === 'string' && t.status === 'running')
+}
+
 function errorText(error) {
   return error instanceof Error ? error.message : String(error)
 }
@@ -873,14 +878,19 @@ export default function App() {
         }
 
         const nextEntries = buildEntriesFromThreadData(data, agentById)
+        const turnsRunning = hasRunningTurn(data.turns)
         setConversation((prev) => {
           if (!prev.open || prev.threadId !== threadIdRef.current || cancelled) {
             return prev
           }
+          const nextLoading = prev.taskId
+            ? prev.loading
+            : turnsRunning
           return {
             ...prev,
             harness: data.thread.harness,
             modelLabel: data.thread.model_label,
+            loading: nextLoading,
             entries: nextEntries,
           }
         })
@@ -1936,7 +1946,7 @@ export default function App() {
         reasoningEffort: 'medium',
         recipientAgentId: '',
         entries,
-        loading: false,
+        loading: hasRunningTurn(data.turns),
         error: '',
       })
 
