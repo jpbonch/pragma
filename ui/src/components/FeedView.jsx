@@ -23,6 +23,8 @@ function getTimeAgo(dateStr) {
 }
 
 const STATUS_COLORS = {
+  planning: '#8A72D8',
+  planned: '#9B6DD7',
   pending_review: '#2FA67E',
   waiting_for_recipient: '#9B6DD7',
   waiting_for_question_response: '#4B83D6',
@@ -37,6 +39,8 @@ const STATUS_COLORS = {
 }
 
 const STATUS_LABELS = {
+  planning: 'Planning',
+  planned: 'Planned',
   pending_review: 'Review',
   waiting_for_recipient: 'Assign',
   waiting_for_question_response: 'Answer',
@@ -87,6 +91,10 @@ function isActive(status) {
 
 function isDone(status) {
   return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
+function isPlanTaskStatus(status) {
+  return status === 'planning' || status === 'planned'
 }
 
 function SectionLabel({ children, count, badge, actionLabel, onAction }) {
@@ -351,7 +359,9 @@ export function FeedView({
 
     for (const task of tasks) {
       const status = String(task.status).toLowerCase()
-      if (isNeedsYou(status)) {
+      if (isPlanTaskStatus(status)) {
+        continue
+      } else if (isNeedsYou(status)) {
         needsYou.push(task)
       } else if (isDone(status)) {
         done.push(task)
@@ -374,90 +384,87 @@ export function FeedView({
       {loading && <div className="muted">Loading tasks...</div>}
       {error && <div className="error">Error: {error}</div>}
 
-      {!plansLoading && remainingPlans.length > 0 && (
+      {!loading && !error && (
         <>
           <SectionLabel count={remainingPlans.length}>Plans</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {remainingPlans.map((plan) => (
-              <PlanRow
+            {plansLoading ? (
+              <div className="muted">Loading plans...</div>
+            ) : remainingPlans.length > 0 ? (
+              remainingPlans.map((plan) => (
+                <PlanRow
+                  key={plan.id}
+                  plan={plan}
+                  isActive={activePlanThreadId === plan.id}
+                  onClick={onOpenPlan}
+                />
+              ))
+            ) : (
+              <div className="muted">No tasks yet.</div>
+            )}
+          </div>
+
+          <SectionLabel count={needsYou.length + readyPlans.length} badge>Needs you</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {readyPlans.map((plan) => (
+              <NeedsYouPlanCard
                 key={plan.id}
                 plan={plan}
-                isActive={activePlanThreadId === plan.id}
                 onClick={onOpenPlan}
               />
             ))}
+            {needsYou.map((task) => (
+              <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+                <NeedsYouCard
+                  task={task}
+                  onClick={onOpenTaskConversation}
+                  onPickTaskRecipient={onPickTaskRecipient}
+                  recipientAgents={recipients}
+                  pickerTaskId={pickerTaskId}
+                  setPickerTaskId={setPickerTaskId}
+                />
+              </div>
+            ))}
+            {needsYou.length + readyPlans.length === 0 && (
+              <div className="muted">No tasks yet.</div>
+            )}
           </div>
-        </>
-      )}
 
-      {!loading && !error && tasks.length === 0 && (
-        <div className="muted">No tasks found.</div>
-      )}
-
-      {!loading && !error && tasks.length > 0 && (
-        <>
-          {(needsYou.length > 0 || readyPlans.length > 0) && (
-            <>
-              <SectionLabel count={needsYou.length + readyPlans.length} badge>Needs you</SectionLabel>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {readyPlans.map((plan) => (
-                  <NeedsYouPlanCard
-                    key={plan.id}
-                    plan={plan}
-                    onClick={onOpenPlan}
+          <SectionLabel count={active.length}>Working on</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {active.length > 0 ? (
+              active.map((task) => (
+                <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+                  <ActiveTaskRow
+                    task={task}
+                    onClick={onOpenTaskConversation}
                   />
-                ))}
-                {needsYou.map((task) => (
-                  <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
-                    <NeedsYouCard
-                      task={task}
-                      onClick={onOpenTaskConversation}
-                      onPickTaskRecipient={onPickTaskRecipient}
-                      recipientAgents={recipients}
-                      pickerTaskId={pickerTaskId}
-                      setPickerTaskId={setPickerTaskId}
-                    />
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+                </div>
+              ))
+            ) : (
+              <div className="muted">No tasks yet.</div>
+            )}
+          </div>
 
-          {active.length > 0 && (
-            <>
-              <SectionLabel count={active.length}>Working on</SectionLabel>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                {active.map((task) => (
-                  <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
-                    <ActiveTaskRow
-                      task={task}
-                      onClick={onOpenTaskConversation}
-                    />
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {done.length > 0 && (
-            <>
-              <SectionLabel
-                count={done.length}
-                actionLabel={done.length > DONE_DISPLAY_LIMIT ? (showAllDone ? 'Show less' : 'View all') : undefined}
-                onAction={() => setShowAllDone((v) => !v)}
-              >Done</SectionLabel>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                {(showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
-                  <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
-                    <DoneTaskRow
-                      task={task}
-                      onClick={onOpenTaskConversation}
-                    />
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+          <SectionLabel
+            count={done.length}
+            actionLabel={done.length > DONE_DISPLAY_LIMIT ? (showAllDone ? 'Show less' : 'View all') : undefined}
+            onAction={() => setShowAllDone((v) => !v)}
+          >Done</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {done.length > 0 ? (
+              (showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
+                <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+                  <DoneTaskRow
+                    task={task}
+                    onClick={onOpenTaskConversation}
+                  />
+                </div>
+              ))
+            ) : (
+              <div className="muted">No tasks yet.</div>
+            )}
+          </div>
         </>
       )}
     </section>

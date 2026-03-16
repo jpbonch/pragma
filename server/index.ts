@@ -2727,9 +2727,32 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
 
       return streamSSE(c, async (stream) => {
       const turnAbort = new AbortController();
-      const onClientDisconnect = () => { turnAbort.abort(); };
+      const shouldAbortOnClientDisconnect = body.mode !== "plan";
+      let streamDisconnected = false;
+      const writeSSE = async (event: string, data: unknown): Promise<void> => {
+        if (streamDisconnected) {
+          return;
+        }
+        try {
+          await stream.writeSSE({
+            event,
+            data: JSON.stringify(data),
+          });
+        } catch (error) {
+          streamDisconnected = true;
+          if (shouldAbortOnClientDisconnect) {
+            throw error;
+          }
+        }
+      };
+      const onClientDisconnect = () => {
+        streamDisconnected = true;
+        if (shouldAbortOnClientDisconnect) {
+          turnAbort.abort();
+        }
+      };
       c.req.raw.signal.addEventListener("abort", onClientDisconnect, { once: true });
-      stream.onAbort(() => { turnAbort.abort(); });
+      stream.onAbort(onClientDisconnect);
 
       try {
         if (isNewThread) {
@@ -2741,16 +2764,10 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
             eventName: "thread_started",
             payload: startedPayload,
           });
-          await stream.writeSSE({
-            event: "thread_started",
-            data: JSON.stringify(startedPayload),
-          });
+          await writeSSE("thread_started", startedPayload);
         }
 
-        await stream.writeSSE({
-          event: "user_message_saved",
-          data: JSON.stringify({ message_id: userMessageId }),
-        });
+        await writeSSE("user_message_saved", { message_id: userMessageId });
 
         let assistantText = "";
         const planPromptCandidates =
@@ -2805,10 +2822,7 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
                 eventName: "assistant_text",
                 payload: event,
               });
-              await stream.writeSSE({
-                event: "assistant_text",
-                data: JSON.stringify({ delta: event.delta, turn_id: turnId }),
-              });
+              await writeSSE("assistant_text", { delta: event.delta, turn_id: turnId });
               return;
             }
 
@@ -2819,13 +2833,10 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
               eventName: "tool_event",
               payload: event,
             });
-            await stream.writeSSE({
-              event: "tool_event",
-              data: JSON.stringify({
-                name: event.name,
-                payload: event.payload,
-                turn_id: turnId,
-              }),
+            await writeSSE("tool_event", {
+              name: event.name,
+              payload: event.payload,
+              turn_id: turnId,
             });
           },
         });
@@ -2934,10 +2945,7 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
           payload: turnCompletedPayload,
         });
 
-        await stream.writeSSE({
-          event: "turn_completed",
-          data: JSON.stringify(turnCompletedPayload),
-        });
+        await writeSSE("turn_completed", turnCompletedPayload);
       } catch (error: unknown) {
         const messageText = errorMessage(error);
 
@@ -2950,10 +2958,9 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
           payload: { code: "TURN_ERROR", message: messageText },
         });
 
-        await stream.writeSSE({
-          event: "error",
-          data: JSON.stringify({ code: "TURN_ERROR", message: messageText }),
-        });
+        if (!streamDisconnected) {
+          await writeSSE("error", { code: "TURN_ERROR", message: messageText });
+        }
       } finally {
         c.req.raw.signal.removeEventListener("abort", onClientDisconnect);
         await db.close();

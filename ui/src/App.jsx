@@ -1910,7 +1910,7 @@ export default function App() {
     }
 
     setConversation({
-      open: mode === 'plan' ? (reuseExisting && conversation.open) : true,
+      open: true,
       mode,
       threadId: nextThreadId || '',
       taskId: '',
