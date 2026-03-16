@@ -1501,22 +1501,17 @@ LIMIT 1
           throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
         }
 
-        const assignedWorker =
-          task.assigned_to && task.assigned_to !== DEFAULT_AGENT_ID
-            ? await getAgentRow(db, task.assigned_to)
-            : null;
-
         await db.query(
           `
 UPDATE tasks
-SET status = 'queued',
+SET status = 'waiting_for_help_response',
     merge_retry_count = 0,
     completed_at = NULL
 WHERE id = $1
 `,
           [taskId],
         );
-        emitTaskStatus(workspaceName, taskId, "queued", "review_reopen");
+        emitTaskStatus(workspaceName, taskId, "waiting_for_help_response", "review_reopen");
 
         await insertEvent(db, {
           id: `evt_${randomUUID().slice(0, 12)}`,
@@ -1529,24 +1524,9 @@ WHERE id = $1
         });
         publishThreadUpdated(workspaceName, thread.id, "task_reopened");
 
-        executeRunner.execute({
-          workspaceName,
-          taskId,
-          threadId: thread.id,
-          prompt: latestExecuteTurn.user_message,
-          requestedRecipientAgentId: assignedWorker?.id ?? undefined,
-          reasoningEffort: requireReasoningEffort(
-            latestExecuteTurn.reasoning_effort,
-            `latest execute turn for reopen task ${taskId}`,
-          ),
-          resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? undefined,
-          followUpMessage: body.message ?? undefined,
-        });
-
         return c.json({
           ok: true,
-          status: "queued",
-          reopen_state: "enqueued",
+          status: "waiting_for_help_response",
         });
       }
 

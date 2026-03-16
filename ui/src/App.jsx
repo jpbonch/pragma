@@ -557,7 +557,7 @@ function summarizeStatusEvent(name, payload) {
     return 'Worker completed.'
   }
   if (name === 'task_reopened') {
-    return 'Task marked as not completed. Re-running.'
+    return 'Task reopened. Send a follow-up message to continue.'
   }
   return ''
 }

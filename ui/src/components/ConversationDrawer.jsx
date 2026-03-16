@@ -560,9 +560,9 @@ export function ConversationDrawer({
                     className="conv-reopen-btn"
                     onClick={() => { void submitReviewAction('reopen') }}
                     disabled={approveLoading}
-                    title="Mark task as not completed"
+                    title="Reopen task and send follow-up messages"
                   >
-                    {approveLoading ? 'Reopening...' : 'Mark Not Completed'}
+                    {approveLoading ? 'Reopening...' : 'Reopen'}
                   </button>
                 )}
               </div>
