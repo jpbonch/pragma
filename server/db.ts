@@ -560,11 +560,8 @@ SELECT EXISTS (
 ) AS exists
 `,
   );
-  if (statusType.rows[0]?.exists) {
-    return;
-  }
-
-  await db.exec(`
+  if (!statusType.rows[0]?.exists) {
+    await db.exec(`
 CREATE TYPE task_status AS ENUM (
   'queued',
   'orchestrating',
@@ -579,6 +576,10 @@ CREATE TYPE task_status AS ENUM (
   'cancelled'
 );
 `);
+  }
+
+  await db.exec(`ALTER TYPE task_status ADD VALUE IF NOT EXISTS 'planning'`);
+  await db.exec(`ALTER TYPE task_status ADD VALUE IF NOT EXISTS 'planned'`);
 }
 
 async function ensureDefaultAgents(db: PGlite, orchestratorHarness?: string): Promise<void> {
