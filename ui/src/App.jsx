@@ -232,7 +232,7 @@ function summarizeToolEvent(name, payload) {
       return { label: type, summary: truncate(payload.command, 140) }
     }
     if (typeof payload.file_path === 'string') {
-      return { label: type, summary: payload.file_path }
+      return { label: type, summary: basename(payload.file_path) }
     }
     if (typeof payload.name === 'string') {
       return { label: type, summary: payload.name }
@@ -247,10 +247,10 @@ function summarizeToolInput(input) {
     return truncate(input.command.trim(), 140)
   }
   if (typeof input.file_path === 'string' && input.file_path.trim()) {
-    return input.file_path.trim()
+    return basename(input.file_path.trim())
   }
   if (Array.isArray(input.paths) && input.paths.length > 0) {
-    return input.paths.join(', ')
+    return input.paths.map(basename).join(', ')
   }
   if (typeof input.description === 'string' && input.description.trim()) {
     return truncate(input.description.trim(), 140)
@@ -272,6 +272,13 @@ function truncate(value, maxLength) {
     return value
   }
   return `${value.slice(0, maxLength - 3)}...`
+}
+
+function basename(filePath) {
+  if (typeof filePath !== 'string') return filePath
+  const lastSlash = filePath.lastIndexOf('/')
+  if (lastSlash === -1) return filePath
+  return filePath.slice(lastSlash + 1) || filePath
 }
 
 function normalizeTaskTitle(value) {

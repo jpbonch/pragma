@@ -1393,11 +1393,6 @@ select { cursor: pointer; }
   color: #B0AFA8;
 }
 
-.conv-tool-icon {
-  flex-shrink: 0;
-  opacity: 0.5;
-}
-
 .conv-tool-label {
   font-weight: 600;
   color: #9B9A97;
@@ -1432,11 +1427,6 @@ select { cursor: pointer; }
 .conv-tool-group-summary {
   flex: 1;
   min-width: 0;
-}
-
-.conv-tool-group-count {
-  font-size: 11px;
-  opacity: 0.6;
 }
 
 .conv-tool-group-chevron {

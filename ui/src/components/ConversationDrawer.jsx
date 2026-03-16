@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, X, Sparkles, User, Wrench, Info, Square, ChevronRight } from 'lucide-react'
+import { ArrowUp, X, Sparkles, User, Info, Square, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
@@ -45,20 +45,17 @@ function ToolGroup({ entry }) {
   return (
     <div>
       <div className="conv-tool-group" onClick={() => setExpanded((e) => !e)}>
-        <Wrench size={12} strokeWidth={2} className="conv-tool-icon" />
         <ChevronRight
           size={12}
           strokeWidth={2}
           className={`conv-tool-group-chevron${expanded ? ' expanded' : ''}`}
         />
         <span className="conv-tool-group-summary">{entry.summary}</span>
-        <span className="conv-tool-group-count">({entry.tools.length})</span>
       </div>
       {expanded && (
         <div className="conv-tool-group-items">
           {entry.tools.map((t) => (
             <div key={t.id} className="conv-tool">
-              <Wrench size={12} strokeWidth={2} className="conv-tool-icon" />
               <span className="conv-tool-label">{t.label || t.name || 'Tool'}</span>
               {t.summary ? <span className="conv-tool-summary">{t.summary}</span> : null}
             </div>
@@ -345,7 +342,6 @@ export function ConversationDrawer({
     if (entry.type === 'tool') {
       return (
         <div key={entry.id} className="conv-tool">
-          <Wrench size={12} strokeWidth={2} className="conv-tool-icon" />
           <span className="conv-tool-label">{entry.label || entry.name || 'Tool'}</span>
           {entry.summary ? (
             <span className="conv-tool-summary">{entry.summary}</span>
