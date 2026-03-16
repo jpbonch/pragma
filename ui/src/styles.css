@@ -1327,6 +1327,18 @@ select { cursor: pointer; }
   padding: 10px 4px;
 }
 
+.conv-msg-user {
+  justify-content: flex-end;
+}
+
+.conv-msg-bubble {
+  max-width: 75%;
+  background: #2D2D2D;
+  color: #fff;
+  border-radius: 18px 18px 4px 18px;
+  padding: 8px 14px;
+}
+
 .conv-msg-avatar {
   width: 24px;
   height: 24px;
@@ -1343,9 +1355,8 @@ select { cursor: pointer; }
   line-height: 1;
 }
 
-.conv-msg-user .conv-msg-avatar {
-  background: #F0EFEC;
-  color: #6F6E69;
+.conv-msg-user .conv-msg-text {
+  color: #fff;
 }
 
 .conv-msg-assistant .conv-msg-avatar {

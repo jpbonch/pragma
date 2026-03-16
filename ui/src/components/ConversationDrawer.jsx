@@ -369,26 +369,30 @@ export function ConversationDrawer({
         ? entry.agentEmoji.trim()
         : ''
 
+    if (isUser) {
+      return (
+        <div key={entry.id} className="conv-msg conv-msg-user">
+          <div className="conv-msg-bubble">
+            <div className="conv-msg-text">{entry.content}</div>
+          </div>
+        </div>
+      )
+    }
+
     return (
-      <div key={entry.id} className={`conv-msg ${isUser ? 'conv-msg-user' : 'conv-msg-assistant'}`}>
+      <div key={entry.id} className="conv-msg conv-msg-assistant">
         <div className="conv-msg-avatar">
-          {isUser ? (
-            <User size={14} strokeWidth={2} />
-          ) : assistantEmoji ? (
+          {assistantEmoji ? (
             <span className="conv-msg-avatar-emoji">{assistantEmoji}</span>
           ) : (
             <Sparkles size={14} strokeWidth={2} />
           )}
         </div>
         <div className="conv-msg-body">
-          <div className="conv-msg-role">{isUser ? 'You' : assistantName}</div>
-          {isUser ? (
-            <div className="conv-msg-text">{entry.content}</div>
-          ) : (
-            <div className="conv-msg-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || ''}</ReactMarkdown>
-            </div>
-          )}
+          <div className="conv-msg-role">{assistantName}</div>
+          <div className="conv-msg-markdown">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || ''}</ReactMarkdown>
+          </div>
         </div>
       </div>
     )
