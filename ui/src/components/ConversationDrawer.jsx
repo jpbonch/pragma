@@ -559,7 +559,7 @@ export function ConversationDrawer({
                     {approveLoading ? 'Approving...' : 'Approve & Push'}
                   </button>
                 )}
-                {canMarkCompleted && (
+                {canMarkCompleted && !isCompletedTask && (
                   <button
                     className="conv-approve-btn"
                     onClick={() => { void submitReviewAction('mark_completed') }}
@@ -567,6 +567,16 @@ export function ConversationDrawer({
                     title="Mark task as completed"
                   >
                     {approveLoading ? 'Completing...' : 'Mark Task Completed'}
+                  </button>
+                )}
+                {isCompletedTask && (
+                  <button
+                    className="conv-approve-btn"
+                    onClick={() => { void submitReviewAction('reopen') }}
+                    disabled={approveLoading}
+                    title="Reopen task"
+                  >
+                    {approveLoading ? 'Reopening...' : 'Reopen'}
                   </button>
                 )}
               </div>
