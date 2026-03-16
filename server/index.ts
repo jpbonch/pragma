@@ -2727,7 +2727,7 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
 
       return streamSSE(c, async (stream) => {
       const turnAbort = new AbortController();
-      const shouldAbortOnClientDisconnect = body.mode !== "plan";
+      const shouldAbortOnClientDisconnect = false;
       let streamDisconnected = false;
       const writeSSE = async (event: string, data: unknown): Promise<void> => {
         if (streamDisconnected) {
