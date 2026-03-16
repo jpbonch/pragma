@@ -314,6 +314,8 @@ export function FeedView({
 
   const prevTaskIdsRef = useRef(null)
   const [newTaskIds, setNewTaskIds] = useState(new Set())
+  const prevCategoriesRef = useRef({})
+  const [exitingTasks, setExitingTasks] = useState([])
 
   useEffect(() => {
     const currentIds = new Set(tasks.map((t) => t.id))
@@ -326,7 +328,7 @@ export function FeedView({
       }
       if (added.size > 0) {
         setNewTaskIds(added)
-        const timer = setTimeout(() => setNewTaskIds(new Set()), 350)
+        const timer = setTimeout(() => setNewTaskIds(new Set()), 500)
         return () => clearTimeout(timer)
       }
     }
@@ -338,6 +340,35 @@ export function FeedView({
       prevTaskIdsRef.current = new Set(tasks.map((t) => t.id))
     }
   }, [newTaskIds, tasks])
+
+  useEffect(() => {
+    const currentCategories = {}
+    for (const task of tasks) {
+      const status = String(task.status).toLowerCase()
+      if (isPlanTaskStatus(status)) continue
+      if (isNeedsYou(status)) currentCategories[task.id] = 'needsYou'
+      else if (isDone(status)) currentCategories[task.id] = 'done'
+      else currentCategories[task.id] = 'active'
+    }
+
+    const prev = prevCategoriesRef.current
+    if (Object.keys(prev).length > 0) {
+      const moving = []
+      for (const [id, oldCat] of Object.entries(prev)) {
+        const newCat = currentCategories[id]
+        if (newCat && newCat !== oldCat) {
+          const task = tasks.find((t) => t.id === id)
+          if (task) moving.push({ ...task, _fromCategory: oldCat })
+        }
+      }
+      if (moving.length > 0) {
+        setExitingTasks(moving)
+        const timer = setTimeout(() => setExitingTasks([]), 220)
+        return () => clearTimeout(timer)
+      }
+    }
+    prevCategoriesRef.current = currentCategories
+  }, [tasks])
 
   const { readyPlans, remainingPlans } = useMemo(() => {
     const readyPlans = []
@@ -413,6 +444,18 @@ export function FeedView({
                 onClick={onOpenPlan}
               />
             ))}
+            {exitingTasks.filter((t) => t._fromCategory === 'needsYou').map((task) => (
+              <div key={`exit-${task.id}`} className="task-exit">
+                <NeedsYouCard
+                  task={task}
+                  onClick={onOpenTaskConversation}
+                  onPickTaskRecipient={onPickTaskRecipient}
+                  recipientAgents={recipients}
+                  pickerTaskId={pickerTaskId}
+                  setPickerTaskId={setPickerTaskId}
+                />
+              </div>
+            ))}
             {needsYou.map((task) => (
               <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
                 <NeedsYouCard
@@ -425,13 +468,18 @@ export function FeedView({
                 />
               </div>
             ))}
-            {needsYou.length + readyPlans.length === 0 && (
+            {needsYou.length + readyPlans.length === 0 && exitingTasks.filter((t) => t._fromCategory === 'needsYou').length === 0 && (
               <div className="muted">No tasks yet.</div>
             )}
           </div>
 
           <SectionLabel count={active.length}>Working on</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {exitingTasks.filter((t) => t._fromCategory === 'active').map((task) => (
+              <div key={`exit-${task.id}`} className="task-exit">
+                <ActiveTaskRow task={task} onClick={onOpenTaskConversation} />
+              </div>
+            ))}
             {active.length > 0 ? (
               active.map((task) => (
                 <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
@@ -441,9 +489,9 @@ export function FeedView({
                   />
                 </div>
               ))
-            ) : (
+            ) : exitingTasks.filter((t) => t._fromCategory === 'active').length === 0 ? (
               <div className="muted">No tasks yet.</div>
-            )}
+            ) : null}
           </div>
 
           <SectionLabel
@@ -452,6 +500,11 @@ export function FeedView({
             onAction={() => setShowAllDone((v) => !v)}
           >Done</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {exitingTasks.filter((t) => t._fromCategory === 'done').map((task) => (
+              <div key={`exit-${task.id}`} className="task-exit">
+                <DoneTaskRow task={task} onClick={onOpenTaskConversation} />
+              </div>
+            ))}
             {done.length > 0 ? (
               (showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
                 <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
@@ -461,9 +514,9 @@ export function FeedView({
                   />
                 </div>
               ))
-            ) : (
+            ) : exitingTasks.filter((t) => t._fromCategory === 'done').length === 0 ? (
               <div className="muted">No tasks yet.</div>
-            )}
+            ) : null}
           </div>
         </>
       )}
