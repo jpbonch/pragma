@@ -2088,22 +2088,8 @@ export default function App() {
     }
 
     setSelectedServiceId('')
-    setConversation({
-      open: true,
-      mode: 'chat',
-      threadId: '',
-      taskId: '',
-      taskStatus: '',
-      taskTitle: '',
-      harness: runtime.harness,
-      modelLabel: runtime.model_label,
-      reasoningEffort: 'medium',
-      recipientAgentId: '',
-      entries: [],
-      loading: false,
-      error: '',
-    })
-    setActiveTab('feed')
+    closeConversationDrawer()
+    setActiveTab('new-chat')
   }
 
   async function handleOpenChat(threadId) {
@@ -2412,6 +2398,14 @@ export default function App() {
     })
   }
 
+  function handleNewChatSubmit(payload) {
+    setActiveTab('feed')
+    void handleInputSubmit({
+      ...payload,
+      mode: 'chat',
+    })
+  }
+
   function handleOpenOrchestratorConfig() {
     setWorkspaceError('')
     if (!orchestratorRuntime) {
@@ -2542,6 +2536,31 @@ export default function App() {
                 onValueChange={setInputBarText}
               />
             )}
+          </div>
+        )}
+
+        {activeTab === 'new-chat' && (
+          <div className="feed-page">
+            <div className="main-topbar">
+              <h1>New chat</h1>
+            </div>
+            <div style={{ flex: 1 }} />
+            <InputBar
+              disabled={
+                conversation.loading ||
+                workspacesLoading ||
+                agentsLoading ||
+                !activeWorkspaceName
+              }
+              loading={conversation.loading}
+              onStop={handleStopStream}
+              onOpenOrchestratorConfig={handleOpenOrchestratorConfig}
+              hideMode
+              lockedMode="chat"
+              onSubmit={(payload) => {
+                void handleNewChatSubmit(payload)
+              }}
+            />
           </div>
         )}
 

@@ -190,7 +190,7 @@ export function Sidebar({
         </div>
         <div className="sidebar-chats-list">
           <button
-            className="sidebar-new-chat-btn"
+            className={`sidebar-new-chat-btn ${activeTab === 'new-chat' ? 'active' : ''}`}
             onClick={() => onNewChat?.()}
             title="New chat"
           >

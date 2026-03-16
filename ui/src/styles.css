@@ -405,6 +405,11 @@ select { cursor: pointer; }
   background: rgba(0, 0, 0, 0.04);
   color: #37352F;
 }
+.sidebar-new-chat-btn.active {
+  background: rgba(0, 0, 0, 0.05);
+  font-weight: 600;
+  color: #37352F;
+}
 
 .sidebar-chats-list {
   display: flex;

@@ -35,6 +35,7 @@ export function InputBar({
   preferredMode = '',
   embedded = false,
   lockedMode = '',
+  hideMode = false,
   value,
   onValueChange,
 }) {
@@ -184,9 +185,11 @@ export function InputBar({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={
-            mode === 'plan'
-              ? 'What should we plan?'
-              : 'Kick off a task...'
+            hideMode
+              ? 'Send a message...'
+              : mode === 'plan'
+                ? 'What should we plan?'
+                : 'Kick off a task...'
           }
           rows={1}
           onInput={(e) => {
@@ -244,7 +247,7 @@ export function InputBar({
               <Plus size={14} />
             </button>
 
-            {isModeLocked ? (
+            {!hideMode && (isModeLocked ? (
               <div className="selector-btn selector-btn-static">
                 <SelectedModeIcon size={14} strokeWidth={2} />
                 {selectedMode.label}
@@ -283,7 +286,7 @@ export function InputBar({
                   </div>
                 )}
               </div>
-            )}
+            ))}
 
             <div className="input-selector">
               <button
