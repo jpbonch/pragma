@@ -3408,6 +3408,10 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     skill_path: string;
   }
 
+  // ── Registry skills cache (10-minute TTL) ────────────────────────
+  let registrySkillsCache: { data: RegistrySkill[]; timestamp: number } | null = null;
+  const REGISTRY_CACHE_TTL_MS = 10 * 60 * 1000;
+
   async function fetchGitHubTree(owner: string, repo: string, treeSha: string): Promise<GitHubTreeItem[]> {
     const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${treeSha}`;
     const res = await fetch(url, {
@@ -3509,7 +3513,12 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
   app.get("/skills/registry", async (c) => {
     try {
+      const now = Date.now();
+      if (registrySkillsCache && now - registrySkillsCache.timestamp < REGISTRY_CACHE_TTL_MS) {
+        return c.json({ skills: registrySkillsCache.data });
+      }
       const skills = await fetchRegistrySkills();
+      registrySkillsCache = { data: skills, timestamp: now };
       return c.json({ skills });
     } catch (error: unknown) {
       throw new PragmaError("REGISTRY_FETCH_FAILED", 502, errorMessage(error));
