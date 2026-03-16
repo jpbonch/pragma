@@ -4580,6 +4580,22 @@ select { cursor: pointer; }
 .cn-card:hover { border-color: #d4d3d0; }
 .cn-card--installed { background: #f9fafb; }
 
+/* Agent cards at top of skills page */
+.cn-agent-card {
+  background: #fff;
+  border: 1px solid #e8e7e4;
+}
+.cn-agent-card-identity {
+  display: flex; align-items: center; gap: 8px;
+}
+.cn-agent-card-emoji {
+  font-size: 20px; line-height: 1;
+}
+.cn-agent-card-skills {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid #e8e7e4;
+}
+
 .cn-card-header {
   display: flex; align-items: center; justify-content: space-between;
   gap: 8px; margin-bottom: 6px;

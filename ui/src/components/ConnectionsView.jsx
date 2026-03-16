@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Check, Download, Trash2, Plus, X } from 'lucide-react'
 import {
   fetchSkillRegistry,
@@ -32,6 +32,26 @@ export function ConnectionsView() {
   // Track which skill card has the agent-assign dropdown open
   const [assigningSkill, setAssigningSkill] = useState(null)
   const [assignBusy, setAssignBusy] = useState(false)
+  // Track which agent card has the skill-add dropdown open
+  const [addingSkillToAgent, setAddingSkillToAgent] = useState(null)
+
+  // Derive agent -> skills map from skillAgents
+  const agentSkillsMap = useMemo(() => {
+    const map = {} // agent_id -> [{ id, name, description }]
+    for (const agent of agents) {
+      map[agent.id] = []
+    }
+    for (const [skillId, agentsList] of Object.entries(skillAgents)) {
+      const skill = installed.find((s) => s.id === skillId)
+      if (!skill) continue
+      for (const agent of agentsList) {
+        if (map[agent.id]) {
+          map[agent.id].push({ id: skill.id, name: skill.name, description: skill.description })
+        }
+      }
+    }
+    return map
+  }, [agents, skillAgents, installed])
 
   async function loadAgentSkillMap(agentList, skills) {
     // Build skill -> agents map by querying each agent's skills
@@ -86,18 +106,20 @@ export function ConnectionsView() {
     loadData()
   }, [])
 
-  // Close agent-assign dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
-    if (!assigningSkill) return
+    if (!assigningSkill && !addingSkillToAgent) return
     function onPointerDown(e) {
-      const wrap = contentRef.current?.querySelector('.cn-agent-add-wrap .cn-agent-dropdown')
-      if (wrap && !wrap.contains(e.target) && !e.target.closest('.cn-agent-add-btn')) {
+      if (e.target.closest('.cn-agent-add-btn') || e.target.closest('.cn-skill-add-btn')) return
+      const dropdown = e.target.closest('.cn-agent-dropdown') || e.target.closest('.cn-skill-dropdown')
+      if (!dropdown) {
         setAssigningSkill(null)
+        setAddingSkillToAgent(null)
       }
     }
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [assigningSkill])
+  }, [assigningSkill, addingSkillToAgent])
 
   const installedNames = new Set(installed.map((s) => s.name))
 
@@ -165,6 +187,7 @@ export function ConnectionsView() {
     } finally {
       setAssignBusy(false)
       setAssigningSkill(null)
+      setAddingSkillToAgent(null)
     }
   }
 
@@ -220,6 +243,81 @@ export function ConnectionsView() {
 
         {!loading && !error && (
           <>
+            {/* Agent Cards */}
+            {agents.length > 0 && (
+              <div className="cn-section">
+                <h2 className="cn-section-title">Agents</h2>
+                <div className="cn-grid">
+                  {agents.map((agent) => {
+                    const assignedSkills = agentSkillsMap[agent.id] || []
+                    const assignedSkillIds = new Set(assignedSkills.map((s) => s.id))
+                    const availableSkills = installed.filter((s) => !assignedSkillIds.has(s.id))
+                    return (
+                      <div key={agent.id} className="cn-card cn-agent-card">
+                        <div className="cn-card-header">
+                          <div className="cn-agent-card-identity">
+                            <span className="cn-agent-card-emoji">{agent.emoji || '🤖'}</span>
+                            <span className="cn-card-name">{agent.name}</span>
+                          </div>
+                        </div>
+
+                        <div className="cn-agent-card-skills">
+                          <div className="cn-agents-label">Skills</div>
+                          <div className="cn-agents-list">
+                            {assignedSkills.map((skill) => (
+                              <span key={skill.id} className="cn-agent-chip">
+                                <span className="cn-agent-chip-name">{skill.name}</span>
+                                <button
+                                  className="cn-agent-chip-remove"
+                                  title={`Remove ${skill.name}`}
+                                  onClick={() => handleUnassignSkill(skill.id, agent.id)}
+                                >
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ))}
+                            {assignedSkills.length === 0 && (
+                              <span className="cn-agents-none">No skills assigned</span>
+                            )}
+                            {availableSkills.length > 0 && (
+                              <div className="cn-agent-add-wrap">
+                                <button
+                                  className="cn-skill-add-btn cn-agent-add-btn"
+                                  onClick={() =>
+                                    setAddingSkillToAgent(
+                                      addingSkillToAgent === agent.id ? null : agent.id,
+                                    )
+                                  }
+                                  disabled={assignBusy}
+                                  title="Add skill"
+                                >
+                                  <Plus size={12} />
+                                </button>
+                                {addingSkillToAgent === agent.id && (
+                                  <div className="cn-skill-dropdown cn-agent-dropdown">
+                                    {availableSkills.map((skill) => (
+                                      <button
+                                        key={skill.id}
+                                        className="cn-agent-dropdown-item"
+                                        onClick={() => handleAssignSkill(skill.id, agent.id)}
+                                        disabled={assignBusy}
+                                      >
+                                        {skill.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {installed.length > 0 && (
               <div className="cn-section">
                 <h2 className="cn-section-title">Installed</h2>
