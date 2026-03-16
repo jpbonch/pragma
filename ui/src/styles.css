@@ -1379,6 +1379,29 @@ select { cursor: pointer; }
   color: #1f6fbe;
 }
 
+.conv-msg-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.45em 0;
+  font-size: 12px;
+}
+
+.conv-msg-markdown th,
+.conv-msg-markdown td {
+  border: 1px solid #e3e0d8;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.conv-msg-markdown th {
+  background: #f7f6f3;
+  font-weight: 600;
+}
+
+.conv-msg-markdown tr:nth-child(even) {
+  background: #fafaf8;
+}
+
 /* Tool events - inline, compact */
 .conv-tool {
   display: flex;
@@ -1854,6 +1877,29 @@ select { cursor: pointer; }
   color: #1f6fbe;
 }
 
+.conversation-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.45em 0;
+  font-size: 12px;
+}
+
+.conversation-markdown th,
+.conversation-markdown td {
+  border: 1px solid #e3e0d8;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.conversation-markdown th {
+  background: #f7f6f3;
+  font-weight: 600;
+}
+
+.conversation-markdown tr:nth-child(even) {
+  background: #fafaf8;
+}
+
 .conversation-tool-row {
   padding: 4px 10px;
   font-size: 12px;
@@ -2237,6 +2283,29 @@ select { cursor: pointer; }
 
 .output-markdown-preview > :last-child {
   margin-bottom: 0;
+}
+
+.output-markdown-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.45em 0;
+  font-size: 12px;
+}
+
+.output-markdown-preview th,
+.output-markdown-preview td {
+  border: 1px solid #e3e0d8;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.output-markdown-preview th {
+  background: #f7f6f3;
+  font-weight: 600;
+}
+
+.output-markdown-preview tr:nth-child(even) {
+  background: #fafaf8;
 }
 
 .output-html-preview {
@@ -3397,6 +3466,29 @@ select { cursor: pointer; }
   border-radius: 8px;
   padding: 10px 12px;
   overflow-x: auto;
+}
+
+.context-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+  font-size: 14px;
+}
+
+.context-markdown th,
+.context-markdown td {
+  border: 1px solid #e3e0d8;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.context-markdown th {
+  background: #f7f6f3;
+  font-weight: 600;
+}
+
+.context-markdown tr:nth-child(even) {
+  background: #fafaf8;
 }
 
 .context-editor {

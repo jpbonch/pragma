@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, X, Sparkles, User, Wrench, Info, Square, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
 import { fetchTaskPlan, fetchTaskTestCommands, runTaskTestCommand, updateTaskTestCommands } from '../api'
 
@@ -379,7 +380,7 @@ export function ConversationDrawer({
             <div className="conv-msg-text">{entry.content}</div>
           ) : (
             <div className="conv-msg-markdown">
-              <ReactMarkdown>{entry.content || ''}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || ''}</ReactMarkdown>
             </div>
           )}
         </div>

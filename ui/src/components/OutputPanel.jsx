@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, FileCode2, FileImage, FileSpreadsheet, FileText, FileType2 } from 'lucide-react'
 import Papa from 'papaparse'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   fetchTaskOutputChanges,
   fetchTaskOutputFiles,
@@ -567,7 +568,7 @@ export function OutputPanel({
 
                   {!previewLoading && !previewError && selectedKind === 'markdown' && (
                     <div className="output-markdown-preview">
-                      <ReactMarkdown>{previewText}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewText}</ReactMarkdown>
                     </div>
                   )}
 

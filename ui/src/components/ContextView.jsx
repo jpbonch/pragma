@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { FilePlus2, FileText, Folder, FolderPlus, Pencil } from 'lucide-react'
 
 function ensureMdName(name) {
@@ -290,7 +291,7 @@ export function ContextView({
 
             {!isEditing ? (
               <div className="context-markdown">
-                <ReactMarkdown>{selected.content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content}</ReactMarkdown>
               </div>
             ) : (
               <textarea
