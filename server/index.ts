@@ -1539,6 +1539,8 @@ WHERE id = $1
             latestExecuteTurn.reasoning_effort,
             `latest execute turn for reopen task ${taskId}`,
           ),
+          resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? undefined,
+          followUpMessage: body.message ?? undefined,
         });
 
         return c.json({
