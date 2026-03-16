@@ -118,7 +118,7 @@ export function ConversationDrawer({
   const [planError, setPlanError] = useState('')
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
-  const showOutputPanel = Boolean(taskId) && mode === 'chat'
+  const showOutputPanel = Boolean(taskId) && (mode === 'chat' || mode === 'execute')
   const canApprove = showOutputPanel && taskStatus === 'pending_review'
   const canReopenCompleted = showOutputPanel && taskStatus === 'completed'
   const isCompletedTask = showOutputPanel && taskStatus === 'completed'
