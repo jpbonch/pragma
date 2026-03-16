@@ -2785,24 +2785,13 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
         const assistantMessageId = `msg_${randomUUID().slice(0, 12)}`;
         const selectedPlanRecipientAgentId =
           body.mode === "plan" ? await getStoredPlanRecipientForTurn(db, turnId) : null;
-        const planRecipientSelectionCount =
-          body.mode === "plan" ? await countPlanRecipientSelectionsForTurn(db, turnId) : 0;
-        if (
-          body.mode === "plan" &&
-          (!selectedPlanRecipientAgentId || planRecipientSelectionCount < 1)
-        ) {
-          throw new PragmaError(
-            "PLAN_RECIPIENT_REQUIRED",
-            409,
-            "Plan mode requires at least one `pragma task plan-select-recipient` CLI submission.",
-          );
-        }
-
         await completeTurn(db, {
           turnId,
           assistantMessage: finalAssistantText,
           selectedAgentId: selectedPlanRecipientAgentId,
-          selectionStatus: body.mode === "plan" ? "auto_selected" : null,
+          selectionStatus: body.mode === "plan"
+            ? (selectedPlanRecipientAgentId ? "auto_selected" : "recipient_required")
+            : null,
         });
 
         await insertMessage(db, {
@@ -2815,16 +2804,17 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
 
         // Transition task from planning → planned when plan turn completes
         if (body.mode === "plan" && thread!.task_id) {
-          await db.query(
-            `
-UPDATE tasks
-SET status = 'planned',
-    plan = $2,
-    assigned_to = $3
-WHERE id = $1
-`,
-            [thread!.task_id, finalAssistantText, selectedPlanRecipientAgentId],
-          );
+          if (selectedPlanRecipientAgentId) {
+            await db.query(
+              `UPDATE tasks SET status = 'planned', plan = $2, assigned_to = $3 WHERE id = $1`,
+              [thread!.task_id, finalAssistantText, selectedPlanRecipientAgentId],
+            );
+          } else {
+            await db.query(
+              `UPDATE tasks SET status = 'planned', plan = $2 WHERE id = $1`,
+              [thread!.task_id, finalAssistantText],
+            );
+          }
           emitTaskStatus(workspaceName, thread!.task_id, "planned", "plan_completed");
         }
 
@@ -3941,21 +3931,6 @@ LIMIT 1
   return result.rows[0]?.selected_agent_id ?? null;
 }
 
-async function countPlanRecipientSelectionsForTurn(
-  db: Awaited<ReturnType<typeof openDatabase>>,
-  turnId: string,
-): Promise<number> {
-  const result = await db.query<{ count: number }>(
-    `
-SELECT COUNT(*)::int AS count
-FROM conversation_events
-WHERE turn_id = $1
-  AND event_name = 'plan_recipient_selected'
-`,
-    [turnId],
-  );
-  return result.rows[0]?.count ?? 0;
-}
 
 function buildConversationAgentEnv(input: {
   apiUrl: string;
