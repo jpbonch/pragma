@@ -201,6 +201,7 @@ export async function checkpointTaskRepos(input: {
 export async function mergeApprovedTask(input: {
   workspacePaths: WorkspacePathsLike;
   taskId: string;
+  taskTitle?: string;
   gitState: TaskGitState;
 }): Promise<MergeTaskResult> {
   const taskWorkspaceDir = join(input.workspacePaths.worktreesDir, input.taskId, "workspace");
@@ -210,7 +211,8 @@ export async function mergeApprovedTask(input: {
   for (const repo of input.gitState.repos) {
     const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, repo.relative_path);
     const taskRepoPath = resolveRepoPath(taskWorkspaceDir, repo.relative_path);
-    const commitMessage = `pragma: merge task ${input.taskId} (${repo.relative_path})`;
+    const label = input.taskTitle || input.taskId;
+    const commitMessage = `pragma: ${label}`;
 
     try {
       await runGitSafe(sourceRepoPath, ["merge", "--abort"]);

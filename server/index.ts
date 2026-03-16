@@ -1460,13 +1460,14 @@ LIMIT 1
 
       const taskResult = await db.query<{
         id: string;
+        title: string;
         status: TaskStatus;
         assigned_to: string | null;
         merge_retry_count: number | null;
         git_state_json: string | null;
       }>(
         `
-SELECT id, status, assigned_to, merge_retry_count, git_state_json
+SELECT id, title, status, assigned_to, merge_retry_count, git_state_json
 FROM tasks
 WHERE id = $1
 LIMIT 1
@@ -1567,6 +1568,7 @@ WHERE id = $1
       const mergeResult = await mergeApprovedTask({
         workspacePaths,
         taskId,
+        taskTitle: task.title,
         gitState,
       });
 
