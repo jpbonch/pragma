@@ -174,6 +174,7 @@ export function buildWorkerPrompt(input: {
     codePathPolicyLine,
     "- Put non-code artifacts (docs, reports, generated assets) under `outputs/$PRAGMA_TASK_ID/`.",
     "- Do not place source code files at workspace root.",
+    "Git workflow: You are working in an isolated git worktree on a task branch. Do not run git commit, push, or checkout. Your file changes are automatically committed and merged when the task is approved. Subdirectories under code/ may be independent git repos — run git commands inside them, not at the workspace root.",
     "Before making changes, check if the project has uninstalled dependencies (e.g. missing node_modules/, .venv/, vendor/, etc.) and install them using the appropriate package manager.",
     "If you need clarification from the human, run:",
     askQuestionCommand,
