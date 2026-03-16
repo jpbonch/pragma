@@ -3,7 +3,13 @@ import { Plus, Search } from 'lucide-react'
 import data from '@emoji-mart/data'
 import Picker from '@emoji-mart/react'
 import { iconForAgent } from '../lib/agentIcon'
-import { fetchAgentTemplates } from '../api'
+import {
+  fetchAgentTemplates,
+  fetchInstalledSkills,
+  fetchAgentSkills,
+  assignAgentSkill,
+  unassignAgentSkill,
+} from '../api'
 
 const AGENT_COLORS = ['#4B83D6', '#2383e2', '#E09B3D', '#7C6DD7', '#E06B5E', '#9B6DD7']
 const AGENT_AVATAR_BG = '#E09B3D12'
@@ -234,10 +240,18 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // Skills management state
+  const [installedSkills, setInstalledSkills] = useState([])
+  const [agentSkills, setAgentSkills] = useState([])
+  const [skillDropdownOpen, setSkillDropdownOpen] = useState(false)
+  const [skillBusy, setSkillBusy] = useState(false)
+
   useEffect(() => {
     if (!open) return
     setConfirmDelete(false)
     setDeleting(false)
+    setSkillDropdownOpen(false)
+    setSkillBusy(false)
     if (agent) {
       if (!agent.harness || !agent.model_label) {
         throw new Error('Agent payload is missing harness or model_label.')
@@ -258,6 +272,53 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
     }
     setPickerOpen(false)
   }, [open, agent])
+
+  // Load installed skills and agent's assigned skills when editing
+  useEffect(() => {
+    if (!open) return
+    setInstalledSkills([])
+    setAgentSkills([])
+    fetchInstalledSkills().then(setInstalledSkills).catch(() => {})
+    if (agent?.id) {
+      fetchAgentSkills(agent.id).then(setAgentSkills).catch(() => {})
+    }
+  }, [open, agent?.id])
+
+  async function handleAddSkill(skillId) {
+    if (!agent?.id || skillBusy) return
+    setSkillBusy(true)
+    try {
+      await assignAgentSkill(agent.id, skillId)
+      const skill = installedSkills.find((s) => s.id === skillId)
+      if (skill) setAgentSkills((prev) => [...prev, skill])
+    } catch {
+      // ignore
+    } finally {
+      setSkillBusy(false)
+      setSkillDropdownOpen(false)
+    }
+  }
+
+  async function handleRemoveSkill(skillId) {
+    if (!agent?.id) return
+    try {
+      await unassignAgentSkill(agent.id, skillId)
+      setAgentSkills((prev) => prev.filter((s) => s.id !== skillId))
+    } catch {
+      // ignore
+    }
+  }
+
+  // Close skill dropdown on outside click
+  useEffect(() => {
+    if (!skillDropdownOpen) return
+    function onPointerDown(e) {
+      if (e.target.closest('.apm-skill-add-btn') || e.target.closest('.apm-skill-dropdown')) return
+      setSkillDropdownOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [skillDropdownOpen])
 
   useEffect(() => {
     const options = MODELS_BY_HARNESS[harness] || []
@@ -338,6 +399,61 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
               placeholder="Define this agent's behavior..."
             />
           </div>
+
+          {/* Skills section - only for existing agents */}
+          {agent?.id && (
+            <div className="agent-profile-field">
+              <span className="agent-profile-field-label">Skills</span>
+              <div className="apm-skills-list">
+                {agentSkills.map((skill) => (
+                  <span key={skill.id} className="apm-skill-chip">
+                    <span className="apm-skill-chip-name">{skill.name}</span>
+                    <button
+                      className="apm-skill-chip-remove"
+                      title={`Remove ${skill.name}`}
+                      onClick={() => handleRemoveSkill(skill.id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {agentSkills.length === 0 && (
+                  <span className="apm-skills-none">No skills assigned</span>
+                )}
+                {(() => {
+                  const assignedIds = new Set(agentSkills.map((s) => s.id))
+                  const available = installedSkills.filter((s) => !assignedIds.has(s.id))
+                  if (available.length === 0) return null
+                  return (
+                    <div style={{ position: 'relative', display: 'inline-flex' }}>
+                      <button
+                        className="apm-skill-add-btn"
+                        onClick={() => setSkillDropdownOpen(!skillDropdownOpen)}
+                        disabled={skillBusy}
+                        title="Add skill"
+                      >
+                        <Plus size={12} />
+                      </button>
+                      {skillDropdownOpen && (
+                        <div className="apm-skill-dropdown">
+                          {available.map((skill) => (
+                            <button
+                              key={skill.id}
+                              className="apm-skill-dropdown-item"
+                              onClick={() => handleAddSkill(skill.id)}
+                              disabled={skillBusy}
+                            >
+                              {skill.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+          )}
         </div>
 
         {error && <div className="error" style={{ padding: '0 0 4px' }}>Error: {error}</div>}
