@@ -1963,30 +1963,61 @@ select { cursor: pointer; }
   gap: 10px;
 }
 
-.output-plan-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #37352f;
+.output-plan-body {
+  overflow-y: auto;
 }
 
-.output-plan-summary {
-  margin: 0;
-  font-size: 13px;
-  color: #5f5d58;
-  line-height: 1.5;
-}
-
-.output-plan-steps {
-  margin: 0;
-  padding-left: 20px;
+.output-plan-markdown {
   font-size: 13px;
   color: #37352f;
   line-height: 1.6;
 }
 
-.output-plan-steps li {
+.output-plan-markdown h1,
+.output-plan-markdown h2,
+.output-plan-markdown h3,
+.output-plan-markdown h4 {
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+
+.output-plan-markdown h1 { font-size: 16px; }
+.output-plan-markdown h2 { font-size: 15px; }
+.output-plan-markdown h3 { font-size: 14px; }
+
+.output-plan-markdown p {
+  margin: 6px 0;
+}
+
+.output-plan-markdown ul,
+.output-plan-markdown ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.output-plan-markdown li {
   padding: 2px 0;
+}
+
+.output-plan-markdown code {
+  background: #f5f4f0;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.output-plan-markdown pre {
+  background: #f5f4f0;
+  padding: 8px 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.output-plan-markdown pre code {
+  background: none;
+  padding: 0;
 }
 
 .output-run-card {

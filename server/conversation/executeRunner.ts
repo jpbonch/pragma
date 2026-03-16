@@ -393,7 +393,6 @@ WHERE id = $1
         await completeTurn(db, {
           turnId,
           assistantMessage: finalOrchestratorText || "Recipient selection requires input.",
-          planSummary: null,
           selectionStatus: unresolvedStatus,
         });
 
@@ -565,7 +564,6 @@ WHERE id = $1
     await completeTurn(db, {
       turnId,
       assistantMessage: finalWorkerText,
-      planSummary: null,
       selectedAgentId: selectedWorker.id,
       workerSessionId: workerResult.sessionId,
       selectionStatus,

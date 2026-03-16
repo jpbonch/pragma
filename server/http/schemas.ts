@@ -140,14 +140,6 @@ export const taskRespondSchema = z
   })
   .strict();
 
-export const planSummarySchema = z
-  .object({
-    title: nonEmptyString,
-    summary: nonEmptyString,
-    steps: z.array(nonEmptyString).min(1),
-  })
-  .strict();
-
 export const reviewTaskSchema = z
   .object({
     action: z.enum(["approve", "approve_and_push", "reopen"]),

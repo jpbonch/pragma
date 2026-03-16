@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
   mode VARCHAR(16) NOT NULL,
   user_message TEXT NOT NULL,
   assistant_message TEXT,
-  plan_summary TEXT,
   reasoning_effort VARCHAR(16),
   requested_recipient_agent_id VARCHAR(64),
   selected_agent_id VARCHAR(64),
@@ -191,19 +190,19 @@ SELECT thread.id,
        thread.status,
        thread.created_at,
        thread.updated_at,
-       latest_plan_turn.plan_summary AS latest_plan_summary,
+       latest_plan_turn.assistant_message AS latest_plan_assistant_message,
        first_plan_turn.user_message AS first_user_message,
-       (latest_plan_turn.plan_summary IS NOT NULL) AS has_completed_plan_turn,
+       (latest_plan_turn.assistant_message IS NOT NULL) AS has_completed_plan_turn,
        newest_turn.status AS latest_turn_status
 FROM conversation_threads AS thread
 LEFT JOIN LATERAL (
-  SELECT plan_summary
+  SELECT assistant_message
   FROM conversation_turns
   WHERE thread_id = thread.id
     AND mode = 'plan'
     AND status = 'completed'
-    AND plan_summary IS NOT NULL
-    AND plan_summary <> ''
+    AND assistant_message IS NOT NULL
+    AND assistant_message <> ''
   ORDER BY created_at DESC
   LIMIT 1
 ) AS latest_plan_turn ON TRUE
@@ -367,7 +366,6 @@ export async function completeTurn(
   input: {
     turnId: string;
     assistantMessage: string;
-    planSummary: string | null;
     selectedAgentId?: string | null;
     workerSessionId?: string | null;
     selectionStatus?: "auto_selected" | "manual_selected" | "recipient_required" | "invalid" | null;
@@ -377,10 +375,9 @@ export async function completeTurn(
     `
 UPDATE conversation_turns
 SET assistant_message = $2,
-    plan_summary = $3,
-    selected_agent_id = COALESCE($4, selected_agent_id),
-    worker_session_id = COALESCE($5, worker_session_id),
-    selection_status = COALESCE($6, selection_status),
+    selected_agent_id = COALESCE($3, selected_agent_id),
+    worker_session_id = COALESCE($4, worker_session_id),
+    selection_status = COALESCE($5, selection_status),
     status = 'completed',
     completed_at = CURRENT_TIMESTAMP
 WHERE id = $1
@@ -388,7 +385,6 @@ WHERE id = $1
     [
       input.turnId,
       input.assistantMessage,
-      input.planSummary,
       input.selectedAgentId ?? null,
       input.workerSessionId ?? null,
       input.selectionStatus ?? null,
@@ -501,7 +497,6 @@ SELECT id,
        mode,
        user_message,
        assistant_message,
-       plan_summary,
        reasoning_effort,
        requested_recipient_agent_id,
        selected_agent_id,
@@ -535,7 +530,6 @@ SELECT id,
        mode,
        user_message,
        assistant_message,
-       plan_summary,
        reasoning_effort,
        requested_recipient_agent_id,
        selected_agent_id,
@@ -568,7 +562,6 @@ SELECT id,
        mode,
        user_message,
        assistant_message,
-       plan_summary,
        reasoning_effort,
        requested_recipient_agent_id,
        selected_agent_id,
@@ -609,7 +602,6 @@ SELECT id,
        mode,
        user_message,
        assistant_message,
-       plan_summary,
        reasoning_effort,
        requested_recipient_agent_id,
        selected_agent_id,

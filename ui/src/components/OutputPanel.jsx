@@ -619,21 +619,13 @@ export function OutputPanel({
       )}
 
       {tab === 'plan' && (
-        <div className="output-tab-body">
+        <div className="output-tab-body output-plan-body">
           {planLoading && <div className="muted">Loading plan...</div>}
           {planError && <div className="error">Error: {planError}</div>}
           {!planLoading && !planError && planData && (
-            <>
-              <h3 className="output-plan-title">{planData.title}</h3>
-              <p className="output-plan-summary">{planData.summary}</p>
-              {Array.isArray(planData.steps) && planData.steps.length > 0 && (
-                <ol className="output-plan-steps">
-                  {planData.steps.map((step, i) => (
-                    <li key={i}>{step}</li>
-                  ))}
-                </ol>
-              )}
-            </>
+            <div className="output-plan-markdown">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{planData}</ReactMarkdown>
+            </div>
           )}
         </div>
       )}

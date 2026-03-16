@@ -37,7 +37,6 @@ export function buildPrompt(
 
   if (mode === "plan") {
     const planRecipientCommand = `${cli} task plan-select-recipient --agent-id "<candidate_id>" --reason "<one sentence reason>"`;
-    const planSummaryCommand = `${cli} task plan-summary --title "<short title>" --summary "<1-2 sentence summary>" --step "<step 1>" --step "<step 2>"`;
     const listAgentsCommand = `${cli} list-agents`;
     const candidates = Array.isArray(options.planCandidates) ? options.planCandidates : [];
     const candidateLines = candidates.map((candidate, index) => {
@@ -45,7 +44,7 @@ export function buildPrompt(
       return `${index + 1}. id=${candidate.id}; name=${candidate.name}${desc}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
     });
     const workspaceInstruction = options.workspaceIsEmpty
-      ? "Workspace appears empty. Skip exploratory probing and immediately produce recipient selection + plan summary CLI submissions."
+      ? "Workspace appears empty. Skip exploratory probing and immediately produce the plan and recipient selection."
       : "Use tools for read-only inspection and exploratory context gathering before finalizing the plan.";
 
     return [
@@ -53,22 +52,19 @@ export function buildPrompt(
       "Plan mode is planning-only.",
       workspaceInstruction,
       "Do not execute implementation work and do not modify files.",
-      "Return a concrete, decision-complete plan in plain language.",
+      "Return a concrete, decision-complete plan in plain language as your response.",
+      "Your full response will be stored as the plan and passed to the implementation agent.",
       `Use this Pragma CLI command prefix: ${cli}`,
       "If you need to inspect available agents, run:",
       listAgentsCommand,
       "Available worker candidates (use one of these ids for `--agent-id`):",
       candidateLines.length > 0 ? candidateLines.join("\n") : "(none available)",
-      "First, persist the selected implementation recipient by calling exactly one CLI command:",
+      "Persist the selected implementation recipient by calling exactly one CLI command:",
       planRecipientCommand,
-      "Then persist structured plan data by calling exactly one CLI command:",
-      planSummaryCommand,
       "Rules:",
       "- Use exactly one recipient selection command and choose a valid worker id.",
       "- Recipient reason must be one sentence.",
-      "- Use at least one --step flag and keep steps ordered.",
-      "- Title and summary must be concise and specific.",
-      "- Do not emit PLAN_SUMMARY_JSON tags.",
+      "- Write the plan as your natural response with clear steps.",
       reasoningLine,
       "User request:",
       cleanMessage,

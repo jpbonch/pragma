@@ -81,7 +81,6 @@ import {
   outputFileQuerySchema,
   plansQuerySchema,
   planSelectRecipientSchema,
-  planSummarySchema,
   reviewTaskSchema,
   runTaskTestCommandSchema,
   updateTaskTestCommandsSchema,
@@ -1266,37 +1265,12 @@ LIMIT 1
     const db = await openDatabase(workspaceName);
 
     try {
-      const thread = await getThreadByTaskId(db, taskId);
-      if (!thread) {
-        return c.json({ plan: null });
-      }
-
-      const sourceThreadId = thread.source_thread_id;
-      if (!sourceThreadId) {
-        // For execute-mode tasks (no plan thread), use the initial prompt as the plan
-        const executeTurn = await getFirstExecuteTurn(db, thread.id);
-        if (executeTurn?.user_message) {
-          const prompt = executeTurn.user_message.trim();
-          if (prompt) {
-            return c.json({
-              plan: { title: "Task Prompt", summary: prompt, steps: [] },
-            });
-          }
-        }
-        return c.json({ plan: null });
-      }
-
-      const planTurn = await getLatestCompletedPlanTurn(db, sourceThreadId);
-      if (!planTurn?.plan_summary) {
-        return c.json({ plan: null });
-      }
-
-      const parsed = safeParseJson(planTurn.plan_summary);
-      if (!isPlanSummaryRecord(parsed)) {
-        return c.json({ plan: null });
-      }
-
-      return c.json({ plan: normalizePlanSummary(parsed) });
+      const result = await db.query<{ plan: string | null }>(
+        `SELECT plan FROM tasks WHERE id = $1 LIMIT 1`,
+        [taskId],
+      );
+      const plan = result.rows[0]?.plan?.trim() || null;
+      return c.json({ plan });
     } finally {
       await db.close();
     }
@@ -2312,89 +2286,6 @@ WHERE id = $1
   });
 
   app.post(
-    "/conversations/:threadId/turns/:turnId/agent/plan-summary",
-    validateJson(planSummarySchema),
-    async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const threadId = c.req.param("threadId");
-    const turnId = c.req.param("turnId");
-    const body = c.req.valid("json");
-
-    const db = await openDatabase(workspaceName);
-    try {
-      await ensureConversationSchema(db);
-
-      const turnResult = await db.query<{
-        id: string;
-        thread_id: string;
-        mode: "chat" | "plan" | "execute";
-      }>(
-        `
-SELECT id, thread_id, mode
-FROM conversation_turns
-WHERE id = $1
-  AND thread_id = $2
-LIMIT 1
-`,
-        [turnId, threadId],
-      );
-
-      const turn = turnResult.rows[0];
-      if (!turn) {
-        throw new PragmaError(
-          "TURN_NOT_FOUND",
-          404,
-          `Conversation turn not found: ${turnId}`,
-        );
-      }
-      if (turn.mode !== "plan") {
-        throw new PragmaError(
-          "TURN_NOT_PLAN_MODE",
-          409,
-          `Turn is not in plan mode: ${turnId}`,
-        );
-      }
-
-      const normalized = normalizePlanSummary(body);
-      await db.query(
-        `
-UPDATE conversation_turns
-SET plan_summary = $2
-WHERE id = $1
-`,
-        [turnId, JSON.stringify(normalized)],
-      );
-
-      // Update the task title with the orchestrator-generated title
-      const threadResult = await db.query<{ task_id: string | null }>(
-        `SELECT task_id FROM conversation_threads WHERE id = $1 LIMIT 1`,
-        [threadId],
-      );
-      const taskId = threadResult.rows[0]?.task_id;
-      if (taskId && normalized.title) {
-        await updateTaskTitle(db, taskId, normalized.title);
-      }
-
-      await insertEvent(db, {
-        id: `evt_${randomUUID().slice(0, 12)}`,
-        threadId,
-        turnId,
-        eventName: "plan_summary_submitted",
-        payload: {
-          source: "cli",
-          title: normalized.title,
-          summary: normalized.summary,
-          steps_count: normalized.steps.length,
-        },
-      });
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
-    }
-  });
-
-  app.post(
     "/conversations/:threadId/turns/:turnId/agent/select-recipient",
     validateJson(planSelectRecipientSchema),
     async (c) => {
@@ -2509,7 +2400,7 @@ WHERE id = $1
       await ensureConversationSchema(db);
       const pendingPlans = await listOpenPlanThreads(db, { limit, cursor });
       const plans = pendingPlans.map((plan) => {
-        const metadata = derivePendingPlanMetadata(plan.latest_plan_summary, plan.first_user_message);
+        const metadata = derivePendingPlanMetadata(plan.first_user_message);
         return {
           id: plan.id,
           plan_title: metadata.title,
@@ -2760,24 +2651,10 @@ WHERE id = $1
 
         const finalAssistantText = (result.finalText || assistantText || "").trim();
         const assistantMessageId = `msg_${randomUUID().slice(0, 12)}`;
-        const declaredPlanSummary =
-          body.mode === "plan" ? await getStoredPlanSummaryForTurn(db, turnId) : null;
-        const planSummarySubmissionCount =
-          body.mode === "plan" ? await countPlanSummarySubmissionsForTurn(db, turnId) : 0;
         const selectedPlanRecipientAgentId =
           body.mode === "plan" ? await getStoredPlanRecipientForTurn(db, turnId) : null;
         const planRecipientSelectionCount =
           body.mode === "plan" ? await countPlanRecipientSelectionsForTurn(db, turnId) : 0;
-        if (
-          body.mode === "plan" &&
-          (!declaredPlanSummary || planSummarySubmissionCount < 1)
-        ) {
-          throw new PragmaError(
-            "PLAN_SUMMARY_REQUIRED",
-            409,
-            "Plan mode requires at least one `pragma task plan-summary` CLI submission.",
-          );
-        }
         if (
           body.mode === "plan" &&
           (!selectedPlanRecipientAgentId || planRecipientSelectionCount < 1)
@@ -2788,12 +2665,10 @@ WHERE id = $1
             "Plan mode requires at least one `pragma task plan-select-recipient` CLI submission.",
           );
         }
-        const planSummary = body.mode === "plan" ? declaredPlanSummary : null;
 
         await completeTurn(db, {
           turnId,
           assistantMessage: finalAssistantText,
-          planSummary: planSummary ? JSON.stringify(planSummary) : null,
           selectedAgentId: selectedPlanRecipientAgentId,
           selectionStatus: body.mode === "plan" ? "auto_selected" : null,
         });
@@ -2836,7 +2711,6 @@ WHERE id = $1
         const turnCompletedPayload = {
           turn_id: turnId,
           assistant_message_id: assistantMessageId,
-          plan_summary: planSummary,
         };
 
         await insertEvent(db, {
@@ -2901,16 +2775,14 @@ WHERE id = $1
         throw new PragmaError("NO_PLAN_FOUND", 409, "No completed plan turn found.");
       }
 
-      const parsedSummary = latestPlanTurn.plan_summary
-        ? safeParseJson(latestPlanTurn.plan_summary)
-        : null;
-      if (!isPlanSummaryRecord(parsedSummary)) {
-        throw new PragmaError("PLAN_SUMMARY_INVALID", 409, "Plan summary is missing or invalid.");
+      const planText = latestPlanTurn.assistant_message?.trim() || null;
+      if (!planText) {
+        throw new PragmaError("PLAN_EMPTY", 409, "Plan turn has no assistant message.");
       }
-      const normalizedSummary = normalizePlanSummary(parsedSummary);
-      const planTitle = normalizedSummary.title;
-      const planSummaryText = normalizedSummary.summary;
-      const planSteps = normalizedSummary.steps;
+      const planTitle = truncateChatText(
+        latestPlanTurn.user_message?.replace(/\s+/g, " ").trim() || "Task",
+        80,
+      );
       const plannedRecipientAgentId =
         typeof latestPlanTurn.selected_agent_id === "string" &&
         latestPlanTurn.selected_agent_id.trim().length > 0
@@ -2933,23 +2805,14 @@ WHERE id = $1
         );
       }
 
-      executePrompt = latestPlanTurn.assistant_message?.trim() ||
-        [
-          `Implement this plan: ${planTitle}`,
-          planSummaryText,
-          planSteps.length > 0
-            ? `Steps:\\n${planSteps.map((step, index) => `${index + 1}. ${step}`).join("\\n")}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\\n\\n");
+      executePrompt = planText;
 
       await db.query(
         `
-INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
-VALUES ($1, $2, 'queued', $3, NULL, NULL)
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan)
+VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 `,
-        [taskId, planTitle, executeRecipient.id],
+        [taskId, planTitle, executeRecipient.id, planText],
       );
       emitTaskStatus(workspaceName, taskId, "queued", "execute_from_plan_created");
 
@@ -3469,28 +3332,10 @@ function deriveChatTitle(assistantMessage: string, userMessage: string): string 
 }
 
 function derivePendingPlanMetadata(
-  latestPlanSummary: string | null,
   firstUserMessage: string | null,
 ): { title: string; preview: string | null } {
-  let title = "";
-  let preview = "";
-
-  if (latestPlanSummary) {
-    const parsedSummary = safeParseJson(latestPlanSummary);
-    if (isPlanSummaryRecord(parsedSummary)) {
-      const normalized = normalizePlanSummary(parsedSummary);
-      title = normalized.title;
-      preview = normalized.summary;
-    }
-  }
-
-  if (!title && firstUserMessage) {
-    title = truncateChatText(firstUserMessage, 80);
-  }
-
-  if (!preview && firstUserMessage) {
-    preview = truncateChatText(firstUserMessage, 140);
-  }
+  const title = firstUserMessage ? truncateChatText(firstUserMessage, 80) : "";
+  const preview = firstUserMessage ? truncateChatText(firstUserMessage, 140) : "";
 
   return {
     title: title || "New plan",
@@ -3518,73 +3363,6 @@ function truncateChatText(value: string, maxLength: number): string {
     return normalized;
   }
   return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
-}
-
-type PlanSummaryRecord = {
-  title: string;
-  summary: string;
-  steps: string[];
-};
-
-function normalizePlanSummary(input: PlanSummaryRecord): {
-  title: string;
-  summary: string;
-  steps: string[];
-} {
-  return {
-    title: input.title.trim(),
-    summary: input.summary.trim(),
-    steps: input.steps.map((step) => step.trim()).filter(Boolean),
-  };
-}
-
-async function getStoredPlanSummaryForTurn(
-  db: Awaited<ReturnType<typeof openDatabase>>,
-  turnId: string,
-): Promise<{ title: string; summary: string; steps: string[] } | null> {
-  const result = await db.query<{ plan_summary: string | null }>(
-    `
-SELECT plan_summary
-FROM conversation_turns
-WHERE id = $1
-LIMIT 1
-`,
-    [turnId],
-  );
-
-  const raw = result.rows[0]?.plan_summary;
-  if (!raw) {
-    return null;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-
-  if (!isPlanSummaryRecord(parsed)) {
-    return null;
-  }
-
-  return normalizePlanSummary(parsed);
-}
-
-async function countPlanSummarySubmissionsForTurn(
-  db: Awaited<ReturnType<typeof openDatabase>>,
-  turnId: string,
-): Promise<number> {
-  const result = await db.query<{ count: number }>(
-    `
-SELECT COUNT(*)::int AS count
-FROM conversation_events
-WHERE turn_id = $1
-  AND event_name = 'plan_summary_submitted'
-`,
-    [turnId],
-  );
-  return result.rows[0]?.count ?? 0;
 }
 
 async function getStoredPlanRecipientForTurn(
@@ -3617,20 +3395,6 @@ WHERE turn_id = $1
     [turnId],
   );
   return result.rows[0]?.count ?? 0;
-}
-
-function isPlanSummaryRecord(value: unknown): value is PlanSummaryRecord {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.title === "string" &&
-    typeof record.summary === "string" &&
-    Array.isArray(record.steps) &&
-    record.steps.every((step) => typeof step === "string")
-  );
 }
 
 function buildConversationAgentEnv(input: {

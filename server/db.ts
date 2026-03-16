@@ -517,6 +517,11 @@ ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ
 `);
 
   await db.exec(`
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS plan TEXT
+`);
+
+  await db.exec(`
 CREATE TABLE IF NOT EXISTS humans (
   id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR(64),
   emoji VARCHAR(32) NOT NULL,

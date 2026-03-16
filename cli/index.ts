@@ -338,55 +338,6 @@ taskCommand
     },
   );
 
-taskCommand
-  .command("plan-summary")
-  .description("Submit structured plan summary for the current plan turn")
-  .requiredOption("--title <text>", "Plan title")
-  .requiredOption("--summary <text>", "Plan summary")
-  .option(
-    "--step <text>",
-    "Plan step (repeat for multiple steps)",
-    (value: string, prev: string[]) => [...prev, value],
-    [],
-  )
-  .option("--thread-id <id>", "Conversation thread id")
-  .option("--turn-id <id>", "Conversation turn id")
-  .option("--api-url <url>", "Pragma API base URL")
-  .action(
-    async (options: {
-      title: string;
-      summary: string;
-      step: string[];
-      threadId?: string;
-      turnId?: string;
-      apiUrl?: string;
-    }) => {
-      const { apiUrl, threadId, turnId } = resolveThreadTurnCommandContext(options);
-      const steps = (Array.isArray(options.step) ? options.step : [])
-        .map((step) => step.trim())
-        .filter(Boolean);
-      if (steps.length === 0) {
-        throw new Error("At least one --step is required.");
-      }
-
-      await apiRequest(
-        apiUrl,
-        `/conversations/${encodeURIComponent(threadId)}/turns/${encodeURIComponent(turnId)}/agent/plan-summary`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            title: options.title.trim(),
-            summary: options.summary.trim(),
-            steps,
-          }),
-        },
-      );
-
-      console.log(`Plan summary submitted for turn ${turnId}.`);
-    },
-  );
-
 program
   .command("server")
   .description("Start the Pragma API server")
