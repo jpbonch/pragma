@@ -38,6 +38,7 @@ export function buildPrompt(
   if (mode === "plan") {
     const planRecipientCommand = `${cli} task plan-select-recipient --agent-id "<candidate_id>" --reason "<one sentence reason>"`;
     const listAgentsCommand = `${cli} list-agents`;
+    const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"]`;
     const candidates = Array.isArray(options.planCandidates) ? options.planCandidates : [];
     const candidateLines = candidates.map((candidate, index) => {
       const desc = candidate.description ? `; description=${candidate.description}` : "";
@@ -55,6 +56,9 @@ export function buildPrompt(
       "Return a concrete, decision-complete plan in plain language as your response.",
       "Your full response will be stored as the plan and passed to the implementation agent.",
       `Use this Pragma CLI command prefix: ${cli}`,
+      "If you need clarification before finalizing the plan, ask the user:",
+      askQuestionCommand,
+      "After asking, stop further work until the user responds.",
       "If you need to inspect available agents, run:",
       listAgentsCommand,
       "Available worker candidates (use one of these ids for `--agent-id`):",
