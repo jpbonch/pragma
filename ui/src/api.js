@@ -675,6 +675,14 @@ export async function fetchSkillRegistry() {
   return data.skills
 }
 
+export async function fetchGlobalSkills() {
+  const data = asObject(await fetchJson('/skills/global'), 'Invalid global skills response.')
+  if (!Array.isArray(data.skills)) {
+    throw invalidResponse('`skills` must be an array.')
+  }
+  return data.skills
+}
+
 export async function fetchInstalledSkills() {
   const data = asObject(await fetchJson('/skills'), 'Invalid skills response.')
   if (!Array.isArray(data.skills)) {

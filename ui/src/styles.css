@@ -4534,6 +4534,11 @@ select { cursor: pointer; }
   padding: 2px 8px; border-radius: 10px; white-space: nowrap;
 }
 .cn-badge--installed { background: #ecfdf5; color: #059669; }
+.cn-badge--global { background: #eff6ff; color: #2563eb; }
+
+.cn-global-source {
+  font-size: 11px; color: #9b9a97; font-family: 'SF Mono', 'Fira Code', monospace;
+}
 
 .cn-card-desc {
   font-size: 12px; color: #6f6e69; margin: 0 0 10px;

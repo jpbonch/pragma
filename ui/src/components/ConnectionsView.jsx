@@ -3,6 +3,7 @@ import { AlertCircle, Check, Download, Trash2, Plus, X } from 'lucide-react'
 import {
   fetchSkillRegistry,
   fetchInstalledSkills,
+  fetchGlobalSkills,
   installRegistrySkill,
   deleteSkill,
   fetchAgents,
@@ -19,6 +20,7 @@ const PROVIDER_LABELS = {
 export function ConnectionsView() {
   const [registry, setRegistry] = useState([])
   const [installed, setInstalled] = useState([])
+  const [globalSkills, setGlobalSkills] = useState([])
   const [agents, setAgents] = useState([])
   // Map of skill_id -> [{ id, name, emoji }]
   const [skillAgents, setSkillAgents] = useState({})
@@ -58,13 +60,15 @@ export function ConnectionsView() {
     setLoading(true)
     setError('')
     try {
-      const [reg, inst, agentList] = await Promise.all([
+      const [reg, inst, global, agentList] = await Promise.all([
         fetchSkillRegistry(),
         fetchInstalledSkills(),
+        fetchGlobalSkills().catch(() => []),
         fetchAgents(),
       ])
       setRegistry(reg)
       setInstalled(inst)
+      setGlobalSkills(global)
       setAgents(agentList)
 
       const map = await loadAgentSkillMap(agentList, inst)
@@ -186,7 +190,7 @@ export function ConnectionsView() {
         <div className="cn-header-inner">
           <h1 className="cn-title">Skills</h1>
           <span className="cn-subtitle">
-            {installed.length} installed
+            {installed.length} installed{globalSkills.length > 0 ? ` · ${globalSkills.length} global` : ''}
           </span>
         </div>
       </div>
@@ -309,6 +313,29 @@ export function ConnectionsView() {
               </div>
             )}
 
+            {globalSkills.length > 0 && (
+              <div className="cn-section">
+                <h2 className="cn-section-title">Global Skills</h2>
+                <p className="cn-section-source">~/.agents/skills · ~/.claude/skills</p>
+                <div className="cn-grid">
+                  {globalSkills.map((skill) => (
+                    <div key={`global-${skill.name}`} className="cn-card cn-card--installed">
+                      <div className="cn-card-header">
+                        <span className="cn-card-name">{skill.name}</span>
+                        <span className="cn-badge cn-badge--global">Global</span>
+                      </div>
+                      {skill.description && (
+                        <p className="cn-card-desc">{skill.description}</p>
+                      )}
+                      <div className="cn-card-footer">
+                        <span className="cn-global-source">{skill.source}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {anthropicSkills.length > 0 && (
               <div className="cn-section">
                 <h2 className="cn-section-title">Anthropic Skills</h2>
@@ -397,7 +424,7 @@ export function ConnectionsView() {
               </div>
             )}
 
-            {registry.length === 0 && installed.length === 0 && (
+            {registry.length === 0 && installed.length === 0 && globalSkills.length === 0 && (
               <div className="cn-empty">
                 <Download size={40} strokeWidth={1.5} />
                 <p className="cn-empty-title">No skills available</p>

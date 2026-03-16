@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
@@ -3445,6 +3446,69 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     } catch (error: unknown) {
       throw new PragmaError("REGISTRY_FETCH_FAILED", 502, errorMessage(error));
     }
+  });
+
+  // ── Global Skills (from ~/.agents/skills and ~/.claude/skills) ─────
+
+  async function scanGlobalSkillsDir(dir: string, source: string): Promise<{ name: string; description: string; source: string; path: string }[]> {
+    const results: { name: string; description: string; source: string; path: string }[] = [];
+    let entries: string[];
+    try {
+      entries = await readdir(dir);
+    } catch {
+      return results;
+    }
+    for (const entry of entries) {
+      if (entry.startsWith(".")) continue;
+      const skillDir = join(dir, entry);
+      try {
+        const s = await stat(skillDir);
+        if (!s.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      // Look for SKILL.md
+      const skillMdPath = join(skillDir, "SKILL.md");
+      let content: string;
+      try {
+        content = await readFile(skillMdPath, "utf-8");
+      } catch {
+        // No SKILL.md, skip
+        continue;
+      }
+      const description = parseSkillMdDescription(content);
+      // Try to extract name from frontmatter
+      let name = entry;
+      const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+      if (fmMatch) {
+        const nameMatch = fmMatch[1].match(/name:\s*["']?(.*?)["']?\s*$/m);
+        if (nameMatch && nameMatch[1].trim()) name = nameMatch[1].trim();
+      }
+      results.push({ name, description, source, path: skillDir });
+    }
+    return results;
+  }
+
+  app.get("/skills/global", async (c) => {
+    const home = homedir();
+    const [agentsSkills, claudeSkills] = await Promise.all([
+      scanGlobalSkillsDir(join(home, ".agents", "skills"), "~/.agents"),
+      scanGlobalSkillsDir(join(home, ".claude", "skills"), "~/.claude"),
+    ]);
+    // Deduplicate by name (prefer ~/.agents over ~/.claude since claude often symlinks to agents)
+    const seen = new Set<string>();
+    const skills: { name: string; description: string; source: string; path: string }[] = [];
+    for (const s of agentsSkills) {
+      seen.add(s.name.toLowerCase());
+      skills.push(s);
+    }
+    for (const s of claudeSkills) {
+      if (!seen.has(s.name.toLowerCase())) {
+        skills.push(s);
+      }
+    }
+    skills.sort((a, b) => a.name.localeCompare(b.name));
+    return c.json({ skills });
   });
 
   app.post("/skills/registry/install", validateJson(
