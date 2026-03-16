@@ -782,6 +782,20 @@ export default function App() {
     }
     return sidebarChats.filter((chat) => !hiddenIds.has(chat.id))
   }, [sidebarChats, hiddenChatsByWorkspace, activeWorkspaceName])
+  const thinkingChatIds = useMemo(() => {
+    const ids = new Set()
+    // Currently streaming conversation in chat mode
+    if (conversation.mode === 'chat' && conversation.loading && conversation.threadId) {
+      ids.add(conversation.threadId)
+    }
+    // Chats with a running turn from server data
+    for (const chat of sidebarChats) {
+      if (chat.latest_turn_status === 'running') {
+        ids.add(chat.id)
+      }
+    }
+    return ids
+  }, [conversation.mode, conversation.loading, conversation.threadId, sidebarChats])
   const selectedRuntimeService = useMemo(() => {
     if (!selectedServiceId) {
       return null
@@ -2242,6 +2256,7 @@ export default function App() {
         workspacesLoading={workspacesLoading}
         chats={visibleSidebarChats}
         chatsLoading={sidebarChatsLoading}
+        thinkingChatIds={thinkingChatIds}
         activeChatId={conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''}
         services={visibleRuntimeServices}
         activeServiceId={selectedServiceId}

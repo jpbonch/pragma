@@ -152,23 +152,31 @@ export async function listChatThreads(
 
   const params: Array<string | number> = [limit];
   let query = `
-SELECT id,
-       chat_title,
-       chat_preview,
-       status,
-       updated_at,
-       chat_last_message_at
-FROM conversation_threads
-WHERE mode = 'chat'
+SELECT thread.id,
+       thread.chat_title,
+       thread.chat_preview,
+       thread.status,
+       thread.updated_at,
+       thread.chat_last_message_at,
+       newest_turn.status AS latest_turn_status
+FROM conversation_threads AS thread
+LEFT JOIN LATERAL (
+  SELECT status
+  FROM conversation_turns
+  WHERE thread_id = thread.id
+  ORDER BY created_at DESC
+  LIMIT 1
+) AS newest_turn ON TRUE
+WHERE thread.mode = 'chat'
 `;
 
   if (cursor) {
     params.push(cursor);
-    query += "  AND COALESCE(chat_last_message_at, updated_at) < $2::timestamptz\n";
+    query += "  AND COALESCE(thread.chat_last_message_at, thread.updated_at) < $2::timestamptz\n";
   }
 
   query += `
-ORDER BY chat_last_message_at DESC NULLS LAST, updated_at DESC
+ORDER BY thread.chat_last_message_at DESC NULLS LAST, thread.updated_at DESC
 LIMIT $1
 `;
 

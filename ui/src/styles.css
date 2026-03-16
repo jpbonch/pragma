@@ -382,6 +382,19 @@ select { cursor: pointer; }
   cursor: pointer;
   font-family: inherit;
   transition: background 0.12s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-chat-spinner {
+  flex-shrink: 0;
+  color: #2383e2;
+  animation: sidebar-chat-spin 0.8s linear infinite;
+}
+
+@keyframes sidebar-chat-spin {
+  to { transform: rotate(360deg); }
 }
 
 .sidebar-chat-row {
@@ -408,6 +421,7 @@ select { cursor: pointer; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .sidebar-chat-item:hover .sidebar-chat-item-title {

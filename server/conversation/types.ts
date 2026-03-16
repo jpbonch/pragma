@@ -51,6 +51,7 @@ export type ChatThreadListItem = {
   status: ConversationStatus;
   updated_at: string;
   chat_last_message_at: string | null;
+  latest_turn_status: "running" | "completed" | "failed" | null;
 };
 
 export type OpenPlanThreadListItem = {

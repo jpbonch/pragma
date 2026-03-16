@@ -11,6 +11,7 @@ import {
   Code2,
   Folder,
   TerminalSquare,
+  Loader2,
 } from 'lucide-react'
 
 const ITEMS = [
@@ -30,6 +31,7 @@ export function Sidebar({
   workspacesLoading,
   chats = [],
   chatsLoading = false,
+  thinkingChatIds,
   activeChatId = '',
   onOpenChat,
   onHideChat,
@@ -187,13 +189,16 @@ export function Sidebar({
           )}
 
           {!chatsLoading &&
-            chats.map((chat) => (
+            chats.map((chat) => {
+              const isThinking = thinkingChatIds?.has(chat.id)
+              return (
               <div key={chat.id} className="sidebar-chat-row">
                 <button
                   className={`sidebar-chat-item ${activeChatId === chat.id ? 'active' : ''}`}
                   onClick={() => onOpenChat?.(chat.id)}
                   title={chat.chat_title || 'New chat'}
                 >
+                  {isThinking && <Loader2 size={12} className="sidebar-chat-spinner" />}
                   <div className="sidebar-chat-item-title">{chat.chat_title || 'New chat'}</div>
                 </button>
                 <button
@@ -209,7 +214,8 @@ export function Sidebar({
                   <X size={11} />
                 </button>
               </div>
-            ))}
+              )
+            })}
         </div>
       </section>
 
