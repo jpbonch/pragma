@@ -3672,7 +3672,7 @@ select { cursor: pointer; }
 .settings-sidebar {
   width: 180px;
   flex-shrink: 0;
-  background: #F7F7F5;
+  background: #FFFFFF;
   border-right: 1px solid #ebe7df;
   padding: 12px 8px;
   display: flex;
