@@ -348,7 +348,7 @@ export async function buildRepoDiffEntries(input: {
   return entries;
 }
 
-function resolveRepoPath(rootPath: string, relativeRepoPath: string): string {
+export function resolveRepoPath(rootPath: string, relativeRepoPath: string): string {
   if (relativeRepoPath === ".") {
     return rootPath;
   }
@@ -780,4 +780,32 @@ async function runGitCapture(cwd: string, args: string[]): Promise<string> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Returns a git log summary of commits that landed on the base branch
+ * between baseCommit and current HEAD, filtered to the given files.
+ * This is a read-only operation on the source repo (not the task worktree).
+ */
+export async function getMainChangesSummary(input: {
+  sourceRepoPath: string;
+  baseCommit: string;
+  baseBranch: string;
+  files: string[];
+}): Promise<string> {
+  if (input.files.length === 0) {
+    return "";
+  }
+  try {
+    const output = await runGitCapture(input.sourceRepoPath, [
+      "log",
+      "--oneline",
+      `${input.baseCommit}..${input.baseBranch}`,
+      "--",
+      ...input.files,
+    ]);
+    return output.trim();
+  } catch {
+    return "(unable to retrieve main branch changes)";
+  }
 }

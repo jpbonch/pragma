@@ -27,9 +27,11 @@ import { ExecuteRunner } from "./conversation/executeRunner";
 import {
   buildRepoDiffEntries,
   deleteTaskWorktree,
+  getMainChangesSummary,
   getTaskMainOutputDir,
   mergeApprovedTask,
   parseTaskGitState,
+  resolveRepoPath,
   saveDiffSnapshot,
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
@@ -1597,9 +1599,33 @@ WHERE id = $1
         const thread = await getThreadByTaskId(db, taskId);
         const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
         if (thread && latestExecuteTurn && latestExecuteTurn.user_message.trim()) {
+          const taskWorkspaceDir = join(workspacePaths.worktreesDir, taskId, "workspace");
+          const enrichedConflicts = await Promise.all(
+            mergeResult.conflicts.map(async (conflict) => {
+              const repo = gitState.repos.find((r) => r.relative_path === conflict.repo_path);
+              const sourceRepoPath = resolveRepoPath(workspacePaths.workspaceDir, conflict.repo_path);
+              const taskRepoPath = resolveRepoPath(taskWorkspaceDir, conflict.repo_path);
+              const mainChangesSummary = repo
+                ? await getMainChangesSummary({
+                    sourceRepoPath,
+                    baseCommit: repo.base_commit,
+                    baseBranch: repo.base_branch,
+                    files: conflict.files,
+                  })
+                : "";
+              return {
+                repo_path: conflict.repo_path,
+                files: conflict.files,
+                taskRepoPath,
+                branchName: gitState.branch_name,
+                baseBranch: repo?.base_branch ?? "main",
+                mainChangesSummary,
+              };
+            }),
+          );
           const retryPrompt = buildConflictRetryPrompt({
             originalTask: latestExecuteTurn.user_message,
-            conflicts: mergeResult.conflicts,
+            conflicts: enrichedConflicts,
           });
           executeRunner.execute({
             workspaceName,
@@ -3653,30 +3679,65 @@ function buildConversationAgentEnv(input: {
 
 function buildConflictRetryPrompt(input: {
   originalTask: string;
-  conflicts: Array<{ repo_path: string; files: string[] }>;
+  conflicts: Array<{
+    repo_path: string;
+    files: string[];
+    taskRepoPath: string;
+    branchName: string;
+    baseBranch: string;
+    mainChangesSummary: string;
+  }>;
 }): string {
-  const conflictLines = input.conflicts
-    .map((conflict, index) => {
+  const conflictSections = input.conflicts
+    .map((conflict) => {
       const files =
         conflict.files.length > 0
-          ? conflict.files.map((file) => `  - ${file}`).join("\n")
-          : "  - (git reported conflict without explicit file list)";
-      return `${index + 1}. repo: ${conflict.repo_path}\n${files}`;
+          ? conflict.files.map((file) => `- ${file}`).join("\n")
+          : "- (git reported conflict without explicit file list)";
+
+      const mainChanges = conflict.mainChangesSummary
+        ? conflict.mainChangesSummary
+        : "(no commits found touching conflicted files)";
+
+      return [
+        `### Repo: ${conflict.repo_path}`,
+        `**Path in worktree:** ${conflict.taskRepoPath}`,
+        `**Merge state:** MERGING (merge already initiated — do NOT run \`git merge\`)`,
+        `**Task branch:** ${conflict.branchName}  ←  merging in: ${conflict.baseBranch}`,
+        "",
+        "Conflicted files:",
+        files,
+        "",
+        `Commits that landed on ${conflict.baseBranch} since this task branched (touching conflicted files):`,
+        mainChanges,
+      ].join("\n");
     })
-    .join("\n");
+    .join("\n\n");
 
   return [
-    "The previous approval merge reported conflicts.",
-    "Resolve all merge conflicts in the current task worktrees, then finish with a clean summary for review.",
-    "Conflict details:",
-    conflictLines || "(none reported)",
-    "Requirements:",
-    "- Keep prior successful work intact.",
-    "- Resolve conflict markers and ensure files are consistent.",
-    "- Leave the workspace ready for a new approval review.",
-    "Original task:",
+    "The approval merge for this task hit conflicts. Resolve them in the task worktree.",
+    "",
+    "## Conflict Details",
+    "",
+    conflictSections,
+    "",
+    "## Important: Worktree Structure",
+    "",
+    "Each repo listed above is a **nested git repository** inside the task worktree.",
+    "You MUST run all git commands (git add, git commit, git status, etc.) from the repo path shown above, NOT from the outer workspace directory.",
+    "",
+    "## Resolution Steps",
+    "",
+    "1. Open each conflicted file and resolve the conflict markers (`<<<<<<<` / `=======` / `>>>>>>>`)",
+    "2. Incorporate main's intent (e.g. if main deleted code, don't reintroduce it; if main added code, keep it)",
+    "3. `git add <resolved-file>` in the repo directory shown above",
+    "4. `git commit` to complete the merge (git supplies the merge commit message)",
+    "5. Verify: `git status` should show a clean working tree with no conflict markers in any file",
+    "",
+    "## Original Task",
+    "",
     input.originalTask.trim(),
-  ].join("\n\n");
+  ].join("\n");
 }
 
 async function getTaskOutputsRoot(
