@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, X, Sparkles, User, Wrench, Info, Square, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -99,6 +99,16 @@ export function ConversationDrawer({
   onStop,
 }) {
   const bodyRef = useRef(null)
+  const isNearBottomRef = useRef(true)
+
+  const handleMessagesScroll = useCallback(() => {
+    const el = bodyRef.current
+    if (!el) return
+    const threshold = 80
+    isNearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight <= threshold
+  }, [])
+
   const [prompt, setPrompt] = useState('')
   const [approveLoading, setApproveLoading] = useState(false)
   const [approveError, setApproveError] = useState('')
@@ -127,7 +137,7 @@ export function ConversationDrawer({
       : '🤖'
 
   useEffect(() => {
-    if (!bodyRef.current) {
+    if (!bodyRef.current || !isNearBottomRef.current) {
       return
     }
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight
@@ -418,7 +428,7 @@ export function ConversationDrawer({
           {showOutputPanel ? (
             <>
               <div className="conv-chat-side">
-                <div className="conv-messages" ref={bodyRef}>
+                <div className="conv-messages" ref={bodyRef} onScroll={handleMessagesScroll}>
                   {entries.length === 0 && <div className="muted" style={{ padding: '8px 0' }}>No messages yet.</div>}
                   {entries.map(renderEntry)}
                   {loading && <div className="conv-status"><span className="conv-streaming-label">Thinking...</span></div>}
@@ -483,7 +493,7 @@ export function ConversationDrawer({
               </div>
             </>
           ) : (
-            <div className="conv-messages" ref={bodyRef}>
+            <div className="conv-messages" ref={bodyRef} onScroll={handleMessagesScroll}>
               {entries.length === 0 && <div className="muted" style={{ padding: '8px 0' }}>No messages yet.</div>}
               {entries.map(renderEntry)}
               {loading && <div className="conv-status"><span className="conv-streaming-label">Thinking...</span></div>}
