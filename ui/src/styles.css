@@ -424,6 +424,15 @@ select { cursor: pointer; }
   to { transform: rotate(360deg); }
 }
 
+.sidebar-chat-unread-dot {
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2383e2;
+}
+
 .sidebar-chat-row {
   position: relative;
 }

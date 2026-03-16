@@ -770,6 +770,7 @@ export default function App() {
   const [hiddenChatsByWorkspace, setHiddenChatsByWorkspace] = useState(() =>
     loadHiddenChatsByWorkspace(),
   )
+  const [unreadChatIds, setUnreadChatIds] = useState(() => new Set())
 
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false)
   const [onboardingError, setOnboardingError] = useState('')
@@ -805,6 +806,7 @@ export default function App() {
   const tasksRefreshQueuedRef = useRef(false)
   const runtimeServicesPollTimerRef = useRef(null)
   const chatsPollTimerRef = useRef(null)
+  const prevThinkingChatIdsRef = useRef(new Set())
   const runtimeServiceStreamCloseRef = useRef(null)
   const pendingCount = useMemo(() => getPendingCount(tasks), [tasks])
   const orchestratorRuntime = useMemo(() => {
@@ -854,6 +856,30 @@ export default function App() {
     }
     return ids
   }, [conversation.mode, conversation.loading, conversation.threadId, sidebarChats])
+
+  // Mark chats as unread when they stop thinking and the user isn't viewing them
+  useEffect(() => {
+    const prev = prevThinkingChatIdsRef.current
+    const activeChatId =
+      conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''
+    const newlyDone = []
+    for (const id of prev) {
+      if (!thinkingChatIds.has(id) && id !== activeChatId) {
+        newlyDone.push(id)
+      }
+    }
+    if (newlyDone.length > 0) {
+      setUnreadChatIds((current) => {
+        const next = new Set(current)
+        for (const id of newlyDone) {
+          next.add(id)
+        }
+        return next
+      })
+    }
+    prevThinkingChatIdsRef.current = new Set(thinkingChatIds)
+  }, [thinkingChatIds, conversation.open, conversation.mode, conversation.threadId])
+
   const selectedRuntimeService = useMemo(() => {
     if (!selectedServiceId) {
       return null
@@ -2078,6 +2104,12 @@ export default function App() {
       return
     }
     setSelectedServiceId('')
+    setUnreadChatIds((current) => {
+      if (!current.has(threadId)) return current
+      const next = new Set(current)
+      next.delete(threadId)
+      return next
+    })
 
     try {
       const data = await fetchConversationThread(threadId)
@@ -2391,6 +2423,7 @@ export default function App() {
         chats={visibleSidebarChats}
         chatsLoading={sidebarChatsLoading}
         thinkingChatIds={thinkingChatIds}
+        unreadChatIds={unreadChatIds}
         activeChatId={conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''}
         services={visibleRuntimeServices}
         activeServiceId={selectedServiceId}

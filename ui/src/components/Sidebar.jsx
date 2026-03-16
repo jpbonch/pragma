@@ -33,6 +33,7 @@ export function Sidebar({
   chats = [],
   chatsLoading = false,
   thinkingChatIds,
+  unreadChatIds,
   activeChatId = '',
   onOpenChat,
   onHideChat,
@@ -203,6 +204,7 @@ export function Sidebar({
           {!chatsLoading &&
             chats.map((chat) => {
               const isThinking = thinkingChatIds?.has(chat.id)
+              const isUnread = !isThinking && unreadChatIds?.has(chat.id)
               return (
               <div key={chat.id} className="sidebar-chat-row">
                 <button
@@ -212,6 +214,7 @@ export function Sidebar({
                 >
                   <div className="sidebar-chat-item-title">{chat.chat_title || 'New chat'}</div>
                   {isThinking && <Loader2 size={12} className="sidebar-chat-spinner" />}
+                  {isUnread && <span className="sidebar-chat-unread-dot" />}
                 </button>
                 <button
                   className="sidebar-chat-hide"
