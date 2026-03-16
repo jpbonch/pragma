@@ -2453,7 +2453,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'connections' && <ConnectionsView />}
+        {activeTab === 'skills' && <ConnectionsView />}
         {activeTab === 'settings' && (
           <SettingsView
             workspaceName={activeWorkspaceName}

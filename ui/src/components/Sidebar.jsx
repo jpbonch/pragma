@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Zap,
   BookOpen,
-  Link2,
+  Puzzle,
   Settings,
   ChevronDown,
   Plus,
@@ -19,7 +19,7 @@ const ITEMS = [
   { id: 'code', icon: Code2, label: 'Code' },
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'context', icon: BookOpen, label: 'Context' },
-  { id: 'connections', icon: Link2, label: 'Connections' },
+  { id: 'skills', icon: Puzzle, label: 'Skills' },
 ]
 
 export function Sidebar({
