@@ -384,14 +384,12 @@ export function OutputPanel({
         >
           Changes
         </button>
-        {planData && (
-          <button
-            className={`output-tab-btn ${tab === 'plan' ? 'active' : ''}`}
-            onClick={() => setTab('plan')}
-          >
-            Plan
-          </button>
-        )}
+        <button
+          className={`output-tab-btn ${tab === 'plan' ? 'active' : ''}`}
+          onClick={() => setTab('plan')}
+        >
+          Plan
+        </button>
       </div>
 
       {tab === 'changes' && (
@@ -626,6 +624,9 @@ export function OutputPanel({
             <div className="output-plan-markdown">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{planData}</ReactMarkdown>
             </div>
+          )}
+          {!planLoading && !planError && !planData && (
+            <div className="muted">No plan yet.</div>
           )}
         </div>
       )}
