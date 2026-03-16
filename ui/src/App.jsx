@@ -804,6 +804,7 @@ export default function App() {
   const tasksRefreshInFlightRef = useRef(false)
   const tasksRefreshQueuedRef = useRef(false)
   const runtimeServicesPollTimerRef = useRef(null)
+  const chatsPollTimerRef = useRef(null)
   const runtimeServiceStreamCloseRef = useRef(null)
   const pendingCount = useMemo(() => getPendingCount(tasks), [tasks])
   const orchestratorRuntime = useMemo(() => {
@@ -903,6 +904,10 @@ export default function App() {
       if (runtimeServicesPollTimerRef.current) {
         clearInterval(runtimeServicesPollTimerRef.current)
         runtimeServicesPollTimerRef.current = null
+      }
+      if (chatsPollTimerRef.current) {
+        clearInterval(chatsPollTimerRef.current)
+        chatsPollTimerRef.current = null
       }
       runtimeServiceStreamCloseRef.current?.()
       runtimeServiceStreamCloseRef.current = null
@@ -1308,6 +1313,10 @@ export default function App() {
       clearInterval(runtimeServicesPollTimerRef.current)
       runtimeServicesPollTimerRef.current = null
     }
+    if (chatsPollTimerRef.current) {
+      clearInterval(chatsPollTimerRef.current)
+      chatsPollTimerRef.current = null
+    }
     closeConversationDrawer()
   }
 
@@ -1457,8 +1466,10 @@ export default function App() {
     }
   }
 
-  async function loadChats() {
-    setSidebarChatsLoading(true)
+  async function loadChats({ silent = false } = {}) {
+    if (!silent) {
+      setSidebarChatsLoading(true)
+    }
     try {
       setSidebarChats(await fetchChats(20))
     } catch (error) {
@@ -1472,9 +1483,32 @@ export default function App() {
       // Keep existing list if fetch fails and surface in workspace error area.
       setWorkspaceError((prev) => prev || errorText(error))
     } finally {
-      setSidebarChatsLoading(false)
+      if (!silent) {
+        setSidebarChatsLoading(false)
+      }
     }
   }
+
+  // Poll sidebar chats while any chat has a running turn so the spinner
+  // stays visible even when the user is viewing a different tab.
+  useEffect(() => {
+    if (chatsPollTimerRef.current) {
+      clearInterval(chatsPollTimerRef.current)
+      chatsPollTimerRef.current = null
+    }
+    if (thinkingChatIds.size === 0 || !activeWorkspaceName) {
+      return
+    }
+    chatsPollTimerRef.current = setInterval(() => {
+      void loadChats({ silent: true })
+    }, 3000)
+    return () => {
+      if (chatsPollTimerRef.current) {
+        clearInterval(chatsPollTimerRef.current)
+        chatsPollTimerRef.current = null
+      }
+    }
+  }, [thinkingChatIds.size > 0, activeWorkspaceName])
 
   async function loadAgents() {
     setAgentsLoading(true)

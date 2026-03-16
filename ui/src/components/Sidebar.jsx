@@ -210,8 +210,8 @@ export function Sidebar({
                   onClick={() => onOpenChat?.(chat.id)}
                   title={chat.chat_title || 'New chat'}
                 >
-                  {isThinking && <Loader2 size={12} className="sidebar-chat-spinner" />}
                   <div className="sidebar-chat-item-title">{chat.chat_title || 'New chat'}</div>
+                  {isThinking && <Loader2 size={12} className="sidebar-chat-spinner" />}
                 </button>
                 <button
                   className="sidebar-chat-hide"

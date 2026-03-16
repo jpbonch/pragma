@@ -415,6 +415,7 @@ select { cursor: pointer; }
 
 .sidebar-chat-spinner {
   flex-shrink: 0;
+  margin-left: auto;
   color: #2383e2;
   animation: sidebar-chat-spin 0.8s linear infinite;
 }
