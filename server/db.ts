@@ -56,28 +56,6 @@ Your task is to:
 - Report what changed and any follow-up work.
 `;
 
-const RESEARCHER_AGENT_FILE = `# Researcher
-
-You are the investigation specialist.
-
-Your task is to:
-- Clarify requirements, constraints, and edge cases.
-- Compare options with concrete tradeoffs.
-- Identify risks early and propose mitigations.
-- Hand off actionable findings for implementation.
-`;
-
-const REVIEWER_AGENT_FILE = `# Reviewer
-
-You are the quality and safety specialist.
-
-Your task is to:
-- Review code for correctness, regressions, and risk.
-- Check tests and identify coverage gaps.
-- Flag security, reliability, and performance issues.
-- Give concise, prioritized findings.
-`;
-
 type DefaultAgentSeed = {
   id: string;
   name: string;
@@ -109,28 +87,6 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
     status: "idle",
     agent_file: CODER_AGENT_FILE,
     emoji: "💻",
-    harness: "claude_code",
-    model_label: "Opus 4.6",
-    model_id: "opus",
-  },
-  {
-    id: "pragma-researcher",
-    name: "Researcher",
-    description: "Investigates requirements, compares options, and delivers actionable findings.",
-    status: "idle",
-    agent_file: RESEARCHER_AGENT_FILE,
-    emoji: "🔎",
-    harness: "claude_code",
-    model_label: "Opus 4.6",
-    model_id: "opus",
-  },
-  {
-    id: "pragma-reviewer",
-    name: "Reviewer",
-    description: "Reviews code for correctness, security, and performance issues.",
-    status: "idle",
-    agent_file: REVIEWER_AGENT_FILE,
-    emoji: "🛡️",
     harness: "claude_code",
     model_label: "Opus 4.6",
     model_id: "opus",
