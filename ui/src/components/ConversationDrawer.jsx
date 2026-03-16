@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, X, Sparkles, User, Wrench, Info, Square } from 'lucide-react'
+import { ArrowUp, X, Sparkles, User, Wrench, Info, Square, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { OutputPanel } from './OutputPanel'
 import { fetchTaskPlan, fetchTaskTestCommands, runTaskTestCommand, updateTaskTestCommands } from '../api'
@@ -37,6 +37,35 @@ function getHeaderStatusLabel({ taskStatus, mode, loading, planReady }) {
     return planReady ? 'Plan Ready' : 'Planning'
   }
   return 'Ready'
+}
+
+function ToolGroup({ entry }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div>
+      <div className="conv-tool-group" onClick={() => setExpanded((e) => !e)}>
+        <Wrench size={12} strokeWidth={2} className="conv-tool-icon" />
+        <ChevronRight
+          size={12}
+          strokeWidth={2}
+          className={`conv-tool-group-chevron${expanded ? ' expanded' : ''}`}
+        />
+        <span className="conv-tool-group-summary">{entry.summary}</span>
+        <span className="conv-tool-group-count">({entry.tools.length})</span>
+      </div>
+      {expanded && (
+        <div className="conv-tool-group-items">
+          {entry.tools.map((t) => (
+            <div key={t.id} className="conv-tool">
+              <Wrench size={12} strokeWidth={2} className="conv-tool-icon" />
+              <span className="conv-tool-label">{t.label || t.name || 'Tool'}</span>
+              {t.summary ? <span className="conv-tool-summary">{t.summary}</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function ConversationDrawer({
@@ -298,6 +327,10 @@ export function ConversationDrawer({
   }
 
   function renderEntry(entry) {
+    if (entry.type === 'tool_group') {
+      return <ToolGroup key={entry.id} entry={entry} />
+    }
+
     if (entry.type === 'tool') {
       return (
         <div key={entry.id} className="conv-tool">

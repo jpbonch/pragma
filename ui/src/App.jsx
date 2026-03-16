@@ -80,6 +80,102 @@ function nextEntryId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
 
+const EXPLORE_LABELS = new Set([
+  'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+  'read', 'glob', 'grep', 'websearch', 'webfetch',
+  'search', 'list_directory',
+])
+const WRITE_LABELS = new Set([
+  'Write', 'Edit', 'NotebookEdit',
+  'write', 'edit', 'notebookedit', 'write_file',
+])
+const COMMAND_LABELS = new Set(['Bash', 'bash', 'shell'])
+
+function buildToolGroupSummary(tools) {
+  let explores = 0
+  let writes = 0
+  let commands = 0
+  let other = 0
+  const writtenFiles = new Set()
+
+  for (const t of tools) {
+    const lbl = t.label || ''
+    if (EXPLORE_LABELS.has(lbl)) {
+      explores++
+    } else if (WRITE_LABELS.has(lbl)) {
+      writes++
+      if (t.summary) writtenFiles.add(t.summary)
+    } else if (COMMAND_LABELS.has(lbl)) {
+      commands++
+    } else {
+      other++
+    }
+  }
+
+  const parts = []
+  if (explores > 0) parts.push(`Explored ${explores} file${explores > 1 ? 's' : ''}`)
+  if (writes > 0) {
+    if (writtenFiles.size <= 3 && writtenFiles.size > 0) {
+      parts.push(`Updated ${[...writtenFiles].join(', ')}`)
+    } else {
+      parts.push(`Updated ${writes} file${writes > 1 ? 's' : ''}`)
+    }
+  }
+  if (commands > 0) parts.push(`Ran ${commands} command${commands > 1 ? 's' : ''}`)
+  if (other > 0 && parts.length === 0) parts.push(`Performed ${other} tool call${other > 1 ? 's' : ''}`)
+
+  return parts.length > 0 ? parts.join(', ') : `Performed ${tools.length} tool calls`
+}
+
+function groupConsecutiveToolEntries(entries) {
+  const result = []
+  let i = 0
+  while (i < entries.length) {
+    if (entries[i].type !== 'tool') {
+      result.push(entries[i])
+      i++
+      continue
+    }
+    // Start of a tool run
+    const runStart = i
+    while (i < entries.length && entries[i].type === 'tool') {
+      i++
+    }
+    const run = entries.slice(runStart, i)
+    if (run.length === 1) {
+      result.push(run[0])
+    } else {
+      result.push({
+        id: nextEntryId('tool_group'),
+        type: 'tool_group',
+        tools: run,
+        summary: buildToolGroupSummary(run),
+      })
+    }
+  }
+  return result
+}
+
+function appendToolEntryStreaming(entries, toolEntry) {
+  const last = entries[entries.length - 1]
+  if (last && last.type === 'tool_group') {
+    const tools = [...last.tools, toolEntry]
+    const updated = { ...last, tools, summary: buildToolGroupSummary(tools) }
+    return [...entries.slice(0, -1), updated]
+  }
+  if (last && last.type === 'tool') {
+    const tools = [last, toolEntry]
+    const group = {
+      id: nextEntryId('tool_group'),
+      type: 'tool_group',
+      tools,
+      summary: buildToolGroupSummary(tools),
+    }
+    return [...entries.slice(0, -1), group]
+  }
+  return [...entries, toolEntry]
+}
+
 function appendAssistantDelta(entries, delta, assistantIdentity) {
   if (!delta) {
     return entries
@@ -403,7 +499,7 @@ function buildEntriesFromThreadData(data, agentById) {
   }
 
   timeline.sort((a, b) => a.createdAt - b.createdAt || a.order - b.order)
-  return timeline.map((item) => item.entry)
+  return groupConsecutiveToolEntries(timeline.map((item) => item.entry))
 }
 
 function summarizeStatusEvent(name, payload) {
@@ -1715,15 +1811,12 @@ export default function App() {
 
                 return {
                   ...prev,
-                  entries: [
-                    ...prev.entries,
-                    {
-                      id: nextEntryId('tool'),
-                      type: 'tool',
-                      label: toolSummary.label,
-                      summary: toolSummary.summary,
-                    },
-                  ],
+                  entries: appendToolEntryStreaming(prev.entries, {
+                    id: nextEntryId('tool'),
+                    type: 'tool',
+                    label: toolSummary.label,
+                    summary: toolSummary.summary,
+                  }),
                 }
               }
 
