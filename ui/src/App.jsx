@@ -2470,7 +2470,6 @@ export default function App() {
               onPickTaskRecipient={(taskId, recipientAgentId) => {
                 void handleSetTaskRecipient(taskId, recipientAgentId)
               }}
-              onCancelTask={(taskId) => handleDeleteTask(taskId)}
             />
             <ConversationDrawer
               open={conversation.open && (conversation.mode === 'chat' || conversation.mode === 'plan')}

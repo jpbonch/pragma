@@ -645,29 +645,6 @@ select { cursor: pointer; }
   background: rgba(0,0,0,0.015);
 }
 
-.task-row-stop {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: #9B9A97;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
-}
-.task-row:hover .task-row-stop {
-  opacity: 1;
-}
-.task-row-stop:hover {
-  background: rgba(224, 62, 62, 0.1);
-  color: #e03e3e;
-}
 
 .task-dot {
   position: relative;
