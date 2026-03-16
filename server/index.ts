@@ -9,6 +9,7 @@ import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { lookup as lookupMimeType } from "mime-types";
 import open from "open";
+import { z } from "zod";
 import {
   DEFAULT_AGENT_ID,
   PragmaError,
@@ -3218,6 +3219,168 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
 
     return c.json({ ok: true });
+  });
+
+  // ── Skill Registry (GitHub) ──────────────────────────────────────
+
+  interface GitHubTreeItem {
+    path: string;
+    mode: string;
+    type: string;
+    sha: string;
+    url: string;
+  }
+
+  interface RegistrySkill {
+    name: string;
+    description: string;
+    provider: string;
+    repo: string;
+    skill_path: string;
+  }
+
+  async function fetchGitHubTree(owner: string, repo: string, treeSha: string): Promise<GitHubTreeItem[]> {
+    const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${treeSha}`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "pragma" },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { tree?: GitHubTreeItem[] };
+    return Array.isArray(data.tree) ? data.tree : [];
+  }
+
+  async function fetchGitHubFileContent(owner: string, repo: string, path: string): Promise<string> {
+    const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/${path}`;
+    const res = await fetch(url, { headers: { "User-Agent": "pragma" } });
+    if (!res.ok) throw new PragmaError("FETCH_FAILED", 502, `Failed to fetch ${path} from ${owner}/${repo}`);
+    return res.text();
+  }
+
+  function parseSkillMdDescription(content: string): string {
+    // Try YAML frontmatter description
+    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      const descMatch = fmMatch[1].match(/description:\s*["']?(.*?)["']?\s*$/m);
+      if (descMatch && descMatch[1].trim()) return descMatch[1].trim();
+    }
+    // Fallback: first non-heading, non-empty line
+    const lines = content.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("---")) continue;
+      return trimmed.length > 120 ? trimmed.slice(0, 120) + "..." : trimmed;
+    }
+    return "";
+  }
+
+  async function fetchRegistrySkills(): Promise<RegistrySkill[]> {
+    const results: RegistrySkill[] = [];
+
+    // 1. Anthropic: skills/
+    const anthropicTree = await fetchGitHubTree("anthropics", "skills", "main");
+    // The top-level tree may include "skills" folder
+    const anthropicSkillsEntry = anthropicTree.find((e) => e.path === "skills" && e.type === "tree");
+    if (anthropicSkillsEntry) {
+      const skillDirs = await fetchGitHubTree("anthropics", "skills", anthropicSkillsEntry.sha);
+      const dirs = skillDirs.filter((e) => e.type === "tree");
+      const settled = await Promise.allSettled(
+        dirs.map(async (dir) => {
+          let desc = "";
+          try {
+            const content = await fetchGitHubFileContent("anthropics", "skills", `skills/${dir.path}/SKILL.md`);
+            desc = parseSkillMdDescription(content);
+          } catch {}
+          return {
+            name: dir.path,
+            description: desc,
+            provider: "anthropic",
+            repo: "anthropics/skills",
+            skill_path: `skills/${dir.path}`,
+          };
+        }),
+      );
+      for (const r of settled) {
+        if (r.status === "fulfilled") results.push(r.value);
+      }
+    }
+
+    // 2. OpenAI: skills/.curated/
+    const openaiTree = await fetchGitHubTree("openai", "skills", "main");
+    const openaiSkillsEntry = openaiTree.find((e) => e.path === "skills" && e.type === "tree");
+    if (openaiSkillsEntry) {
+      const skillsSubtree = await fetchGitHubTree("openai", "skills", openaiSkillsEntry.sha);
+      const curatedEntry = skillsSubtree.find((e) => e.path === ".curated" && e.type === "tree");
+      if (curatedEntry) {
+        const curatedDirs = await fetchGitHubTree("openai", "skills", curatedEntry.sha);
+        const dirs = curatedDirs.filter((e) => e.type === "tree");
+        const settled = await Promise.allSettled(
+          dirs.map(async (dir) => {
+            let desc = "";
+            try {
+              const content = await fetchGitHubFileContent("openai", "skills", `skills/.curated/${dir.path}/SKILL.md`);
+              desc = parseSkillMdDescription(content);
+            } catch {}
+            return {
+              name: dir.path,
+              description: desc,
+              provider: "openai",
+              repo: "openai/skills",
+              skill_path: `skills/.curated/${dir.path}`,
+            };
+          }),
+        );
+        for (const r of settled) {
+          if (r.status === "fulfilled") results.push(r.value);
+        }
+      }
+    }
+
+    return results;
+  }
+
+  app.get("/skills/registry", async (c) => {
+    try {
+      const skills = await fetchRegistrySkills();
+      return c.json({ skills });
+    } catch (error: unknown) {
+      throw new PragmaError("REGISTRY_FETCH_FAILED", 502, errorMessage(error));
+    }
+  });
+
+  app.post("/skills/registry/install", validateJson(
+    z.object({
+      name: z.string().trim().min(1),
+      provider: z.string().trim().min(1),
+      repo: z.string().trim().min(1),
+      skill_path: z.string().trim().min(1),
+    }).strict()
+  ), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const body = c.req.valid("json");
+
+    // Fetch the SKILL.md content from GitHub
+    const [owner, repo] = body.repo.split("/");
+    const skillMdContent = await fetchGitHubFileContent(owner, repo, `${body.skill_path}/SKILL.md`);
+    const description = parseSkillMdDescription(skillMdContent);
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const skillId = `skill_${randomUUID().slice(0, 12)}`;
+      await db.query(
+        `INSERT INTO skills (id, name, description, content) VALUES ($1, $2, $3, $4)`,
+        [skillId, body.name, description, skillMdContent],
+      );
+
+      return c.json({ ok: true, id: skillId }, 201);
+    } catch (error: unknown) {
+      const message = errorMessage(error);
+      if (message.includes("unique") || message.includes("duplicate")) {
+        throw new PragmaError("SKILL_NAME_EXISTS", 409, `Skill "${body.name}" is already installed.`);
+      }
+      throw new PragmaError("INSTALL_SKILL_FAILED", 400, message);
+    } finally {
+      await db.close();
+    }
   });
 
   // ── Skills CRUD ────────────────────────────────────────────────────

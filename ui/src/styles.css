@@ -4427,6 +4427,115 @@ select { cursor: pointer; }
   margin-top: 2px;
 }
 
+/* ─── Connections / Skills View ──────────────────────── */
+.cn { display: flex; flex-direction: column; height: 100%; }
+.cn-header { flex-shrink: 0; padding: 20px 24px 0; }
+.cn-header-inner { display: flex; align-items: baseline; gap: 10px; }
+.cn-title { font-size: 20px; font-weight: 700; color: #37352f; margin: 0; }
+.cn-subtitle { font-size: 13px; color: #9b9a97; font-weight: 400; }
+.cn-content { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px 24px; }
+
+.cn-loading {
+  display: flex; align-items: center; gap: 10px;
+  color: #9b9a97; font-size: 13px; padding: 40px 0; justify-content: center;
+}
+.cn-spinner {
+  width: 16px; height: 16px;
+  border: 2px solid #e8e7e4; border-top-color: #2383e2;
+  border-radius: 50%; animation: cv-spin 0.6s linear infinite;
+}
+.cn-spinner-sm {
+  width: 12px; height: 12px;
+  border: 1.5px solid rgba(0,0,0,0.15); border-top-color: #37352f;
+  border-radius: 50%; animation: cv-spin 0.6s linear infinite;
+}
+.cn-error {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; background: #fef2f2; border: 1px solid #fecaca;
+  border-radius: 10px; color: #dc2626; font-size: 13px;
+}
+.cn-retry-btn {
+  margin-left: auto; border: 1px solid #fecaca; background: #fff;
+  color: #dc2626; font-size: 12px; font-weight: 600;
+  padding: 4px 12px; border-radius: 6px; cursor: pointer;
+  font-family: inherit;
+}
+.cn-retry-btn:hover { background: #fef2f2; }
+.cn-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px; padding: 48px 0; color: #b0afa8;
+}
+.cn-empty-title { font-size: 15px; font-weight: 600; color: #6f6e69; margin: 4px 0 0; }
+.cn-empty-desc { font-size: 13px; color: #9b9a97; margin: 0; }
+
+.cn-section { margin-bottom: 24px; }
+.cn-section-title { font-size: 15px; font-weight: 700; color: #37352f; margin: 0 0 4px; }
+.cn-section-source {
+  font-size: 12px; color: #9b9a97; margin: 0 0 10px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+.cn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.cn-card {
+  border: 1px solid #e8e7e4; border-radius: 12px; background: #fff;
+  padding: 14px 16px; display: flex; flex-direction: column;
+  transition: border-color 0.15s;
+}
+.cn-card:hover { border-color: #d4d3d0; }
+.cn-card--installed { background: #f9fafb; }
+
+.cn-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 6px;
+}
+.cn-card-name {
+  font-size: 14px; font-weight: 700; color: #37352f;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.cn-badge {
+  flex-shrink: 0; font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 10px; white-space: nowrap;
+}
+.cn-badge--installed { background: #ecfdf5; color: #059669; }
+
+.cn-card-desc {
+  font-size: 12px; color: #6f6e69; margin: 0 0 10px;
+  line-height: 1.4; flex: 1;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cn-card-footer { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+
+.cn-install-btn {
+  display: flex; align-items: center; gap: 5px;
+  border: none; border-radius: 8px; background: #2383e2; color: #fff;
+  font-size: 12px; font-weight: 600; padding: 5px 14px;
+  cursor: pointer; transition: background 0.15s; font-family: inherit;
+}
+.cn-install-btn:hover:not(:disabled) { background: #1b6ec2; }
+.cn-install-btn:disabled { opacity: 0.7; cursor: default; }
+
+.cn-remove-btn {
+  display: flex; align-items: center; gap: 5px;
+  border: 1px solid #e8e7e4; border-radius: 8px; background: #fff;
+  color: #6f6e69; font-size: 12px; font-weight: 500; padding: 4px 12px;
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+}
+.cn-remove-btn:hover:not(:disabled) { border-color: #dc2626; color: #dc2626; }
+.cn-remove-btn:disabled { opacity: 0.7; cursor: default; }
+
+.cn-installed-label {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; color: #059669; font-weight: 500;
+}
+
 @media (max-width: 980px) {
   .right-panel {
     display: none;

@@ -42,6 +42,7 @@ import {
 import { CodeView } from './components/CodeView'
 import { ContextView } from './components/ContextView'
 import { ConversationDrawer } from './components/ConversationDrawer'
+import { ConnectionsView } from './components/ConnectionsView'
 import { EmptyPane } from './components/EmptyPane'
 import { FeedView } from './components/FeedView'
 import { InputBar } from './components/InputBar'
@@ -2452,7 +2453,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'connections' && <EmptyPane title="Connections" />}
+        {activeTab === 'connections' && <ConnectionsView />}
         {activeTab === 'settings' && (
           <SettingsView
             workspaceName={activeWorkspaceName}
