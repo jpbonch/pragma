@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, ChevronDown, MessageSquare, Play, Plus, Route, Settings, Square, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Play, Plus, Route, Settings, Square, X } from 'lucide-react'
 
 const MODES = [
   { id: 'plan', icon: Route, label: 'Plan', desc: 'Break work into steps' },
   { id: 'execute', icon: Play, label: 'Execute', desc: 'Run tracked work' },
-  { id: 'chat', icon: MessageSquare, label: 'Chat', desc: 'Quick conversation' },
 ]
-const MODE_CYCLE_ORDER = ['plan', 'chat', 'execute']
+const MODE_CYCLE_ORDER = ['plan', 'execute']
 
 const REASONING_EFFORTS = [
   { id: 'low', label: 'Low' },
@@ -185,11 +184,9 @@ export function InputBar({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={
-            mode === 'chat'
-              ? 'Ask questions about your project...'
-              : mode === 'plan'
-                ? 'What should we plan?'
-                : 'Kick off a task...'
+            mode === 'plan'
+              ? 'What should we plan?'
+              : 'Kick off a task...'
           }
           rows={1}
           onInput={(e) => {
@@ -340,7 +337,7 @@ export function InputBar({
             ) : (
               <button
                 className="send-btn"
-                style={{ background: mode === 'chat' ? '#4B83D6' : '#2383e2' }}
+                style={{ background: '#2383e2' }}
                 onClick={() => submitInput()}
                 disabled={disabled || (!input.trim() && attachments.length === 0)}
                 title="Send"

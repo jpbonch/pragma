@@ -2001,6 +2001,32 @@ export default function App() {
     }
   }
 
+  async function handleNewChat() {
+    const runtime = orchestratorRuntime ?? (await resolveOrchestratorRuntime())
+    if (!runtime) {
+      setWorkspaceError('Orchestrator runtime is not available.')
+      return
+    }
+
+    setSelectedServiceId('')
+    setConversation({
+      open: true,
+      mode: 'chat',
+      threadId: '',
+      taskId: '',
+      taskStatus: '',
+      taskTitle: '',
+      harness: runtime.harness,
+      modelLabel: runtime.model_label,
+      reasoningEffort: 'medium',
+      recipientAgentId: '',
+      entries: [],
+      loading: false,
+      error: '',
+    })
+    setActiveTab('feed')
+  }
+
   async function handleOpenChat(threadId) {
     if (!threadId) {
       return
@@ -2332,6 +2358,7 @@ export default function App() {
           void handleStopRuntimeService(serviceId)
         }}
         onHideChat={handleHideChat}
+        onNewChat={handleNewChat}
         onSelectWorkspace={handleSelectWorkspace}
         onCreateWorkspace={() => {
           setOnboardingError('')

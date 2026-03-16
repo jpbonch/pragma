@@ -347,13 +347,39 @@ select { cursor: pointer; }
   overflow: hidden;
 }
 
-.sidebar-chats-title {
+.sidebar-chats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 4px 10px 6px;
+}
+
+.sidebar-chats-title {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #B0AFA8;
+}
+
+.sidebar-new-chat-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 11px;
+  color: #7A7972;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-new-chat-btn:hover {
+  background: #F0EFEC;
+  color: #37352F;
 }
 
 .sidebar-chats-list {

@@ -12,6 +12,7 @@ import {
   Folder,
   TerminalSquare,
   Loader2,
+  MessageSquare,
 } from 'lucide-react'
 
 const ITEMS = [
@@ -39,6 +40,7 @@ export function Sidebar({
   activeServiceId = '',
   onOpenService,
   onStopService,
+  onNewChat,
   onSelectWorkspace,
   onCreateWorkspace,
 }) {
@@ -181,7 +183,17 @@ export function Sidebar({
       </section>
 
       <section className="sidebar-chats">
-        <div className="sidebar-chats-title">Chats</div>
+        <div className="sidebar-chats-header">
+          <div className="sidebar-chats-title">Chats</div>
+          <button
+            className="sidebar-new-chat-btn"
+            onClick={() => onNewChat?.()}
+            title="New chat"
+          >
+            <Plus size={12} />
+            New chat
+          </button>
+        </div>
         <div className="sidebar-chats-list">
           {chatsLoading && <div className="sidebar-chat-empty">Loading chats...</div>}
           {!chatsLoading && chats.length === 0 && (
