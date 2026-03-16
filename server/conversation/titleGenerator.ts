@@ -23,7 +23,7 @@ export async function generateTitle(
   try {
     const agent = await getAgentRow(db);
     if (!agent) {
-      return deriveChatTitleFallback(assistantMessage, userMessage);
+      return deriveChatTitleFallback(userMessage, assistantMessage);
     }
 
     const harness = agent.harness as HarnessId;
@@ -49,9 +49,9 @@ export async function generateTitle(
       return title;
     }
 
-    return deriveChatTitleFallback(assistantMessage, userMessage);
+    return deriveChatTitleFallback(userMessage, assistantMessage);
   } catch {
-    return deriveChatTitleFallback(assistantMessage, userMessage);
+    return deriveChatTitleFallback(userMessage, assistantMessage);
   }
 }
 
@@ -79,14 +79,14 @@ async function getAgentRow(
   return result.rows[0] ?? null;
 }
 
-function deriveChatTitleFallback(assistantMessage: string, userMessage: string): string {
-  const assistantFirst = firstSentence(assistantMessage);
-  if (assistantFirst) {
-    return truncate(assistantFirst, 80);
-  }
+function deriveChatTitleFallback(userMessage: string, assistantMessage: string): string {
   const userFirst = firstSentence(userMessage);
   if (userFirst) {
     return truncate(userFirst, 80);
+  }
+  const assistantFirst = firstSentence(assistantMessage);
+  if (assistantFirst) {
+    return truncate(assistantFirst, 80);
   }
   return "New chat";
 }

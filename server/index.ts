@@ -2742,14 +2742,7 @@ WHERE id = $1
         });
 
         if (body.mode === "chat") {
-          const chatTitle = deriveChatTitle(finalAssistantText, message);
-          await updateChatThreadMetadata(db, {
-            threadId,
-            title: chatTitle,
-            lastMessageAt: new Date().toISOString(),
-          });
-
-          // Only generate an AI title on the first turn (when no title exists yet)
+          // Only generate a title on the first turn (when no title exists yet)
           const existing = await db.query<{ chat_title: string | null }>(
             `SELECT chat_title FROM conversation_threads WHERE id = $1 LIMIT 1`,
             [threadId],
@@ -2757,6 +2750,15 @@ WHERE id = $1
           const hasTitle = existing.rows[0]?.chat_title && existing.rows[0].chat_title !== "";
 
           if (!hasTitle) {
+            // Set a quick placeholder from the user's message so the sidebar isn't blank
+            const placeholder = deriveChatTitle(message, finalAssistantText);
+            await updateChatThreadMetadata(db, {
+              threadId,
+              title: placeholder,
+              lastMessageAt: new Date().toISOString(),
+            });
+
+            // Fire AI title generation and overwrite the placeholder when ready
             generateTitle(db, message, finalAssistantText).then((aiTitle) => {
               updateChatThreadMetadata(db, {
                 threadId,
@@ -2765,6 +2767,11 @@ WHERE id = $1
                 force: true,
               }).catch(() => {});
             }).catch(() => {});
+          } else {
+            await updateChatThreadMetadata(db, {
+              threadId,
+              lastMessageAt: new Date().toISOString(),
+            });
           }
         }
 
@@ -3770,15 +3777,15 @@ function safeParseJson(value: string): unknown {
   }
 }
 
-function deriveChatTitle(assistantMessage: string, userMessage: string): string {
-  const assistantFirstSentence = firstSentence(assistantMessage);
-  if (assistantFirstSentence) {
-    return truncateChatText(assistantFirstSentence, 80);
+function deriveChatTitle(userMessage: string, assistantMessage: string): string {
+  const userFirst = firstSentence(userMessage);
+  if (userFirst) {
+    return truncateChatText(userFirst, 80);
   }
 
-  const firstUserSentence = firstSentence(userMessage);
-  if (firstUserSentence) {
-    return truncateChatText(firstUserSentence, 80);
+  const assistantFirst = firstSentence(assistantMessage);
+  if (assistantFirst) {
+    return truncateChatText(assistantFirst, 80);
   }
 
   return "New chat";
