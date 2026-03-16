@@ -2710,6 +2710,13 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
           body.mode === "plan" ? await listPlanWorkerCandidates(db) : [];
         const workspaceIsEmpty =
           body.mode === "plan" ? await isDirectoryEmpty(paths.codeDir) : false;
+        const chatCodeRepos =
+          body.mode === "chat"
+            ? (await readdir(paths.codeDir, { withFileTypes: true }).catch(() => []))
+                .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+                .map((e) => e.name)
+                .sort()
+            : [];
         const prompt = buildPrompt(body.mode, message, reasoningEffort, pragmaCliCommand, {
           planCandidates: planPromptCandidates.map((candidate) => ({
             id: candidate.id,
@@ -2719,6 +2726,8 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
             modelLabel: candidate.model_label,
           })),
           workspaceIsEmpty,
+          workspaceDir: paths.workspaceDir,
+          codeRepos: chatCodeRepos,
         });
 
         const result = await adapter.sendTurn({

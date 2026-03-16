@@ -17,6 +17,8 @@ export function buildPrompt(
   options: {
     planCandidates?: WorkerCandidate[];
     workspaceIsEmpty?: boolean;
+    workspaceDir?: string;
+    codeRepos?: string[];
   } = {},
 ): string {
   const cleanMessage = message.trim();
@@ -24,15 +26,29 @@ export function buildPrompt(
   const cli = pragmaCliCommand.trim() || "pragma";
 
   if (mode === "chat") {
-    return [
+    const chatParts = [
       "You are a pragmatic software engineering assistant.",
       "Chat mode is read-only. You may read files, search code, and run read-only shell commands, but you must not create, edit, or delete any files.",
+    ];
+
+    const wsDir = options.workspaceDir?.trim();
+    if (wsDir) {
+      chatParts.push(`Your working directory is \`${wsDir}\`. Stay within this directory.`);
+      const repos = options.codeRepos;
+      if (repos && repos.length > 0) {
+        chatParts.push(`Repos under code/: ${repos.join(", ")}`);
+      }
+    }
+
+    chatParts.push(
       "Use exploratory probing when useful to understand existing code, context, and constraints before acting.",
       "Answer clearly and concisely.",
       reasoningLine,
       "User message:",
       cleanMessage,
-    ].join("\n\n");
+    );
+
+    return chatParts.join("\n\n");
   }
 
   if (mode === "plan") {
