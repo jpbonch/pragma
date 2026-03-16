@@ -41,6 +41,7 @@ import {
   createTurn,
   ensureConversationSchema,
   getLatestCompletedPlanTurn,
+  getFirstExecuteTurn,
   getLatestExecuteTurn,
   getThreadByTaskId,
   getThreadById,
@@ -1272,6 +1273,16 @@ LIMIT 1
 
       const sourceThreadId = thread.source_thread_id;
       if (!sourceThreadId) {
+        // For execute-mode tasks (no plan thread), use the initial prompt as the plan
+        const executeTurn = await getFirstExecuteTurn(db, thread.id);
+        if (executeTurn?.user_message) {
+          const prompt = executeTurn.user_message.trim();
+          if (prompt) {
+            return c.json({
+              plan: { title: "Task Prompt", summary: prompt, steps: [] },
+            });
+          }
+        }
         return c.json({ plan: null });
       }
 

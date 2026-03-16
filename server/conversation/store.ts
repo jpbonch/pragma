@@ -557,6 +557,39 @@ LIMIT 1
   return result.rows[0] ?? null;
 }
 
+export async function getFirstExecuteTurn(
+  db: PGlite,
+  threadId: string,
+): Promise<ConversationTurn | null> {
+  const result = await db.query<ConversationTurn>(
+    `
+SELECT id,
+       thread_id,
+       mode,
+       user_message,
+       assistant_message,
+       plan_summary,
+       reasoning_effort,
+       requested_recipient_agent_id,
+       selected_agent_id,
+       orchestrator_agent_id,
+       worker_session_id,
+       selection_status,
+       status,
+       created_at,
+       completed_at
+FROM conversation_turns
+WHERE thread_id = $1
+  AND mode = 'execute'
+ORDER BY created_at ASC
+LIMIT 1
+`,
+    [threadId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
 export async function getThreadWithDetails(
   db: PGlite,
   threadId: string,
