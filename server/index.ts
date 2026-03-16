@@ -1830,10 +1830,10 @@ VALUES ($1, $2, $3, $4, $5, $6)
 
       await db.query(
         `
-INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
-VALUES ($1, $2, 'queued', NULL, NULL, NULL)
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan)
+VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
 `,
-        [taskId, fallbackTitle],
+        [taskId, fallbackTitle, prompt],
       );
       emitTaskStatus(workspaceName, taskId, "queued", "execute_created");
 
