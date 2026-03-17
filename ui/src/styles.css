@@ -574,7 +574,7 @@ select { cursor: pointer; }
 }
 
 .main-topbar {
-  padding: 16px 22px;
+  padding: 12px 22px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -594,8 +594,8 @@ select { cursor: pointer; }
   pointer-events: none;
 }
 .main-topbar h1 {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   color: #37352F;
   margin: 0;
 }
