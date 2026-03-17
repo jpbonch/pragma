@@ -648,7 +648,12 @@ WHERE id = $1
       await notifyTaskStatus("pending_review", "execute_runner");
 
       // Trigger follow-up task execution if one exists
-      const followupTaskId = taskStateResult.rows[0].followup_task_id;
+      // Re-query followup_task_id from DB since it may have been set while this task was running
+      const followupCheck = await db.query<{ followup_task_id: string | null }>(
+        `SELECT followup_task_id FROM tasks WHERE id = $1 LIMIT 1`,
+        [input.taskId],
+      );
+      const followupTaskId = followupCheck.rows[0]?.followup_task_id;
       if (followupTaskId) {
         const followupResult = await db.query<{
           id: string;
