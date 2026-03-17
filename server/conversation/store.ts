@@ -72,7 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_events_thread ON conversation_events
 `);
 
   await db.exec(`
-CREATE INDEX IF NOT EXISTS idx_conversation_chat_mode_sort ON conversation_threads(mode, chat_last_message_at DESC, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversation_chat_mode_sort ON conversation_threads(mode, created_at DESC);
 `);
 
   // Migration: add seq column to conversation_events if it doesn't exist
@@ -192,11 +192,11 @@ WHERE thread.mode = 'chat'
 
   if (cursor) {
     params.push(cursor);
-    query += "  AND COALESCE(thread.chat_last_message_at, thread.updated_at) < $2::timestamptz\n";
+    query += "  AND thread.created_at < $2::timestamptz\n";
   }
 
   query += `
-ORDER BY thread.chat_last_message_at DESC NULLS LAST, thread.updated_at DESC
+ORDER BY thread.created_at DESC
 LIMIT $1
 `;
 
