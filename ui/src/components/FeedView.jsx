@@ -476,9 +476,11 @@ export function FeedView({
 
   const prevTaskIdsRef = useRef(null)
   const [newTaskIds, setNewTaskIds] = useState(new Set())
+  const newTaskIdsTimerRef = useRef(null)
   const prevCategoriesRef = useRef({})
   const [exitingTasks, setExitingTasks] = useState([])
 
+  // Track newly added tasks for enter animation
   useEffect(() => {
     const currentIds = new Set(tasks.map((t) => t.id))
     if (prevTaskIdsRef.current !== null) {
@@ -490,19 +492,15 @@ export function FeedView({
       }
       if (added.size > 0) {
         setNewTaskIds(added)
-        const timer = setTimeout(() => setNewTaskIds(new Set()), 500)
-        return () => clearTimeout(timer)
+        clearTimeout(newTaskIdsTimerRef.current)
+        newTaskIdsTimerRef.current = setTimeout(() => setNewTaskIds(new Set()), 500)
       }
     }
+    // Always update the ref to prevent re-detection on next render
     prevTaskIdsRef.current = currentIds
   }, [tasks])
 
-  useEffect(() => {
-    if (newTaskIds.size > 0) {
-      prevTaskIdsRef.current = new Set(tasks.map((t) => t.id))
-    }
-  }, [newTaskIds, tasks])
-
+  // Track category changes for exit animation
   useEffect(() => {
     const currentCategories = {}
     for (const task of tasks) {
@@ -514,6 +512,9 @@ export function FeedView({
     }
 
     const prev = prevCategoriesRef.current
+    // Always update the ref first to prevent re-detection
+    prevCategoriesRef.current = currentCategories
+
     if (Object.keys(prev).length > 0) {
       const moving = []
       for (const [id, oldCat] of Object.entries(prev)) {
@@ -529,7 +530,6 @@ export function FeedView({
         return () => clearTimeout(timer)
       }
     }
-    prevCategoriesRef.current = currentCategories
   }, [tasks])
 
   const { readyPlans, remainingPlans } = useMemo(() => {
