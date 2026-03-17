@@ -2841,7 +2841,7 @@ export default function App() {
         )}
       </main>
 
-      {activeTab === 'feed' && (
+      {activeTab === 'feed' && !(conversation.open && (conversation.mode === 'plan' || (conversation.mode === 'chat' && Boolean(conversation.taskId)))) && (
         <RightPanel
           agents={agents}
           loading={agentsLoading}
