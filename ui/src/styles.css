@@ -2603,6 +2603,7 @@ select { cursor: pointer; }
   flex-direction: column;
   min-height: 0;
   gap: 12px;
+  overflow-y: auto;
 }
 
 .output-file-grid {
