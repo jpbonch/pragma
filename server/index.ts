@@ -1214,8 +1214,9 @@ FROM tasks j
         }
       };
 
-      const unsubscribe = subscribeThreadUpdates(workspaceName, threadId, () => {
+      const unsubscribe = subscribeThreadUpdates(workspaceName, threadId, (updateEvent) => {
         void drainNewEvents();
+        void writeEvent("thread_updated", updateEvent);
       });
 
       const pingTimer = setInterval(() => {
@@ -2766,6 +2767,7 @@ LIMIT 1
           [taskId],
         );
         emitTaskStatus(workspaceName, taskId, "planning", "plan_question_responded");
+        publishThreadUpdated(workspaceName, thread.id, "human_response_received");
 
         planContinuation = {
           threadId: thread.id,
@@ -2828,6 +2830,8 @@ WHERE id = $1
 `,
           [taskId],
         );
+        emitTaskStatus(workspaceName, taskId, "queued", "execute_question_responded");
+        publishThreadUpdated(workspaceName, thread.id, "human_response_received");
 
         requeue = {
           threadId: thread.id,
