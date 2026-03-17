@@ -187,6 +187,7 @@ export function OutputPanel({
   onRunTestCommand,
   onUpdateTestCommand,
   onChangesLoaded,
+  onFilesLoaded,
   planData = null,
   planLoading = false,
   planError = '',
@@ -313,9 +314,11 @@ export function OutputPanel({
       const data = await fetchTaskOutputFiles(targetTaskId)
       const nextFiles = Array.isArray(data.files) ? data.files : []
       setFiles(nextFiles)
+      onFilesLoaded?.(nextFiles.length > 0)
     } catch (error) {
       setFilesError(error instanceof Error ? error.message : String(error))
       setFiles([])
+      onFilesLoaded?.(false)
     } finally {
       setFilesLoading(false)
     }

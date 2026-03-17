@@ -123,10 +123,12 @@ export function ConversationDrawer({
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [hasChanges, setHasChanges] = useState(null)
+  const [hasOutputFiles, setHasOutputFiles] = useState(null)
   const showOutputPanel = Boolean(taskId) && (mode === 'chat' || mode === 'execute')
   const isPendingReview = showOutputPanel && taskStatus === 'pending_review'
-  const canApprove = isPendingReview && hasChanges === true
-  const canMarkCompleted = (isPendingReview && hasChanges === false) || (showOutputPanel && taskStatus === 'completed')
+  const hasOutputs = hasChanges === true || hasOutputFiles === true
+  const canApprove = isPendingReview && hasOutputs
+  const canMarkCompleted = (isPendingReview && hasChanges === false && hasOutputFiles === false) || (showOutputPanel && taskStatus === 'completed')
   const isCompletedTask = showOutputPanel && taskStatus === 'completed'
   const headerStatusLabel = useMemo(
     () => getHeaderStatusLabel({ taskStatus, mode, loading, planReady }),
@@ -161,6 +163,7 @@ export function ConversationDrawer({
       setDeleteConfirming(false)
       setDeleteLoading(false)
       setHasChanges(null)
+      setHasOutputFiles(null)
     }
   }, [open])
 
@@ -596,6 +599,7 @@ export function ConversationDrawer({
                   onRunTestCommand={handleRunTestCommand}
                   onUpdateTestCommand={handleUpdateTestCommand}
                   onChangesLoaded={setHasChanges}
+                  onFilesLoaded={setHasOutputFiles}
                   planData={planData}
                   planLoading={planLoading}
                   planError={planError}
@@ -659,7 +663,7 @@ export function ConversationDrawer({
                     {approveLoading ? 'Approving...' : isFollowupTask ? 'Approve Chain ✓' : 'Approve ✓'}
                   </button>
                 )}
-                {canApprove && (
+                {canApprove && hasChanges === true && (
                   <button
                     className="conv-approve-btn"
                     onClick={() => { void submitReviewAction(isFollowupTask ? 'approve_chain_and_push' : 'approve_and_push') }}

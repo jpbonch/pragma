@@ -1774,7 +1774,35 @@ WHERE id = $1
 
         const gitState = parseTaskGitState(task.git_state_json);
         if (!gitState) {
-          throw new PragmaError("TASK_GIT_STATE_MISSING", 409, `Task has no git execution state: ${taskId}`);
+          // No git state — output-files-only chain approval, mark all chain tasks completed
+          const workspacePaths = getWorkspacePaths(workspaceName);
+          const chainTaskIds: string[] = [taskId];
+          let currentPredecessorId = task.predecessor_task_id;
+          while (currentPredecessorId) {
+            chainTaskIds.push(currentPredecessorId);
+            const predResult = await db.query<{ predecessor_task_id: string | null }>(
+              `SELECT predecessor_task_id FROM tasks WHERE id = $1 LIMIT 1`,
+              [currentPredecessorId],
+            );
+            currentPredecessorId = predResult.rows[0]?.predecessor_task_id ?? null;
+          }
+          for (const chainId of chainTaskIds) {
+            await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId: chainId });
+            const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
+            await mkdir(mergedOutputDir, { recursive: true });
+            await db.query(
+              `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
+              [chainId, mergedOutputDir],
+            );
+            emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action");
+            await deleteTaskWorktree({ workspacePaths, taskId: chainId });
+          }
+          return c.json({
+            ok: true,
+            status: "completed",
+            merge_state: "no_changes",
+            chain_completed: chainTaskIds,
+          });
         }
 
         const workspacePaths = getWorkspacePaths(workspaceName);
@@ -1922,11 +1950,19 @@ WHERE id = $1
 
       const gitState = parseTaskGitState(task.git_state_json);
       if (!gitState) {
-        throw new PragmaError(
-          "TASK_GIT_STATE_MISSING",
-          409,
-          `Task has no git execution state: ${taskId}`,
+        // No git state — output-files-only approval, just mark completed
+        const nextStatus: TaskStatus = "completed";
+        const workspacePaths = getWorkspacePaths(workspaceName);
+        await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId });
+        const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
+        await mkdir(mergedOutputDir, { recursive: true });
+        await db.query(
+          `UPDATE tasks SET status = $2, output_dir = $3, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [taskId, nextStatus, mergedOutputDir],
         );
+        emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+        await deleteTaskWorktree({ workspacePaths, taskId });
+        return c.json({ ok: true, status: nextStatus, merge_state: "no_changes", conflicts: [] });
       }
 
       const workspacePaths = getWorkspacePaths(workspaceName);
