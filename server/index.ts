@@ -4614,7 +4614,7 @@ async function resolveTaskOutputsRoot(
   );
 
   if (typeof storedOutputDir !== "string" || storedOutputDir.trim().length === 0) {
-    throw new PragmaError("TASK_OUTPUT_DIR_MISSING", 409, `Task output directory is missing: ${taskId}`);
+    return mainRoot;
   }
 
   const absolute = resolve(storedOutputDir.trim());
