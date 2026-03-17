@@ -40,6 +40,7 @@ Your task is to:
 - \`pragma task plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
 - \`pragma task ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
 - \`pragma task request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
+- \`pragma db-query --sql "<SELECT statement>"\`: Run a read-only SQL query against the workspace database. Key tables: tasks, agents, conversation_threads, conversation_turns, conversation_messages, conversation_events.
 - \`pragma server [--port <n>]\`: Starts the Pragma API server.
 - \`pragma ui [--port <n>] [--api-url <url>]\`: Starts the Pragma UI.
 - \`pragma\` (no args): Starts server + UI and opens the UI.

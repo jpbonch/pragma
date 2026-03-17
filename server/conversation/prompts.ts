@@ -40,6 +40,13 @@ export function buildPrompt(
       }
     }
 
+    const dbQueryCommand = `${cli} db-query --sql "<SELECT statement>"`;
+    chatParts.push(
+      "To inspect workspace database state (tasks, threads, messages, events), run read-only SQL queries:",
+      dbQueryCommand,
+      "Key tables: tasks, conversation_threads, conversation_turns, conversation_messages, conversation_events, agents.",
+    );
+
     chatParts.push(
       "Use exploratory probing when useful to understand existing code, context, and constraints before acting.",
       "Answer clearly and concisely.",
@@ -55,6 +62,7 @@ export function buildPrompt(
     const planRecipientCommand = `${cli} task plan-select-recipient --agent-id "<candidate_id>" --reason "<one sentence reason>"`;
     const listAgentsCommand = `${cli} list-agents`;
     const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"]`;
+    const dbQueryCommand = `${cli} db-query --sql "<SELECT statement>"`;
     const candidates = Array.isArray(options.planCandidates) ? options.planCandidates : [];
     const candidateLines = candidates.map((candidate, index) => {
       const desc = candidate.description ? `; description=${candidate.description}` : "";
@@ -76,6 +84,9 @@ export function buildPrompt(
       "If the request is unclear, underspecified, or you are uncertain about the right approach, ask the user a clarifying question:",
       askQuestionCommand,
       "After asking a question, STOP immediately. Do not produce a plan. Do not select a recipient. Output only the question and nothing else. Wait for the user to respond.",
+      "To inspect workspace state (tasks, events, threads, messages), run read-only SQL queries:",
+      dbQueryCommand,
+      "Key tables: tasks (id, title, status, assigned_to, plan), conversation_threads (id, mode, task_id), conversation_turns (id, thread_id, mode, status), conversation_messages (id, thread_id, role, content), conversation_events (id, thread_id, event_name, payload), agents (id, name, status, harness).",
       "",
       "## Step 2: Produce the plan (only when requirements are clear)",
       "When the request is unambiguous and you have enough information, return a concrete, decision-complete plan in plain language.",
@@ -173,6 +184,7 @@ export function buildWorkerPrompt(input: {
   const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"]`;
   const requestHelpCommand = `${cli} task request-help --summary "<short summary>" [--details "<optional context>"]`;
   const submitTestsCommand = `${cli} task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]`;
+  const dbQueryCommand = `${cli} db-query --sql "<SELECT statement>"`;
   const codePathPolicyLine = preferredCodePath
     ? taskWorkspaceDir
       ? `- Put code/source changes under \`${join(taskWorkspaceDir, preferredCodePath)}/\` (relative: \`${preferredCodePath}/\`) unless the task explicitly targets another repo inside this task workspace.`
@@ -210,6 +222,8 @@ export function buildWorkerPrompt(input: {
     "Provide only commands the human can run safely in this workspace.",
     "After either CLI escalation command, stop doing further work.",
     "Do not ask for clarification/help only in plain text without calling the CLI.",
+    "To inspect workspace state (tasks, events, conversation history), run read-only SQL queries:",
+    dbQueryCommand,
     reasoningLine,
     "Agent instructions:",
     agentFile || "(No agent file provided. Use pragmatic software engineering judgement.)",

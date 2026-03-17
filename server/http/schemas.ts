@@ -282,6 +282,13 @@ export const assignAgentSkillSchema = z
   })
   .strict();
 
+export const dbQuerySchema = z
+  .object({
+    sql: z.string().trim().min(1),
+    params: z.array(z.unknown()).optional(),
+  })
+  .strict();
+
 export type Harness = z.infer<typeof harnessSchema>;
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;

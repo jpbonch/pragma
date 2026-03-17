@@ -101,6 +101,7 @@ import {
   createSkillSchema,
   updateSkillSchema,
   assignAgentSkillSchema,
+  dbQuerySchema,
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
@@ -536,6 +537,30 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   app.post("/setup", async (c) => {
     await setupPragma();
     return c.json({ ok: true });
+  });
+
+  app.post("/db/query", validateJson(dbQuerySchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const body = c.req.valid("json");
+    const sql = body.sql.trim();
+
+    // Only allow SELECT statements (read-only)
+    const normalized = sql.replace(/^[\s(]+/, "").toUpperCase();
+    if (!normalized.startsWith("SELECT") && !normalized.startsWith("WITH") && !normalized.startsWith("EXPLAIN")) {
+      return c.json({ error: "Only SELECT, WITH, and EXPLAIN statements are allowed." }, 400);
+    }
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query(sql, body.params ?? []);
+      return c.json({
+        rows: result.rows,
+        rowCount: result.rows.length,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 400);
+    }
   });
 
   app.post("/uploads", async (c) => {

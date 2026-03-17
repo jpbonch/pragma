@@ -117,6 +117,35 @@ program
     console.table(result.agents);
   });
 
+program
+  .command("db-query")
+  .description("Run a read-only SQL query against the workspace database")
+  .requiredOption("--sql <text>", "SQL SELECT statement to execute")
+  .option("-u, --api-url <url>", "Pragma API base URL", DEFAULT_API_URL)
+  .action(
+    async (options: {
+      sql: string;
+      apiUrl: string;
+    }) => {
+      const result = await apiRequest<{ rows: Record<string, unknown>[]; rowCount: number }>(
+        options.apiUrl,
+        "/db/query",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sql: options.sql }),
+        },
+      );
+
+      if (result.rows.length === 0) {
+        console.log("No rows returned.");
+        return;
+      }
+
+      console.table(result.rows);
+    },
+  );
+
 const taskCommand = program
   .command("task")
   .description("Agent task-control commands");
