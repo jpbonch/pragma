@@ -23,6 +23,18 @@ function getTimeAgo(dateStr) {
   return formatDistanceToNow(date, { addSuffix: true })
 }
 
+function getElapsedShort(dateStr) {
+  if (!dateStr) return null
+  const date = new Date(dateStr)
+  if (Number.isNaN(date.getTime())) return null
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h`
+}
+
 const STATUS_COLORS = {
   planning: '#8A72D8',
   planned: '#9B6DD7',
@@ -98,9 +110,36 @@ function isPlanTaskStatus(status) {
   return status === 'planning' || status === 'planned'
 }
 
-function SectionLabel({ children, count, badge, actionLabel, onAction }) {
+function ChevronIcon() {
+  return (
+    <svg viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 1.5L6.5 5L3 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function SkeletonRows({ count = 3 }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="skeleton-row" style={{ opacity: 1 - i * 0.2 }} />
+      ))}
+    </>
+  )
+}
+
+function SectionLabel({ children, count, badge, actionLabel, onAction, collapsible, collapsed, onToggleCollapse }) {
   return (
     <div className="section-label">
+      {collapsible && (
+        <button
+          className={`section-collapse-btn${collapsed ? ' collapsed' : ''}`}
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? 'Expand section' : 'Collapse section'}
+        >
+          <ChevronIcon />
+        </button>
+      )}
       <span className="section-label-text">{children}</span>
       {count > 0 && (
         <span className={`section-count${badge ? ' badge' : ''}`}>{count}</span>
@@ -247,7 +286,9 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
   const isRecipientPick = status === 'waiting_for_recipient'
+  const isUrgent = status === 'waiting_for_help_response'
   const agent = task.assigned_to && agentById ? agentById[task.assigned_to] : null
+  const waitingTime = getElapsedShort(task.created_at)
 
   return (
     <div
@@ -257,7 +298,7 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
     >
       <FollowupChainNumber chainIndex={chainIndex} chainLength={chainLength} isLast={isLast} />
       <div
-        className="needs-you-card"
+        className={`needs-you-card${isUrgent ? ' urgent' : ''}`}
         style={{ '--accent': color }}
         onClick={() => !isRecipientPick && onClick?.(task)}
       >
@@ -269,8 +310,8 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
             {NEEDS_YOU_SUBTITLES[status]}
           </div>
           {task.assigned_to && (
-            <div style={{ fontSize: 11, color: '#C4C3BF', marginTop: 4 }}>
-              Assigned to {agent ? `${agent.emoji || '🤖'} ${agent.name}` : task.assigned_to}
+            <div style={{ fontSize: 11, color: '#B4B3AF', marginTop: 4 }}>
+              Assigned to {agent ? `${agent.emoji || ''} ${agent.name}` : task.assigned_to}
             </div>
           )}
         </div>
@@ -281,12 +322,14 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
               onClickAdd={(id) => setFollowupForTaskId?.((c) => c === id ? '' : id)}
             />
           )}
-          <span style={{ fontSize: 11, color: '#C4C3BF' }}>{getTimeAgo(task.created_at)}</span>
+          {waitingTime && (
+            <span style={{ fontSize: 10.5, color: '#B4B3AF', whiteSpace: 'nowrap' }}>{waitingTime}</span>
+          )}
           {isRecipientPick ? (
             <div className="task-recipient-wrap">
               <button
                 className="needs-you-action"
-                style={{ background: color, opacity: hovered ? 1 : 0.88 }}
+                style={{ background: color }}
                 onClick={(e) => {
                   e.stopPropagation()
                   setPickerTaskId((current) => (current === task.id ? '' : task.id))
@@ -319,7 +362,7 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
           ) : (
             <button
               className="needs-you-action"
-              style={{ background: color, opacity: hovered ? 1 : 0.88 }}
+              style={{ background: color }}
               onClick={(e) => {
                 e.stopPropagation()
                 onClick?.(task)
@@ -339,6 +382,7 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
   const agent = task.assigned_to && agentById ? agentById[task.assigned_to] : null
+  const elapsed = getElapsedShort(task.created_at)
 
   return (
     <div
@@ -364,13 +408,16 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
               onClickAdd={(id) => setFollowupForTaskId?.((c) => c === id ? '' : id)}
             />
           )}
+          {elapsed && status === 'running' && (
+            <span className="task-elapsed">{elapsed}</span>
+          )}
           <span className="type-tag" style={{ color, background: `${color}12` }}>
             {STATUS_LABELS[status]}
           </span>
           {agent ? (
-            <span style={{ fontSize: 11, color: '#C4C3BF' }}>{agent.emoji || '🤖'} {agent.name || task.assigned_to}</span>
+            <span style={{ fontSize: 11, color: '#B4B3AF' }}>{agent.emoji || ''} {agent.name || task.assigned_to}</span>
           ) : task.assigned_to ? (
-            <span style={{ fontSize: 11, color: '#C4C3BF' }}>{task.assigned_to}</span>
+            <span style={{ fontSize: 11, color: '#B4B3AF' }}>{task.assigned_to}</span>
           ) : null}
         </div>
       </div>
@@ -381,18 +428,19 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
 function DoneTaskRow({ task, onClick }) {
   const status = String(task.status).toLowerCase()
   const color = status === 'failed' ? '#EB5757' : status === 'cancelled' ? '#9B9A97' : '#2FA67E'
-  const icon = status === 'failed' ? '✕' : status === 'cancelled' ? '—' : '✓'
-  const titleClass = status === 'failed' ? 'failed' : status === 'cancelled' ? 'done' : 'done'
+  const icon = status === 'failed' ? '\u2715' : status === 'cancelled' ? '\u2014' : '\u2713'
+  const titleClass = status === 'failed' ? 'failed' : 'done'
+  const completedAt = task.completed_at || task.created_at
 
   return (
     <div className="task-row" onClick={() => onClick?.(task)}>
-      <div className="task-done-check" style={{ background: `${color}15`, color }}>
+      <div className="task-done-check" style={{ background: `${color}20`, color }}>
         {icon}
       </div>
       <span className={`task-title ${titleClass}`}>
         {normalizeTaskTitle(task.title)}
       </span>
-      <span className="task-time">{getTimeAgo(task.created_at)}</span>
+      <span className="task-time">{getTimeAgo(completedAt)}</span>
     </div>
   )
 }
@@ -415,11 +463,11 @@ function NeedsYouPlanCard({ plan, onClick }) {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         {plan.created_at && (
-          <span style={{ fontSize: 11, color: '#C4C3BF' }}>{getTimeAgo(plan.created_at)}</span>
+          <span style={{ fontSize: 11, color: '#B4B3AF' }}>{getTimeAgo(plan.created_at)}</span>
         )}
         <button
           className="needs-you-action"
-          style={{ background: color, opacity: hovered ? 1 : 0.88 }}
+          style={{ background: color }}
           onClick={(e) => {
             e.stopPropagation()
             onClick?.(plan.id)
@@ -444,7 +492,7 @@ function PlanRow({ plan, isActive, onClick }) {
       </div>
       <span className="plan-row-title">{plan.plan_title || 'New plan'}</span>
       {isPlanning ? (
-        <span className="plan-row-preview" style={{ color: '#9B6DD7' }}>Planning…</span>
+        <span className="plan-row-preview" style={{ color: '#9B6DD7' }}>Planning...</span>
       ) : plan.plan_preview ? (
         <span className="plan-row-preview">{plan.plan_preview}</span>
       ) : null}
@@ -471,6 +519,11 @@ export function FeedView({
   const DONE_DISPLAY_LIMIT = 5
   const [pickerTaskId, setPickerTaskId] = useState('')
   const [showAllDone, setShowAllDone] = useState(false)
+  const [collapsedSections, setCollapsedSections] = useState({})
+
+  const toggleSection = (section) => {
+    setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }))
+  }
 
   const recipients = useMemo(() => {
     if (!Array.isArray(recipientAgents)) {
@@ -544,143 +597,174 @@ export function FeedView({
 
   return (
     <section className="feed">
-      {loading && <div className="muted">Loading tasks...</div>}
+      {loading && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
+          <SkeletonRows count={4} />
+        </div>
+      )}
       {error && <div className="error">Error: {error}</div>}
 
       {!loading && !error && (
         <>
-          <SectionLabel count={remainingPlans.length}>Planning</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {plansLoading ? (
-              <div className="muted">Loading plans...</div>
-            ) : remainingPlans.length > 0 ? (
-              remainingPlans.map((plan) => (
-                <PlanRow
-                  key={plan.id}
-                  plan={plan}
-                  isActive={activePlanThreadId === plan.id}
-                  onClick={onOpenPlan}
-                />
-              ))
-            ) : (
-              <div className="muted">No tasks yet.</div>
-            )}
-          </div>
-
-          <SectionLabel count={needsYou.length + readyPlans.length} badge>Needs you</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <AnimatePresence mode="popLayout">
-              {readyPlans.map((plan) => (
-                <motion.div
-                  key={plan.id}
-                  layout
-                  initial={taskInitial}
-                  animate={taskAnimate}
-                  exit={taskExit}
-                  transition={taskTransition}
-                  layoutTransition={layoutTransition}
-                >
-                  <NeedsYouPlanCard
+          <SectionLabel
+            count={remainingPlans.length}
+            collapsible
+            collapsed={collapsedSections.planning}
+            onToggleCollapse={() => toggleSection('planning')}
+          >Planning</SectionLabel>
+          {!collapsedSections.planning && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {plansLoading ? (
+                <SkeletonRows count={2} />
+              ) : remainingPlans.length > 0 ? (
+                remainingPlans.map((plan) => (
+                  <PlanRow
+                    key={plan.id}
                     plan={plan}
+                    isActive={activePlanThreadId === plan.id}
                     onClick={onOpenPlan}
                   />
-                </motion.div>
-              ))}
-              {orderedNeedsYou.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
-                <motion.div
-                  key={task.id}
-                  layout
-                  initial={taskInitial}
-                  animate={taskAnimate}
-                  exit={taskExit}
-                  transition={taskTransition}
-                  layoutTransition={layoutTransition}
-                  className={isFollowup ? 'followup-item' : undefined}
-                >
-                  <NeedsYouCard
-                    task={task}
-                    onClick={onOpenTaskConversation}
-                    onPickTaskRecipient={onPickTaskRecipient}
-                    recipientAgents={recipients}
-                    pickerTaskId={pickerTaskId}
-                    setPickerTaskId={setPickerTaskId}
-                    followupForTaskId={followupForTaskId}
-                    setFollowupForTaskId={setFollowupForTaskId}
-                    onAddFollowup={onAddFollowup}
-                    chainIndex={chainIndex}
-                    chainLength={chainLength}
-                    isLast={isLast}
-                    agentById={agentById}
-                  />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            {needsYou.length + readyPlans.length === 0 && (
-              <div className="muted">No tasks yet.</div>
-            )}
-          </div>
+                ))
+              ) : (
+                <div className="muted">No plans in progress</div>
+              )}
+            </div>
+          )}
 
-          <SectionLabel count={active.length}>In progress</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <AnimatePresence mode="popLayout">
-              {orderedActive.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
-                <motion.div
-                  key={task.id}
-                  layout
-                  initial={taskInitial}
-                  animate={taskAnimate}
-                  exit={taskExit}
-                  transition={taskTransition}
-                  layoutTransition={layoutTransition}
-                  className={isFollowup ? 'followup-item' : undefined}
-                >
-                  <ActiveTaskRow
-                    task={task}
-                    onClick={onOpenTaskConversation}
-                    followupForTaskId={followupForTaskId}
-                    setFollowupForTaskId={setFollowupForTaskId}
-                    onAddFollowup={onAddFollowup}
-                    chainIndex={chainIndex}
-                    chainLength={chainLength}
-                    isLast={isLast}
-                    agentById={agentById}
-                  />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            {orderedActive.length === 0 && (
-              <div className="muted">No tasks yet.</div>
-            )}
-          </div>
+          <SectionLabel
+            count={needsYou.length + readyPlans.length}
+            badge
+            collapsible
+            collapsed={collapsedSections.needsYou}
+            onToggleCollapse={() => toggleSection('needsYou')}
+          >Needs you</SectionLabel>
+          {!collapsedSections.needsYou && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <AnimatePresence mode="popLayout">
+                {readyPlans.map((plan) => (
+                  <motion.div
+                    key={plan.id}
+                    layout
+                    initial={taskInitial}
+                    animate={taskAnimate}
+                    exit={taskExit}
+                    transition={taskTransition}
+                    layoutTransition={layoutTransition}
+                  >
+                    <NeedsYouPlanCard
+                      plan={plan}
+                      onClick={onOpenPlan}
+                    />
+                  </motion.div>
+                ))}
+                {orderedNeedsYou.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
+                  <motion.div
+                    key={task.id}
+                    layout
+                    initial={taskInitial}
+                    animate={taskAnimate}
+                    exit={taskExit}
+                    transition={taskTransition}
+                    layoutTransition={layoutTransition}
+                    className={isFollowup ? 'followup-item' : undefined}
+                  >
+                    <NeedsYouCard
+                      task={task}
+                      onClick={onOpenTaskConversation}
+                      onPickTaskRecipient={onPickTaskRecipient}
+                      recipientAgents={recipients}
+                      pickerTaskId={pickerTaskId}
+                      setPickerTaskId={setPickerTaskId}
+                      followupForTaskId={followupForTaskId}
+                      setFollowupForTaskId={setFollowupForTaskId}
+                      onAddFollowup={onAddFollowup}
+                      chainIndex={chainIndex}
+                      chainLength={chainLength}
+                      isLast={isLast}
+                      agentById={agentById}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+              {needsYou.length + readyPlans.length === 0 && (
+                <div className="muted">You're all caught up</div>
+              )}
+            </div>
+          )}
+
+          <SectionLabel
+            count={active.length}
+            collapsible
+            collapsed={collapsedSections.inProgress}
+            onToggleCollapse={() => toggleSection('inProgress')}
+          >In progress</SectionLabel>
+          {!collapsedSections.inProgress && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <AnimatePresence mode="popLayout">
+                {orderedActive.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
+                  <motion.div
+                    key={task.id}
+                    layout
+                    initial={taskInitial}
+                    animate={taskAnimate}
+                    exit={taskExit}
+                    transition={taskTransition}
+                    layoutTransition={layoutTransition}
+                    className={isFollowup ? 'followup-item' : undefined}
+                  >
+                    <ActiveTaskRow
+                      task={task}
+                      onClick={onOpenTaskConversation}
+                      followupForTaskId={followupForTaskId}
+                      setFollowupForTaskId={setFollowupForTaskId}
+                      onAddFollowup={onAddFollowup}
+                      chainIndex={chainIndex}
+                      chainLength={chainLength}
+                      isLast={isLast}
+                      agentById={agentById}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+              {orderedActive.length === 0 && (
+                <div className="muted">No active tasks</div>
+              )}
+            </div>
+          )}
 
           <SectionLabel
             count={done.length}
             actionLabel={done.length > DONE_DISPLAY_LIMIT ? (showAllDone ? 'Show less' : 'View all') : undefined}
             onAction={() => setShowAllDone((v) => !v)}
+            collapsible
+            collapsed={collapsedSections.done}
+            onToggleCollapse={() => toggleSection('done')}
           >Done</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            <AnimatePresence mode="popLayout">
-              {(showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
-                <motion.div
-                  key={task.id}
-                  layout
-                  initial={taskInitial}
-                  animate={taskAnimate}
-                  exit={taskExit}
-                  transition={taskTransition}
-                  layoutTransition={layoutTransition}
-                >
-                  <DoneTaskRow
-                    task={task}
-                    onClick={onOpenTaskConversation}
-                  />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            {done.length === 0 && (
-              <div className="muted">No tasks yet.</div>
-            )}
-          </div>
+          {!collapsedSections.done && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <AnimatePresence mode="popLayout">
+                {(showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
+                  <motion.div
+                    key={task.id}
+                    layout
+                    initial={taskInitial}
+                    animate={taskAnimate}
+                    exit={taskExit}
+                    transition={taskTransition}
+                    layoutTransition={layoutTransition}
+                  >
+                    <DoneTaskRow
+                      task={task}
+                      onClick={onOpenTaskConversation}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+              {done.length === 0 && (
+                <div className="muted">Completed tasks will appear here</div>
+              )}
+            </div>
+          )}
         </>
       )}
     </section>
