@@ -521,6 +521,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       id: def.id,
       command: def.command,
       available: false,
+      models: Object.keys(def.models),
     }));
 
     await Promise.all(

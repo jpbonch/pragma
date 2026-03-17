@@ -5,6 +5,7 @@ import Picker from '@emoji-mart/react'
 import { iconForAgent } from '../lib/agentIcon'
 import {
   fetchAgentTemplates,
+  fetchAvailableClis,
   fetchInstalledSkills,
   fetchAgentSkills,
   assignAgentSkill,
@@ -13,14 +14,9 @@ import {
 
 const AGENT_COLORS = ['#4B83D6', '#2383e2', '#E09B3D', '#7C6DD7', '#E06B5E', '#9B6DD7']
 const AGENT_AVATAR_BG = '#E09B3D12'
-const HARNESSES = [
-  { id: 'claude_code', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-]
-
-const MODELS_BY_HARNESS = {
-  claude_code: ['Opus 4.6', 'Sonnet 4.6', 'Haiku 4.5'],
-  codex: ['GPT-5', 'GPT-5.3-Codex'],
+const HARNESS_LABELS = {
+  claude_code: 'Claude Code',
+  codex: 'Codex',
 }
 
 function getAgentColor(index) {
@@ -240,6 +236,9 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // CLI / harness data fetched from backend
+  const [cliData, setCliData] = useState([])
+
   // Skills management state
   const [installedSkills, setInstalledSkills] = useState([])
   const [agentSkills, setAgentSkills] = useState([])
@@ -272,6 +271,21 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
     }
     setPickerOpen(false)
   }, [open, agent])
+
+  // Fetch available CLIs (harnesses + models) from backend
+  useEffect(() => {
+    if (!open) return
+    fetchAvailableClis().then(setCliData).catch(() => {})
+  }, [open])
+
+  const harnesses = useMemo(
+    () => cliData.map((cli) => ({ id: cli.id, label: HARNESS_LABELS[cli.id] || cli.id })),
+    [cliData],
+  )
+  const modelsByHarness = useMemo(
+    () => Object.fromEntries(cliData.map((cli) => [cli.id, cli.models || []])),
+    [cliData],
+  )
 
   // Load installed skills and agent's assigned skills when editing
   useEffect(() => {
@@ -321,11 +335,11 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
   }, [skillDropdownOpen])
 
   useEffect(() => {
-    const options = MODELS_BY_HARNESS[harness] || []
+    const options = modelsByHarness[harness] || []
     if (!options.includes(modelLabel)) {
       setModelLabel(options[0] || '')
     }
-  }, [harness, modelLabel])
+  }, [harness, modelLabel, modelsByHarness])
 
   if (!open) return null
 
@@ -370,7 +384,7 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
                 value={harness}
                 onChange={(e) => setHarness(e.target.value)}
               >
-                {HARNESSES.map((item) => (
+                {harnesses.map((item) => (
                   <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
               </select>
@@ -382,7 +396,7 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
                 value={modelLabel}
                 onChange={(e) => setModelLabel(e.target.value)}
               >
-                {(MODELS_BY_HARNESS[harness] || []).map((item) => (
+                {(modelsByHarness[harness] || []).map((item) => (
                   <option key={item} value={item}>{item}</option>
                 ))}
               </select>
