@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
+import { AnimatePresence, motion } from 'framer-motion'
 
 function normalizeTaskTitle(title) {
   if (typeof title !== 'string' || title.trim().length === 0) {
@@ -478,63 +479,23 @@ export function FeedView({
     return recipientAgents.filter((agent) => agent && typeof agent.id === 'string')
   }, [recipientAgents])
 
-  const prevTaskIdsRef = useRef(null)
-  const [newTaskIds, setNewTaskIds] = useState(new Set())
-  const newTaskIdsTimerRef = useRef(null)
-  const prevCategoriesRef = useRef({})
-  const [exitingTasks, setExitingTasks] = useState([])
-
-  // Track newly added tasks for enter animation
+  // Track whether this is the initial render to skip enter animations on first load
+  const isInitialRender = useRef(true)
   useEffect(() => {
-    const currentIds = new Set(tasks.map((t) => t.id))
-    if (prevTaskIdsRef.current !== null) {
-      const added = new Set()
-      for (const id of currentIds) {
-        if (!prevTaskIdsRef.current.has(id)) {
-          added.add(id)
-        }
-      }
-      if (added.size > 0) {
-        setNewTaskIds(added)
-        clearTimeout(newTaskIdsTimerRef.current)
-        newTaskIdsTimerRef.current = setTimeout(() => setNewTaskIds(new Set()), 500)
-      }
+    // Mark initial render done after first task data arrives
+    if (tasks.length > 0 && isInitialRender.current) {
+      // Use requestAnimationFrame to let the first paint happen without animations
+      requestAnimationFrame(() => { isInitialRender.current = false })
     }
-    // Always update the ref to prevent re-detection on next render
-    prevTaskIdsRef.current = currentIds
   }, [tasks])
 
-  // Track category changes for exit animation
-  useEffect(() => {
-    const currentCategories = {}
-    for (const task of tasks) {
-      const status = String(task.status).toLowerCase()
-      if (isPlanTaskStatus(status)) continue
-      if (isNeedsYou(status)) currentCategories[task.id] = 'needsYou'
-      else if (isDone(status)) currentCategories[task.id] = 'done'
-      else currentCategories[task.id] = 'active'
-    }
-
-    const prev = prevCategoriesRef.current
-    // Always update the ref first to prevent re-detection
-    prevCategoriesRef.current = currentCategories
-
-    if (Object.keys(prev).length > 0) {
-      const moving = []
-      for (const [id, oldCat] of Object.entries(prev)) {
-        const newCat = currentCategories[id]
-        if (newCat && newCat !== oldCat) {
-          const task = tasks.find((t) => t.id === id)
-          if (task) moving.push({ ...task, _fromCategory: oldCat })
-        }
-      }
-      if (moving.length > 0) {
-        setExitingTasks(moving)
-        const timer = setTimeout(() => setExitingTasks([]), 220)
-        return () => clearTimeout(timer)
-      }
-    }
-  }, [tasks])
+  // On initial render, `initial` is `false` (framer-motion skips the enter animation).
+  // After initial render, new tasks get the slide-in animation.
+  const taskInitial = isInitialRender.current ? false : { opacity: 0, y: -8 }
+  const taskAnimate = { opacity: 1, y: 0 }
+  const taskExit = { opacity: 0, y: -6 }
+  const taskTransition = { duration: 0.25, ease: [0.22, 1, 0.36, 1] }
+  const layoutTransition = { duration: 0.2, ease: [0.22, 1, 0.36, 1] }
 
   const { readyPlans, remainingPlans } = useMemo(() => {
     const readyPlans = []
@@ -608,63 +569,71 @@ export function FeedView({
 
           <SectionLabel count={needsYou.length + readyPlans.length} badge>Needs you</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {readyPlans.map((plan) => (
-              <NeedsYouPlanCard
-                key={plan.id}
-                plan={plan}
-                onClick={onOpenPlan}
-              />
-            ))}
-            {exitingTasks.filter((t) => t._fromCategory === 'needsYou').map((task) => (
-              <div key={`exit-${task.id}`} className="task-exit">
-                <NeedsYouCard
-                  task={task}
-                  onClick={onOpenTaskConversation}
-                  onPickTaskRecipient={onPickTaskRecipient}
-                  recipientAgents={recipients}
-                  pickerTaskId={pickerTaskId}
-                  setPickerTaskId={setPickerTaskId}
-                  followupForTaskId={followupForTaskId}
-                  setFollowupForTaskId={setFollowupForTaskId}
-                  onAddFollowup={onAddFollowup}
-                  agentById={agentById}
-                />
-              </div>
-            ))}
-            {orderedNeedsYou.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
-              <div key={task.id} className={`${newTaskIds.has(task.id) ? 'task-enter' : ''}${isFollowup ? ' followup-item' : ''}`}>
-                <NeedsYouCard
-                  task={task}
-                  onClick={onOpenTaskConversation}
-                  onPickTaskRecipient={onPickTaskRecipient}
-                  recipientAgents={recipients}
-                  pickerTaskId={pickerTaskId}
-                  setPickerTaskId={setPickerTaskId}
-                  followupForTaskId={followupForTaskId}
-                  setFollowupForTaskId={setFollowupForTaskId}
-                  onAddFollowup={onAddFollowup}
-                  chainIndex={chainIndex}
-                  chainLength={chainLength}
-                  isLast={isLast}
-                  agentById={agentById}
-                />
-              </div>
-            ))}
-            {needsYou.length + readyPlans.length === 0 && exitingTasks.filter((t) => t._fromCategory === 'needsYou').length === 0 && (
+            <AnimatePresence mode="popLayout">
+              {readyPlans.map((plan) => (
+                <motion.div
+                  key={plan.id}
+                  layout
+                  initial={taskInitial}
+                  animate={taskAnimate}
+                  exit={taskExit}
+                  transition={taskTransition}
+                  layoutTransition={layoutTransition}
+                >
+                  <NeedsYouPlanCard
+                    plan={plan}
+                    onClick={onOpenPlan}
+                  />
+                </motion.div>
+              ))}
+              {orderedNeedsYou.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
+                <motion.div
+                  key={task.id}
+                  layout
+                  initial={taskInitial}
+                  animate={taskAnimate}
+                  exit={taskExit}
+                  transition={taskTransition}
+                  layoutTransition={layoutTransition}
+                  className={isFollowup ? 'followup-item' : undefined}
+                >
+                  <NeedsYouCard
+                    task={task}
+                    onClick={onOpenTaskConversation}
+                    onPickTaskRecipient={onPickTaskRecipient}
+                    recipientAgents={recipients}
+                    pickerTaskId={pickerTaskId}
+                    setPickerTaskId={setPickerTaskId}
+                    followupForTaskId={followupForTaskId}
+                    setFollowupForTaskId={setFollowupForTaskId}
+                    onAddFollowup={onAddFollowup}
+                    chainIndex={chainIndex}
+                    chainLength={chainLength}
+                    isLast={isLast}
+                    agentById={agentById}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            {needsYou.length + readyPlans.length === 0 && (
               <div className="muted">No tasks yet.</div>
             )}
           </div>
 
           <SectionLabel count={active.length}>Working on</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {exitingTasks.filter((t) => t._fromCategory === 'active').map((task) => (
-              <div key={`exit-${task.id}`} className="task-exit">
-                <ActiveTaskRow task={task} onClick={onOpenTaskConversation} followupForTaskId={followupForTaskId} setFollowupForTaskId={setFollowupForTaskId} onAddFollowup={onAddFollowup} agentById={agentById} />
-              </div>
-            ))}
-            {orderedActive.length > 0 ? (
-              orderedActive.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
-                <div key={task.id} className={`${newTaskIds.has(task.id) ? 'task-enter' : ''}${isFollowup ? ' followup-item' : ''}`}>
+            <AnimatePresence mode="popLayout">
+              {orderedActive.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
+                <motion.div
+                  key={task.id}
+                  layout
+                  initial={taskInitial}
+                  animate={taskAnimate}
+                  exit={taskExit}
+                  transition={taskTransition}
+                  layoutTransition={layoutTransition}
+                  className={isFollowup ? 'followup-item' : undefined}
+                >
                   <ActiveTaskRow
                     task={task}
                     onClick={onOpenTaskConversation}
@@ -676,11 +645,12 @@ export function FeedView({
                     isLast={isLast}
                     agentById={agentById}
                   />
-                </div>
-              ))
-            ) : exitingTasks.filter((t) => t._fromCategory === 'active').length === 0 ? (
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            {orderedActive.length === 0 && (
               <div className="muted">No tasks yet.</div>
-            ) : null}
+            )}
           </div>
 
           <SectionLabel
@@ -689,23 +659,27 @@ export function FeedView({
             onAction={() => setShowAllDone((v) => !v)}
           >Done</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {exitingTasks.filter((t) => t._fromCategory === 'done').map((task) => (
-              <div key={`exit-${task.id}`} className="task-exit">
-                <DoneTaskRow task={task} onClick={onOpenTaskConversation} />
-              </div>
-            ))}
-            {done.length > 0 ? (
-              (showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
-                <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+            <AnimatePresence mode="popLayout">
+              {(showAllDone ? done : done.slice(0, DONE_DISPLAY_LIMIT)).map((task) => (
+                <motion.div
+                  key={task.id}
+                  layout
+                  initial={taskInitial}
+                  animate={taskAnimate}
+                  exit={taskExit}
+                  transition={taskTransition}
+                  layoutTransition={layoutTransition}
+                >
                   <DoneTaskRow
                     task={task}
                     onClick={onOpenTaskConversation}
                   />
-                </div>
-              ))
-            ) : exitingTasks.filter((t) => t._fromCategory === 'done').length === 0 ? (
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            {done.length === 0 && (
               <div className="muted">No tasks yet.</div>
-            ) : null}
+            )}
           </div>
         </>
       )}
