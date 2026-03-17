@@ -811,6 +811,7 @@ export default function App() {
   const runtimeServicesPollTimerRef = useRef(null)
   const chatsPollTimerRef = useRef(null)
   const prevThinkingChatIdsRef = useRef(new Set())
+  const viewingChatIdRef = useRef('')
   const runtimeServiceStreamCloseRef = useRef(null)
   const pendingCount = useMemo(() => getPendingCount(tasks), [tasks])
   const orchestratorRuntime = useMemo(() => {
@@ -866,9 +867,10 @@ export default function App() {
     const prev = prevThinkingChatIdsRef.current
     const activeChatId =
       conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''
+    const viewingId = viewingChatIdRef.current
     const newlyDone = []
     for (const id of prev) {
-      if (!thinkingChatIds.has(id) && id !== activeChatId) {
+      if (!thinkingChatIds.has(id) && id !== activeChatId && id !== viewingId) {
         newlyDone.push(id)
       }
     }
@@ -1769,6 +1771,7 @@ export default function App() {
   }
 
   function closeConversationDrawer() {
+    viewingChatIdRef.current = ''
     streamAbortRef.current?.abort()
     streamAbortRef.current = null
     setConversation({
@@ -2116,6 +2119,7 @@ export default function App() {
     if (!threadId) {
       return
     }
+    viewingChatIdRef.current = threadId
     setSelectedServiceId('')
     setUnreadChatIds((current) => {
       if (!current.has(threadId)) return current
