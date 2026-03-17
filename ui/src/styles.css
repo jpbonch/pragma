@@ -1567,6 +1567,7 @@ select { cursor: pointer; }
   height: 100%;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1589,6 +1590,8 @@ select { cursor: pointer; }
   color: #fff;
   border-radius: 18px 18px 4px 18px;
   padding: 8px 14px;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .conv-msg-avatar {
@@ -1619,6 +1622,7 @@ select { cursor: pointer; }
 .conv-msg-body {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .conv-msg-role {
@@ -1633,12 +1637,15 @@ select { cursor: pointer; }
   font-size: 13px;
   color: #37352f;
   line-height: 1.5;
+  word-break: break-word;
 }
 
 .conv-msg-markdown {
   font-size: 13px;
   color: #37352f;
   line-height: 1.5;
+  overflow-x: hidden;
+  word-break: break-word;
 }
 
 .conv-msg-markdown > :first-child {
@@ -1690,8 +1697,11 @@ select { cursor: pointer; }
 .conv-msg-markdown table {
   border-collapse: collapse;
   width: 100%;
+  max-width: 100%;
   margin: 0.45em 0;
   font-size: 12px;
+  display: block;
+  overflow-x: auto;
 }
 
 .conv-msg-markdown th,
@@ -1718,6 +1728,8 @@ select { cursor: pointer; }
   padding: 4px 4px 4px 34px;
   font-size: 12px;
   color: #B0AFA8;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .conv-tool-label {
@@ -2077,15 +2089,18 @@ select { cursor: pointer; }
 .inline-chat-view {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   padding: 0 22px 0;
+  overflow: hidden;
 }
 
 .inline-chat-messages {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 2px;
