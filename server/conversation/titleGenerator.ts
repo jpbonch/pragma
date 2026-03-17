@@ -9,7 +9,7 @@ const TITLE_SYSTEM_PROMPT = [
   "Rules:",
   "- No quotes around the title",
   "- No punctuation at the end",
-  "- Use title case",
+  "- Use sentence case",
   "- Output ONLY the title, nothing else",
 ].join("\n");
 
