@@ -2310,6 +2310,47 @@ export default function App() {
       const thread = data.thread
       const entries = buildEntriesFromThreadData(data, agentById)
 
+      if (thread.mode === 'plan') {
+        const turns = Array.isArray(data.turns) ? data.turns : []
+        let selectedRecipientAgentId = ''
+        let hasCompletedPlanTurn = false
+
+        for (let index = turns.length - 1; index >= 0; index -= 1) {
+          const turn = turns[index]
+          if (!turn || turn.mode !== 'plan' || turn.status !== 'completed') continue
+          hasCompletedPlanTurn = true
+          if (typeof turn.selected_agent_id === 'string' && turn.selected_agent_id) {
+            selectedRecipientAgentId = turn.selected_agent_id
+            break
+          }
+        }
+
+        const latestTurn = turns.filter((t) => t && t.mode === 'plan').at(-1)
+        const latestTurnStillRunning = latestTurn?.status === 'running'
+        const planReady = hasCompletedPlanTurn && !latestTurnStillRunning
+          && status !== 'waiting_for_question_response'
+          && status !== 'waiting_for_help_response'
+
+        setConversation({
+          open: true,
+          mode: 'plan',
+          threadId: thread.id,
+          taskId,
+          taskStatus: status,
+          taskTitle: title,
+          harness: thread.harness,
+          modelLabel: thread.model_label,
+          reasoningEffort: 'medium',
+          recipientAgentId: selectedRecipientAgentId,
+          entries,
+          loading: latestTurnStillRunning,
+          error: '',
+          planReady,
+        })
+        setActiveTab('feed')
+        return
+      }
+
       setConversation({
         open: true,
         mode: 'chat',

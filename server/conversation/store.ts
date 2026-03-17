@@ -218,10 +218,12 @@ SELECT thread.id,
        thread.status,
        thread.created_at,
        thread.updated_at,
+       thread.task_id,
        latest_plan_turn.assistant_message AS latest_plan_assistant_message,
        first_plan_turn.user_message AS first_user_message,
        (latest_plan_turn.assistant_message IS NOT NULL) AS has_completed_plan_turn,
-       newest_turn.status AS latest_turn_status
+       newest_turn.status AS latest_turn_status,
+       task.status AS task_status
 FROM conversation_threads AS thread
 LEFT JOIN LATERAL (
   SELECT assistant_message
@@ -250,6 +252,7 @@ LEFT JOIN LATERAL (
   ORDER BY created_at DESC
   LIMIT 1
 ) AS newest_turn ON TRUE
+LEFT JOIN tasks AS task ON task.id = thread.task_id
 WHERE thread.mode = 'plan'
   AND thread.status = 'open'
 `;

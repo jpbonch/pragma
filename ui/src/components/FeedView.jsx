@@ -536,7 +536,9 @@ export function FeedView({
     const readyPlans = []
     const remainingPlans = []
     for (const plan of plans) {
-      if (plan.has_completed_plan_turn && plan.latest_turn_status !== 'running') {
+      if (plan.has_completed_plan_turn && plan.latest_turn_status !== 'running'
+          && plan.task_status !== 'waiting_for_question_response'
+          && plan.task_status !== 'waiting_for_help_response') {
         readyPlans.push(plan)
       } else {
         remainingPlans.push(plan)

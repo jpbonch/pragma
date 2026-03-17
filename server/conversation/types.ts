@@ -61,10 +61,12 @@ export type OpenPlanThreadListItem = {
   status: ConversationStatus;
   created_at: string;
   updated_at: string;
+  task_id: string | null;
   latest_plan_assistant_message: string | null;
   first_user_message: string | null;
   has_completed_plan_turn: boolean;
   latest_turn_status: "running" | "completed" | "failed" | null;
+  task_status: string | null;
 };
 
 export type ConversationTurn = {
