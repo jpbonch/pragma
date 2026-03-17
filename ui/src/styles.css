@@ -671,6 +671,125 @@ select { cursor: pointer; }
   flex-shrink: 0;
 }
 
+/* Follow-up task UI */
+.needs-you-card-wrap,
+.active-task-row-wrap {
+  position: relative;
+}
+
+.followup-add-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1.5px solid #E0DFDC;
+  background: #fff;
+  color: #9B9A97;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: all 0.12s ease;
+  line-height: 1;
+}
+.followup-add-btn:hover {
+  border-color: #4B83D6;
+  color: #4B83D6;
+  background: #F0F6FF;
+}
+
+.followup-chain-label {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  background: #EDE8F9;
+  color: #7C6DD7;
+  vertical-align: middle;
+}
+.followup-chain-label.has-followup {
+  background: #E8F4F0;
+  color: #2FA67E;
+}
+
+.followup-popover {
+  position: relative;
+  margin-top: 4px;
+  padding: 12px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.06);
+  border: 1px solid #E0DFDC;
+  z-index: 10;
+}
+.followup-popover-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #37352F;
+  margin-bottom: 8px;
+}
+.followup-popover-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #E0DFDC;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 48px;
+  color: #37352F;
+  background: #FAFAF8;
+  box-sizing: border-box;
+}
+.followup-popover-input:focus {
+  outline: none;
+  border-color: #4B83D6;
+  box-shadow: 0 0 0 2px rgba(75,131,214,0.15);
+}
+.followup-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.followup-popover-cancel {
+  padding: 5px 12px;
+  border: 1px solid #E0DFDC;
+  border-radius: 6px;
+  background: #fff;
+  color: #9B9A97;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.followup-popover-cancel:hover {
+  background: #FAFAF8;
+}
+.followup-popover-submit {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 6px;
+  background: #4B83D6;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.followup-popover-submit:hover {
+  background: #3D72C0;
+}
+.followup-popover-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Task rows */
 .task-row {
   padding: 8px 10px;

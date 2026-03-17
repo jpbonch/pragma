@@ -479,6 +479,16 @@ ADD COLUMN IF NOT EXISTS plan TEXT
 `);
 
   await db.exec(`
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS followup_task_id VARCHAR(64)
+`);
+
+  await db.exec(`
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS predecessor_task_id VARCHAR(64)
+`);
+
+  await db.exec(`
 CREATE TABLE IF NOT EXISTS humans (
   id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR(64),
   emoji VARCHAR(32) NOT NULL,

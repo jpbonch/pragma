@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 
 function normalizeTaskTitle(title) {
@@ -111,7 +111,83 @@ function SectionLabel({ children, count, badge, actionLabel, onAction }) {
   )
 }
 
-function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pickerTaskId, setPickerTaskId }) {
+function FollowupButton({ task, onClickAdd }) {
+  if (task.followup_task_id) {
+    return null
+  }
+  return (
+    <button
+      className="followup-add-btn"
+      title="Add follow-up task"
+      onClick={(e) => {
+        e.stopPropagation()
+        onClickAdd?.(task.id)
+      }}
+    >
+      +
+    </button>
+  )
+}
+
+function FollowupPopover({ taskId, onSubmit, onCancel }) {
+  const [prompt, setPrompt] = useState('')
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const handleSubmit = () => {
+    const text = prompt.trim()
+    if (!text) return
+    onSubmit(taskId, text)
+  }
+
+  return (
+    <div className="followup-popover" onClick={(e) => e.stopPropagation()}>
+      <div className="followup-popover-header">Follow-up task</div>
+      <textarea
+        ref={inputRef}
+        className="followup-popover-input"
+        placeholder="Describe the follow-up task..."
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            handleSubmit()
+          }
+          if (e.key === 'Escape') {
+            onCancel()
+          }
+        }}
+        rows={2}
+      />
+      <div className="followup-popover-actions">
+        <button className="followup-popover-cancel" onClick={onCancel}>Cancel</button>
+        <button
+          className="followup-popover-submit"
+          onClick={handleSubmit}
+          disabled={!prompt.trim()}
+        >
+          Create
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function FollowupChainLabel({ task }) {
+  if (task.predecessor_task_id) {
+    return <span className="followup-chain-label">Follow-up</span>
+  }
+  if (task.followup_task_id) {
+    return <span className="followup-chain-label has-followup">Has follow-up</span>
+  }
+  return null
+}
+
+function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pickerTaskId, setPickerTaskId, followupForTaskId, setFollowupForTaskId, onAddFollowup }) {
   const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
@@ -119,98 +195,147 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
 
   return (
     <div
-      className="needs-you-card"
-      style={{ '--accent': color }}
+      className="needs-you-card-wrap"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={() => !isRecipientPick && onClick?.(task)}
     >
-      <div style={{ flex: 1, minWidth: 0, cursor: isRecipientPick ? 'default' : 'pointer' }}>
-        <div className="needs-you-title">{normalizeTaskTitle(task.title)}</div>
-        <div className="needs-you-subtitle">
-          {NEEDS_YOU_SUBTITLES[status]}
-        </div>
-        {task.assigned_to && (
-          <div style={{ fontSize: 11, color: '#C4C3BF', marginTop: 4 }}>
-            Assigned to {task.assigned_to}
+      <div
+        className="needs-you-card"
+        style={{ '--accent': color }}
+        onClick={() => !isRecipientPick && onClick?.(task)}
+      >
+        <div style={{ flex: 1, minWidth: 0, cursor: isRecipientPick ? 'default' : 'pointer' }}>
+          <div className="needs-you-title">
+            {normalizeTaskTitle(task.title)}
+            <FollowupChainLabel task={task} />
           </div>
-        )}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: '#C4C3BF' }}>{getTimeAgo(task.created_at)}</span>
-        {isRecipientPick ? (
-          <div className="task-recipient-wrap">
+          <div className="needs-you-subtitle">
+            {NEEDS_YOU_SUBTITLES[status]}
+          </div>
+          {task.assigned_to && (
+            <div style={{ fontSize: 11, color: '#C4C3BF', marginTop: 4 }}>
+              Assigned to {task.assigned_to}
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {hovered && onAddFollowup && (
+            <FollowupButton
+              task={task}
+              onClickAdd={(id) => setFollowupForTaskId?.((c) => c === id ? '' : id)}
+            />
+          )}
+          <span style={{ fontSize: 11, color: '#C4C3BF' }}>{getTimeAgo(task.created_at)}</span>
+          {isRecipientPick ? (
+            <div className="task-recipient-wrap">
+              <button
+                className="needs-you-action"
+                style={{ background: color, opacity: hovered ? 1 : 0.88 }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setPickerTaskId((current) => (current === task.id ? '' : task.id))
+                }}
+              >
+                {NEEDS_YOU_ACTIONS[status]}
+              </button>
+              {pickerTaskId === task.id && (
+                <div className="task-recipient-menu">
+                  {(!recipientAgents || recipientAgents.length === 0) && (
+                    <div className="task-recipient-empty">No agents available</div>
+                  )}
+                  {recipientAgents?.map((agent) => (
+                    <button
+                      key={agent.id}
+                      className="task-recipient-option"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onPickTaskRecipient?.(task.id, agent.id)
+                        setPickerTaskId('')
+                      }}
+                    >
+                      <span className="task-recipient-name">{agent.name}</span>
+                      <span className="task-recipient-id">{agent.id}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
             <button
               className="needs-you-action"
               style={{ background: color, opacity: hovered ? 1 : 0.88 }}
               onClick={(e) => {
                 e.stopPropagation()
-                setPickerTaskId((current) => (current === task.id ? '' : task.id))
+                onClick?.(task)
               }}
             >
               {NEEDS_YOU_ACTIONS[status]}
             </button>
-            {pickerTaskId === task.id && (
-              <div className="task-recipient-menu">
-                {(!recipientAgents || recipientAgents.length === 0) && (
-                  <div className="task-recipient-empty">No agents available</div>
-                )}
-                {recipientAgents?.map((agent) => (
-                  <button
-                    key={agent.id}
-                    className="task-recipient-option"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onPickTaskRecipient?.(task.id, agent.id)
-                      setPickerTaskId('')
-                    }}
-                  >
-                    <span className="task-recipient-name">{agent.name}</span>
-                    <span className="task-recipient-id">{agent.id}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <button
-            className="needs-you-action"
-            style={{ background: color, opacity: hovered ? 1 : 0.88 }}
-            onClick={(e) => {
-              e.stopPropagation()
-              onClick?.(task)
-            }}
-          >
-            {NEEDS_YOU_ACTIONS[status]}
-          </button>
-        )}
+          )}
+        </div>
       </div>
+      {followupForTaskId === task.id && (
+        <FollowupPopover
+          taskId={task.id}
+          onSubmit={(id, prompt) => {
+            onAddFollowup?.(id, prompt)
+            setFollowupForTaskId?.('')
+          }}
+          onCancel={() => setFollowupForTaskId?.('')}
+        />
+      )}
     </div>
   )
 }
 
-function ActiveTaskRow({ task, onClick }) {
+function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId, onAddFollowup }) {
   const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
+  const [hovered, setHovered] = useState(false)
 
   return (
-    <div className="task-row" onClick={() => onClick?.(task)}>
-      <div className="task-dot">
-        <div className="task-dot-inner" style={{ background: color }} />
-        {status === 'running' && (
-          <div className="task-dot-pulse" style={{ border: `1.5px solid ${color}` }} />
-        )}
-      </div>
-      <span className="task-title active">{normalizeTaskTitle(task.title)}</span>
-      <div className="task-meta-right">
-        <span className="type-tag" style={{ color, background: `${color}12` }}>
-          {STATUS_LABELS[status]}
+    <div
+      className="active-task-row-wrap"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className="task-row" onClick={() => onClick?.(task)}>
+        <div className="task-dot">
+          <div className="task-dot-inner" style={{ background: color }} />
+          {status === 'running' && (
+            <div className="task-dot-pulse" style={{ border: `1.5px solid ${color}` }} />
+          )}
+        </div>
+        <span className="task-title active">
+          {normalizeTaskTitle(task.title)}
+          <FollowupChainLabel task={task} />
         </span>
-        {task.assigned_to && (
-          <span style={{ fontSize: 11, color: '#C4C3BF' }}>{task.assigned_to}</span>
-        )}
-        <span className="task-time">{getTimeAgo(task.created_at)}</span>
+        <div className="task-meta-right">
+          {hovered && onAddFollowup && (
+            <FollowupButton
+              task={task}
+              onClickAdd={(id) => setFollowupForTaskId?.((c) => c === id ? '' : id)}
+            />
+          )}
+          <span className="type-tag" style={{ color, background: `${color}12` }}>
+            {STATUS_LABELS[status]}
+          </span>
+          {task.assigned_to && (
+            <span style={{ fontSize: 11, color: '#C4C3BF' }}>{task.assigned_to}</span>
+          )}
+          <span className="task-time">{getTimeAgo(task.created_at)}</span>
+        </div>
       </div>
+      {followupForTaskId === task.id && (
+        <FollowupPopover
+          taskId={task.id}
+          onSubmit={(id, prompt) => {
+            onAddFollowup?.(id, prompt)
+            setFollowupForTaskId?.('')
+          }}
+          onCancel={() => setFollowupForTaskId?.('')}
+        />
+      )}
     </div>
   )
 }
@@ -300,10 +425,12 @@ export function FeedView({
   onOpenPlan,
   onOpenTaskConversation,
   onPickTaskRecipient,
+  onAddFollowup,
 }) {
   const DONE_DISPLAY_LIMIT = 5
   const [pickerTaskId, setPickerTaskId] = useState('')
   const [showAllDone, setShowAllDone] = useState(false)
+  const [followupForTaskId, setFollowupForTaskId] = useState('')
 
   const recipients = useMemo(() => {
     if (!Array.isArray(recipientAgents)) {
@@ -453,6 +580,9 @@ export function FeedView({
                   recipientAgents={recipients}
                   pickerTaskId={pickerTaskId}
                   setPickerTaskId={setPickerTaskId}
+                  followupForTaskId={followupForTaskId}
+                  setFollowupForTaskId={setFollowupForTaskId}
+                  onAddFollowup={onAddFollowup}
                 />
               </div>
             ))}
@@ -465,6 +595,9 @@ export function FeedView({
                   recipientAgents={recipients}
                   pickerTaskId={pickerTaskId}
                   setPickerTaskId={setPickerTaskId}
+                  followupForTaskId={followupForTaskId}
+                  setFollowupForTaskId={setFollowupForTaskId}
+                  onAddFollowup={onAddFollowup}
                 />
               </div>
             ))}
@@ -477,7 +610,7 @@ export function FeedView({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {exitingTasks.filter((t) => t._fromCategory === 'active').map((task) => (
               <div key={`exit-${task.id}`} className="task-exit">
-                <ActiveTaskRow task={task} onClick={onOpenTaskConversation} />
+                <ActiveTaskRow task={task} onClick={onOpenTaskConversation} followupForTaskId={followupForTaskId} setFollowupForTaskId={setFollowupForTaskId} onAddFollowup={onAddFollowup} />
               </div>
             ))}
             {active.length > 0 ? (
@@ -486,6 +619,9 @@ export function FeedView({
                   <ActiveTaskRow
                     task={task}
                     onClick={onOpenTaskConversation}
+                    followupForTaskId={followupForTaskId}
+                    setFollowupForTaskId={setFollowupForTaskId}
+                    onAddFollowup={onAddFollowup}
                   />
                 </div>
               ))

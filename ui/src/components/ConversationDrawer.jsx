@@ -88,6 +88,7 @@ export function ConversationDrawer({
   headerAgentEmoji = '',
   onReviewAction,
   onDeleteTask,
+  isFollowupTask = false,
   runtimeService = null,
   runtimeServiceLogs = [],
   runtimeServiceError = '',
@@ -542,31 +543,31 @@ export function ConversationDrawer({
                 {canApprove && (
                   <button
                     className="conv-approve-btn"
-                    onClick={() => { void submitReviewAction('approve') }}
+                    onClick={() => { void submitReviewAction(isFollowupTask ? 'approve_chain' : 'approve') }}
                     disabled={approveLoading}
-                    title="Approve"
+                    title={isFollowupTask ? 'Approve chain' : 'Approve'}
                   >
-                    {approveLoading ? 'Approving...' : 'Approve ✓'}
+                    {approveLoading ? 'Approving...' : isFollowupTask ? 'Approve Chain ✓' : 'Approve ✓'}
                   </button>
                 )}
                 {canApprove && (
                   <button
                     className="conv-approve-btn"
-                    onClick={() => { void submitReviewAction('approve_and_push') }}
+                    onClick={() => { void submitReviewAction(isFollowupTask ? 'approve_chain_and_push' : 'approve_and_push') }}
                     disabled={approveLoading}
-                    title="Approve and push to origin"
+                    title={isFollowupTask ? 'Approve chain and push to origin' : 'Approve and push to origin'}
                   >
-                    {approveLoading ? 'Approving...' : 'Approve & Push'}
+                    {approveLoading ? 'Approving...' : isFollowupTask ? 'Approve Chain & Push' : 'Approve & Push'}
                   </button>
                 )}
                 {canMarkCompleted && !isCompletedTask && (
                   <button
                     className="conv-approve-btn"
-                    onClick={() => { void submitReviewAction('mark_completed') }}
+                    onClick={() => { void submitReviewAction(isFollowupTask ? 'mark_chain_completed' : 'mark_completed') }}
                     disabled={approveLoading}
-                    title="Mark task as completed"
+                    title={isFollowupTask ? 'Mark task and predecessors as completed' : 'Mark task as completed'}
                   >
-                    {approveLoading ? 'Completing...' : 'Mark Task Completed'}
+                    {approveLoading ? 'Completing...' : isFollowupTask ? 'Mark Task and Predecessors Completed' : 'Mark Task Completed'}
                   </button>
                 )}
                 {isCompletedTask && (

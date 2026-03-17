@@ -8,6 +8,7 @@ import {
   createContextFile,
   createContextFolder,
   createExecuteTask,
+  createFollowupTask,
   createWorkspace,
   deleteWorkspace,
   fetchAvailableClis,
@@ -2309,8 +2310,13 @@ export default function App() {
     }
   }
 
+  const VALID_REVIEW_ACTIONS = new Set([
+    'approve', 'approve_and_push', 'reopen', 'mark_completed',
+    'approve_chain', 'approve_chain_and_push', 'mark_chain_completed',
+  ])
+
   async function handleReviewTask(taskId, action) {
-    if (!taskId || (action !== 'approve' && action !== 'approve_and_push' && action !== 'reopen' && action !== 'mark_completed')) {
+    if (!taskId || !VALID_REVIEW_ACTIONS.has(action)) {
       return
     }
 
@@ -2319,13 +2325,14 @@ export default function App() {
     const mergeState = reviewResult.merge_state
 
     await loadTasks()
-    const isApprove = action === 'approve' || action === 'approve_and_push'
+    const isApprove = action === 'approve' || action === 'approve_and_push' || action === 'approve_chain' || action === 'approve_chain_and_push'
     if (isApprove && (mergeState === 'merged' || mergeState === 'merged_and_pushed') && nextStatus === 'completed') {
       closeConversationDrawer()
       return
     }
 
-    if (action === 'mark_completed' && nextStatus === 'completed') {
+    const isMarkCompleted = action === 'mark_completed' || action === 'mark_chain_completed'
+    if (isMarkCompleted && nextStatus === 'completed') {
       closeConversationDrawer()
       return
     }
@@ -2339,6 +2346,21 @@ export default function App() {
         taskStatus: nextStatus,
       }
     })
+  }
+
+  async function handleAddFollowup(parentTaskId, prompt) {
+    if (!parentTaskId || !prompt) {
+      return
+    }
+    try {
+      await createFollowupTask(parentTaskId, {
+        prompt,
+        reasoning_effort: 'high',
+      })
+      await loadTasks()
+    } catch (error) {
+      setWorkspaceError(errorText(error))
+    }
   }
 
   async function handleSetTaskRecipient(taskId, recipientAgentId) {
@@ -2485,6 +2507,9 @@ export default function App() {
               onPickTaskRecipient={(taskId, recipientAgentId) => {
                 void handleSetTaskRecipient(taskId, recipientAgentId)
               }}
+              onAddFollowup={(parentTaskId, prompt) => {
+                void handleAddFollowup(parentTaskId, prompt)
+              }}
             />
             <ConversationDrawer
               open={conversation.open && (conversation.mode === 'plan' || (conversation.mode === 'chat' && Boolean(conversation.taskId)))}
@@ -2500,6 +2525,7 @@ export default function App() {
               headerAgentEmoji={conversationHeaderAgent.emoji}
               onReviewAction={(taskId, action) => handleReviewTask(taskId, action)}
               onDeleteTask={(taskId) => handleDeleteTask(taskId)}
+              isFollowupTask={Boolean(conversation.taskId && tasks.find((t) => t.id === conversation.taskId)?.predecessor_task_id)}
               runtimeService={conversationRuntimeService}
               runtimeServiceLogs={conversationRuntimeService ? selectedRuntimeServiceLogs : []}
               runtimeServiceError={

@@ -132,6 +132,7 @@ export async function prepareTaskWorkspace(input: {
   workspacePaths: WorkspacePathsLike;
   taskId: string;
   existingState: TaskGitState | null;
+  predecessorGitState?: TaskGitState | null;
 }): Promise<PrepareTaskWorkspaceResult> {
   const taskRootDir = join(input.workspacePaths.worktreesDir, input.taskId);
   const taskWorkspaceDir = join(taskRootDir, "workspace");
@@ -139,17 +140,27 @@ export async function prepareTaskWorkspace(input: {
   await mkdir(taskRootDir, { recursive: true });
   await mkdir(input.workspacePaths.outputsDir, { recursive: true });
 
-  const gitState = input.existingState
-    ? await ensureExistingTaskWorktrees({
-        workspacePaths: input.workspacePaths,
-        taskWorkspaceDir,
-        gitState: input.existingState,
-      })
-    : await createFreshTaskWorktrees({
-        workspacePaths: input.workspacePaths,
-        taskId: input.taskId,
-        taskWorkspaceDir,
-      });
+  let gitState: TaskGitState;
+  if (input.existingState) {
+    gitState = await ensureExistingTaskWorktrees({
+      workspacePaths: input.workspacePaths,
+      taskWorkspaceDir,
+      gitState: input.existingState,
+    });
+  } else if (input.predecessorGitState) {
+    gitState = await createFollowupTaskWorktrees({
+      workspacePaths: input.workspacePaths,
+      taskId: input.taskId,
+      taskWorkspaceDir,
+      predecessorGitState: input.predecessorGitState,
+    });
+  } else {
+    gitState = await createFreshTaskWorktrees({
+      workspacePaths: input.workspacePaths,
+      taskId: input.taskId,
+      taskWorkspaceDir,
+    });
+  }
 
   const taskCodeDir = join(taskWorkspaceDir, "code");
   await mkdir(taskCodeDir, { recursive: true });
@@ -373,6 +384,48 @@ async function createFreshTaskWorktrees(input: {
       relative_path: relativePath,
       base_branch: baseBranch,
       base_commit: baseCommit,
+    });
+  }
+
+  return {
+    version: 1,
+    branch_name: branchName,
+    repos,
+  };
+}
+
+async function createFollowupTaskWorktrees(input: {
+  workspacePaths: WorkspacePathsLike;
+  taskId: string;
+  taskWorkspaceDir: string;
+  predecessorGitState: TaskGitState;
+}): Promise<TaskGitState> {
+  const branchName = `pragma/task/${input.taskId}`;
+  const repos: TaskGitRepoState[] = [];
+
+  for (const predRepo of input.predecessorGitState.repos) {
+    const relativePath = normalizeRelativeRepoPath(predRepo.relative_path);
+    const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, relativePath);
+    const taskRepoPath = resolveRepoPath(input.taskWorkspaceDir, relativePath);
+
+    // Get the predecessor branch's current HEAD commit as start point
+    const predecessorHead = (
+      await runGitCapture(sourceRepoPath, ["rev-parse", input.predecessorGitState.branch_name])
+    ).trim();
+
+    await ensureWorktree({
+      sourceRepoPath,
+      worktreePath: taskRepoPath,
+      branchName,
+      startPoint: predecessorHead,
+    });
+
+    repos.push({
+      relative_path: relativePath,
+      // base_branch stays the same as predecessor's (e.g., main) for final merge
+      base_branch: predRepo.base_branch,
+      // base_commit is the predecessor's HEAD so diffs show only the follow-up's changes
+      base_commit: predecessorHead,
     });
   }
 

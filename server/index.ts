@@ -80,6 +80,7 @@ import {
   createHumanSchema,
   createContextFolderSchema,
   createExecuteTaskSchema,
+  createFollowupTaskSchema,
   createTaskSchema,
   createWorkspaceSchema,
   executeFromThreadSchema,
@@ -940,6 +941,8 @@ SELECT j.id,
        j.session_id,
        j.created_at,
        j.completed_at,
+       j.followup_task_id,
+       j.predecessor_task_id,
        (
          SELECT ct.id
          FROM conversation_threads ct
@@ -966,6 +969,8 @@ FROM tasks j
         session_id: string | null;
         created_at: string;
         completed_at: string | null;
+        followup_task_id: string | null;
+        predecessor_task_id: string | null;
         thread_id: string | null;
       }>(query, params);
 
@@ -1562,9 +1567,11 @@ LIMIT 1
         assigned_to: string | null;
         merge_retry_count: number | null;
         git_state_json: string | null;
+        predecessor_task_id: string | null;
+        followup_task_id: string | null;
       }>(
         `
-SELECT id, title, status, assigned_to, merge_retry_count, git_state_json
+SELECT id, title, status, assigned_to, merge_retry_count, git_state_json, predecessor_task_id, followup_task_id
 FROM tasks
 WHERE id = $1
 LIMIT 1
@@ -1576,7 +1583,7 @@ LIMIT 1
         throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
-      const pushAfterMerge = body.action === "approve_and_push";
+      const pushAfterMerge = body.action === "approve_and_push" || body.action === "approve_chain_and_push";
 
       if (body.action === "reopen") {
         if (task.status !== "completed") {
@@ -1663,6 +1670,190 @@ WHERE id = $1
           ok: true,
           status: nextStatus,
           merge_state: "no_changes",
+        });
+      }
+
+      if (body.action === "mark_chain_completed") {
+        if (task.status !== "pending_review" && task.status !== "completed") {
+          throw new PragmaError("TASK_NOT_PENDING_REVIEW", 409, `Task is not pending review: ${taskId}`);
+        }
+
+        const workspacePaths = getWorkspacePaths(workspaceName);
+
+        // Walk predecessor chain and mark all as completed
+        const chainTaskIds: string[] = [taskId];
+        let currentPredecessorId = task.predecessor_task_id;
+        while (currentPredecessorId) {
+          chainTaskIds.push(currentPredecessorId);
+          const predResult = await db.query<{ predecessor_task_id: string | null }>(
+            `SELECT predecessor_task_id FROM tasks WHERE id = $1 LIMIT 1`,
+            [currentPredecessorId],
+          );
+          currentPredecessorId = predResult.rows[0]?.predecessor_task_id ?? null;
+        }
+
+        for (const chainId of chainTaskIds) {
+          const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
+          await db.query(
+            `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
+            [chainId, mergedOutputDir],
+          );
+          emitTaskStatus(workspaceName, chainId, "completed", "review_mark_chain_completed");
+          await deleteTaskWorktree({ workspacePaths, taskId: chainId });
+        }
+
+        return c.json({
+          ok: true,
+          status: "completed",
+          merge_state: "no_changes",
+          chain_completed: chainTaskIds,
+        });
+      }
+
+      const isChainApprove = body.action === "approve_chain" || body.action === "approve_chain_and_push";
+
+      if (isChainApprove) {
+        if (task.status !== "pending_review") {
+          throw new PragmaError("TASK_NOT_PENDING_REVIEW", 409, `Task is not pending review: ${taskId}`);
+        }
+
+        const gitState = parseTaskGitState(task.git_state_json);
+        if (!gitState) {
+          throw new PragmaError("TASK_GIT_STATE_MISSING", 409, `Task has no git execution state: ${taskId}`);
+        }
+
+        const workspacePaths = getWorkspacePaths(workspaceName);
+
+        // Walk the predecessor chain to collect all task IDs
+        const chainTaskIds: string[] = [taskId];
+        let currentPredecessorId = task.predecessor_task_id;
+        while (currentPredecessorId) {
+          chainTaskIds.push(currentPredecessorId);
+          const predResult = await db.query<{ predecessor_task_id: string | null }>(
+            `SELECT predecessor_task_id FROM tasks WHERE id = $1 LIMIT 1`,
+            [currentPredecessorId],
+          );
+          currentPredecessorId = predResult.rows[0]?.predecessor_task_id ?? null;
+        }
+
+        // Merge only the current (last) task's branch — it has all cumulative commits
+        const mergeResult = await mergeApprovedTask({
+          workspacePaths,
+          taskId,
+          taskTitle: task.title,
+          gitState,
+        });
+
+        if (mergeResult.conflicts.length === 0) {
+          // Mark all chain tasks as completed
+          for (const chainId of chainTaskIds) {
+            const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
+            await db.query(
+              `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+              [chainId, mergedOutputDir],
+            );
+            emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action");
+          }
+
+          // Save diff snapshot for the current task
+          await saveDiffSnapshot({ workspacePaths, taskId, gitState });
+
+          // Delete worktrees for all chain tasks
+          for (const chainId of chainTaskIds) {
+            await deleteTaskWorktree({ workspacePaths, taskId: chainId });
+          }
+
+          if (pushAfterMerge) {
+            for (const repo of gitState.repos) {
+              const repoPath = repo.relative_path === "."
+                ? workspacePaths.workspaceDir
+                : join(workspacePaths.workspaceDir, repo.relative_path);
+              await runCommand({
+                command: "git",
+                args: ["push", "origin", repo.base_branch],
+                cwd: repoPath,
+                env: process.env,
+              });
+            }
+          }
+
+          return c.json({
+            ok: true,
+            status: "completed",
+            merge_state: pushAfterMerge ? "merged_and_pushed" : "merged",
+            conflicts: [],
+            chain_completed: chainTaskIds,
+          });
+        }
+
+        // Merge conflicts — use same retry logic as normal approve
+        const retryCount = Number.isInteger(task.merge_retry_count) ? (task.merge_retry_count as number) : 0;
+        if (retryCount < 1) {
+          await db.query(
+            `UPDATE tasks SET status = 'queued', merge_retry_count = COALESCE(merge_retry_count, 0) + 1 WHERE id = $1`,
+            [taskId],
+          );
+          emitTaskStatus(workspaceName, taskId, "queued", "review_chain_conflict_retry");
+
+          const thread = await getThreadByTaskId(db, taskId);
+          const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
+          if (thread && latestExecuteTurn && latestExecuteTurn.user_message.trim()) {
+            const taskWorkspaceDir = join(workspacePaths.worktreesDir, taskId, "workspace");
+            const enrichedConflicts = await Promise.all(
+              mergeResult.conflicts.map(async (conflict) => {
+                const repo = gitState.repos.find((r) => r.relative_path === conflict.repo_path);
+                const sourceRepoPath = resolveRepoPath(workspacePaths.workspaceDir, conflict.repo_path);
+                const taskRepoPath = resolveRepoPath(taskWorkspaceDir, conflict.repo_path);
+                const mainChangesSummary = repo
+                  ? await getMainChangesSummary({
+                      sourceRepoPath,
+                      baseCommit: repo.base_commit,
+                      baseBranch: repo.base_branch,
+                      files: conflict.files,
+                    })
+                  : "";
+                return {
+                  repo_path: conflict.repo_path,
+                  files: conflict.files,
+                  taskRepoPath,
+                  branchName: gitState.branch_name,
+                  baseBranch: repo?.base_branch ?? "main",
+                  mainChangesSummary,
+                };
+              }),
+            );
+            const retryPrompt = buildConflictRetryPrompt({
+              originalTask: latestExecuteTurn.user_message,
+              conflicts: enrichedConflicts,
+            });
+            executeRunner.execute({
+              workspaceName,
+              taskId,
+              threadId: thread.id,
+              prompt: retryPrompt,
+              requestedRecipientAgentId: task.assigned_to ?? undefined,
+              reasoningEffort: requireReasoningEffort(
+                latestExecuteTurn.reasoning_effort,
+                `latest execute turn for chain conflict retry task ${taskId}`,
+              ),
+            });
+
+            return c.json({
+              ok: true,
+              status: "queued",
+              merge_state: "conflict_retry_enqueued",
+              conflicts: mergeResult.conflicts,
+            });
+          }
+        }
+
+        await db.query(`UPDATE tasks SET status = 'needs_fix' WHERE id = $1`, [taskId]);
+        emitTaskStatus(workspaceName, taskId, "needs_fix", "review_chain_conflict_manual");
+        return c.json({
+          ok: true,
+          status: "needs_fix",
+          merge_state: "manual_intervention_required",
+          conflicts: mergeResult.conflicts,
         });
       }
 
@@ -1991,6 +2182,104 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
     }
 
     return c.json({ task_id: taskId }, 201);
+  });
+
+  app.post("/tasks/:taskId/followup", validateJson(createFollowupTaskSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const parentTaskId = c.req.param("taskId");
+    const body = c.req.valid("json");
+    const prompt = body.prompt;
+    const reasoningEffort = body.reasoning_effort;
+    const fallbackTitle = prompt.length > 100 ? `${prompt.slice(0, 97)}...` : prompt;
+    const newTaskId = `task_${randomUUID().slice(0, 8)}`;
+    const threadId = `thread_${randomUUID().slice(0, 12)}`;
+
+    const db = await openDatabase(workspaceName);
+    try {
+      await ensureConversationSchema(db);
+
+      const parentResult = await db.query<{
+        id: string;
+        status: TaskStatus;
+        followup_task_id: string | null;
+      }>(
+        `SELECT id, status, followup_task_id FROM tasks WHERE id = $1 LIMIT 1`,
+        [parentTaskId],
+      );
+      const parent = parentResult.rows[0];
+      if (!parent) {
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${parentTaskId}`);
+      }
+      if (parent.followup_task_id) {
+        throw new PragmaError(
+          "FOLLOWUP_EXISTS",
+          409,
+          `Task ${parentTaskId} already has a follow-up task: ${parent.followup_task_id}`,
+        );
+      }
+
+      const orchestrator = await getAgentRow(db, DEFAULT_AGENT_ID);
+      if (!orchestrator) {
+        throw new PragmaError("ORCHESTRATOR_NOT_FOUND", 400, `Orchestrator agent is missing: ${DEFAULT_AGENT_ID}`);
+      }
+
+      let requestedRecipientAgentId: string | null = null;
+      if (body.recipient_agent_id) {
+        requestedRecipientAgentId = body.recipient_agent_id;
+        const recipient = await getAgentRow(db, requestedRecipientAgentId);
+        if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+          throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${requestedRecipientAgentId}`);
+        }
+      }
+
+      await db.query(
+        `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan, predecessor_task_id)
+         VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3, $4)`,
+        [newTaskId, fallbackTitle, prompt, parentTaskId],
+      );
+
+      await db.query(
+        `UPDATE tasks SET followup_task_id = $2 WHERE id = $1`,
+        [parentTaskId, newTaskId],
+      );
+
+      emitTaskStatus(workspaceName, newTaskId, "queued", "followup_created");
+
+      generateTitle(db, prompt, "").then((aiTitle) => {
+        updateTaskTitle(db, newTaskId, aiTitle);
+      }).catch(() => {});
+
+      await createThread(db, {
+        id: threadId,
+        mode: "execute",
+        harness: orchestrator.harness,
+        modelLabel: orchestrator.model_label,
+        modelId: orchestrator.model_id,
+        sourceThreadId: null,
+        taskId: newTaskId,
+      });
+
+      // If parent is already pending_review or completed, start the follow-up immediately
+      if (parent.status === "pending_review" || parent.status === "completed") {
+        executeRunner.execute({
+          workspaceName,
+          taskId: newTaskId,
+          threadId,
+          prompt,
+          requestedRecipientAgentId,
+          reasoningEffort,
+        });
+      }
+    } catch (error: unknown) {
+      if (error instanceof PragmaError) {
+        throw error;
+      }
+      throw new PragmaError("CREATE_FOLLOWUP_TASK_FAILED", 400, errorMessage(error));
+    } finally {
+      await db.close();
+    }
+
+    return c.json({ task_id: newTaskId, parent_task_id: parentTaskId }, 201);
   });
 
   app.post("/tasks/:taskId/recipient", validateJson(setTaskRecipientSchema), async (c) => {

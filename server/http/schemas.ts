@@ -80,6 +80,14 @@ export const createExecuteTaskSchema = z
   })
   .strict();
 
+export const createFollowupTaskSchema = z
+  .object({
+    prompt: nonEmptyString,
+    recipient_agent_id: nonEmptyString.optional(),
+    reasoning_effort: reasoningEffortSchema,
+  })
+  .strict();
+
 export const setTaskRecipientSchema = z
   .object({
     recipient_agent_id: nonEmptyString,
@@ -142,7 +150,7 @@ export const taskRespondSchema = z
 
 export const reviewTaskSchema = z
   .object({
-    action: z.enum(["approve", "approve_and_push", "reopen", "mark_completed"]),
+    action: z.enum(["approve", "approve_and_push", "reopen", "mark_completed", "approve_chain", "approve_chain_and_push", "mark_chain_completed"]),
     message: nonEmptyString.optional(),
   })
   .strict();

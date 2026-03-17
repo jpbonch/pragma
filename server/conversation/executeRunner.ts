@@ -16,6 +16,8 @@ import {
   completeTurn,
   createTurn,
   failTurn,
+  getFirstExecuteTurn,
+  getThreadByTaskId,
   insertEvent,
   insertMessage,
   reopenThread,
@@ -102,9 +104,13 @@ async function runExecuteTask(
   const db = await openDatabase(input.workspaceName);
   const paths = getWorkspacePaths(input.workspaceName);
 
-  const taskStateResult = await db.query<{ git_state_json: string | null }>(
+  const taskStateResult = await db.query<{
+    git_state_json: string | null;
+    predecessor_task_id: string | null;
+    followup_task_id: string | null;
+  }>(
     `
-SELECT git_state_json
+SELECT git_state_json, predecessor_task_id, followup_task_id
 FROM tasks
 WHERE id = $1
 LIMIT 1
@@ -116,10 +122,25 @@ LIMIT 1
   }
 
   const existingGitState = parseTaskGitState(taskStateResult.rows[0].git_state_json);
+
+  // If this is a follow-up task, load predecessor's git state for worktree creation
+  let predecessorGitState: TaskGitState | null = null;
+  const predecessorTaskId = taskStateResult.rows[0].predecessor_task_id;
+  if (predecessorTaskId && !existingGitState) {
+    const predResult = await db.query<{ git_state_json: string | null }>(
+      `SELECT git_state_json FROM tasks WHERE id = $1 LIMIT 1`,
+      [predecessorTaskId],
+    );
+    if (predResult.rows[0]?.git_state_json) {
+      predecessorGitState = parseTaskGitState(predResult.rows[0].git_state_json);
+    }
+  }
+
   const prepared = await prepareTaskWorkspace({
     workspacePaths: paths,
     taskId: input.taskId,
     existingState: existingGitState,
+    predecessorGitState,
   });
   const outputDir = prepared.outputDir;
   const taskWorkspaceDir = prepared.taskWorkspaceDir;
@@ -625,6 +646,43 @@ WHERE id = $1
         [input.taskId, workerResult.sessionId],
       );
       await notifyTaskStatus("pending_review", "execute_runner");
+
+      // Trigger follow-up task execution if one exists
+      const followupTaskId = taskStateResult.rows[0].followup_task_id;
+      if (followupTaskId) {
+        const followupResult = await db.query<{
+          id: string;
+          status: string;
+          plan: string | null;
+        }>(
+          `SELECT id, status, plan FROM tasks WHERE id = $1 LIMIT 1`,
+          [followupTaskId],
+        );
+        const followup = followupResult.rows[0];
+        if (followup && followup.status === "queued") {
+          const followupThread = await getThreadByTaskId(db, followupTaskId);
+          if (followupThread) {
+            const followupTurn = await getFirstExecuteTurn(db, followupThread.id);
+            const followupPrompt = followup.plan || followupTurn?.user_message || "";
+            if (followupPrompt.trim()) {
+              // Fire-and-forget: start the follow-up task
+              runExecuteTask(
+                {
+                  workspaceName: input.workspaceName,
+                  taskId: followupTaskId,
+                  threadId: followupThread.id,
+                  prompt: followupPrompt,
+                  reasoningEffort: input.reasoningEffort,
+                },
+                options,
+              ).catch((err: unknown) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                console.error(`Follow-up task execution failed: ${msg}`);
+              });
+            }
+          }
+        }
+      }
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

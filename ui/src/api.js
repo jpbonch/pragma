@@ -480,6 +480,14 @@ export async function createExecuteTask({ prompt, recipient_agent_id, reasoning_
   })
 }
 
+export async function createFollowupTask(parentTaskId, { prompt, recipient_agent_id, reasoning_effort }) {
+  return fetchJson(`/tasks/${encodeURIComponent(parentTaskId)}/followup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt, recipient_agent_id, reasoning_effort }),
+  })
+}
+
 export async function executeFromPlanThread(threadId, { recipient_agent_id, reasoning_effort }) {
   return fetchJson(`/conversations/${encodeURIComponent(threadId)}/execute`, {
     method: 'POST',
