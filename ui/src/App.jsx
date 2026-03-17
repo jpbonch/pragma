@@ -1855,14 +1855,16 @@ export default function App() {
         await respondToTask(conversation.taskId, finalMessage)
         setConversation((prev) => ({
           ...prev,
-          taskStatus: 'queued',
+          taskStatus: prev.mode === 'plan' ? 'planning' : 'queued',
           entries: [
             ...prev.entries,
             { id: nextEntryId('user'), type: 'user', content: finalMessage },
             {
               id: nextEntryId('status'),
               type: 'status',
-              content: 'Response sent. Task re-queued with the same worker.',
+              content: prev.mode === 'plan'
+                ? 'Response sent. Continuing plan.'
+                : 'Response sent. Task re-queued with the same worker.',
             },
           ],
         }))

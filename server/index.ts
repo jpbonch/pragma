@@ -2528,7 +2528,6 @@ LIMIT 1
 `,
         [taskId],
       );
-      emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "worker_ask_question");
       const task = taskResult.rows[0];
       if (!task) {
         throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);

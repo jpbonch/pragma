@@ -272,20 +272,28 @@ async function runTurn(
       content: finalAssistantText,
     });
 
-    // Transition task from planning → planned when plan turn completes
+    // Transition task from planning → planned when plan turn completes,
+    // but only if the agent didn't ask a question during this turn.
     if (input.mode === "plan" && thread.task_id) {
-      if (selectedPlanRecipientAgentId) {
-        await db.query(
-          `UPDATE tasks SET status = 'planned', plan = $2, assigned_to = $3 WHERE id = $1`,
-          [thread.task_id, finalAssistantText, selectedPlanRecipientAgentId],
-        );
-      } else {
-        await db.query(
-          `UPDATE tasks SET status = 'planned', plan = $2 WHERE id = $1`,
-          [thread.task_id, finalAssistantText],
-        );
+      const currentTask = await db.query<{ status: string }>(
+        `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
+        [thread.task_id],
+      );
+      const currentStatus = currentTask.rows[0]?.status;
+      if (currentStatus !== "waiting_for_question_response") {
+        if (selectedPlanRecipientAgentId) {
+          await db.query(
+            `UPDATE tasks SET status = 'planned', plan = $2, assigned_to = $3 WHERE id = $1`,
+            [thread.task_id, finalAssistantText, selectedPlanRecipientAgentId],
+          );
+        } else {
+          await db.query(
+            `UPDATE tasks SET status = 'planned', plan = $2 WHERE id = $1`,
+            [thread.task_id, finalAssistantText],
+          );
+        }
+        callbacks.emitTaskStatus(input.workspaceName, thread.task_id, "planned", "plan_completed");
       }
-      callbacks.emitTaskStatus(input.workspaceName, thread.task_id, "planned", "plan_completed");
     }
 
     if (input.mode === "chat") {
