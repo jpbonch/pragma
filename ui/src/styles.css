@@ -676,7 +676,7 @@ select { cursor: pointer; }
 .active-task-row-wrap {
   position: relative;
   display: flex;
-  align-items: stretch;
+  align-items: center;
 }
 .needs-you-card-wrap > .needs-you-card,
 .active-task-row-wrap > .task-row {
@@ -697,7 +697,7 @@ select { cursor: pointer; }
   justify-content: center;
   width: 24px;
   flex-shrink: 0;
-  margin-right: 6px;
+  margin-right: 2px;
   overflow: visible;
 }
 /* Line extending downward to the next chain item */
@@ -706,7 +706,7 @@ select { cursor: pointer; }
   position: absolute;
   left: 50%;
   top: 50%;
-  height: calc(50% + 14px);
+  height: 40px;
   width: 1px;
   background: #D5D4D0;
   transform: translateX(-50%);
@@ -718,7 +718,7 @@ select { cursor: pointer; }
   position: absolute;
   left: 50%;
   bottom: 50%;
-  height: calc(50% + 14px);
+  height: 40px;
   width: 1px;
   background: #D5D4D0;
   transform: translateX(-50%);
