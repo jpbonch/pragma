@@ -241,11 +241,12 @@ function FollowupChainNumber({ chainIndex, chainLength, isLast }) {
   )
 }
 
-function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pickerTaskId, setPickerTaskId, followupForTaskId, setFollowupForTaskId, onAddFollowup, chainIndex, chainLength, isLast }) {
+function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pickerTaskId, setPickerTaskId, followupForTaskId, setFollowupForTaskId, onAddFollowup, chainIndex, chainLength, isLast, agentById }) {
   const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
   const isRecipientPick = status === 'waiting_for_recipient'
+  const agent = task.assigned_to && agentById ? agentById[task.assigned_to] : null
 
   return (
     <div
@@ -268,7 +269,7 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
           </div>
           {task.assigned_to && (
             <div style={{ fontSize: 11, color: '#C4C3BF', marginTop: 4 }}>
-              Assigned to {task.assigned_to}
+              Assigned to {agent ? `${agent.emoji || '🤖'} ${agent.name}` : task.assigned_to}
             </div>
           )}
         </div>
@@ -332,10 +333,11 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
   )
 }
 
-function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId, onAddFollowup, chainIndex, chainLength, isLast }) {
+function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId, onAddFollowup, chainIndex, chainLength, isLast, agentById }) {
   const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
+  const agent = task.assigned_to && agentById ? agentById[task.assigned_to] : null
 
   return (
     <div
@@ -364,10 +366,11 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
           <span className="type-tag" style={{ color, background: `${color}12` }}>
             {STATUS_LABELS[status]}
           </span>
-          {task.assigned_to && (
+          {agent ? (
+            <span style={{ fontSize: 11, color: '#C4C3BF' }}>{agent.emoji || '🤖'} {agent.name || task.assigned_to}</span>
+          ) : task.assigned_to ? (
             <span style={{ fontSize: 11, color: '#C4C3BF' }}>{task.assigned_to}</span>
-          )}
-          <span className="task-time">{getTimeAgo(task.created_at)}</span>
+          ) : null}
         </div>
       </div>
     </div>
@@ -453,6 +456,7 @@ export function FeedView({
   loading,
   error,
   recipientAgents = [],
+  agentById = {},
   plans = [],
   plansLoading = false,
   activePlanThreadId = '',
@@ -623,6 +627,7 @@ export function FeedView({
                   followupForTaskId={followupForTaskId}
                   setFollowupForTaskId={setFollowupForTaskId}
                   onAddFollowup={onAddFollowup}
+                  agentById={agentById}
                 />
               </div>
             ))}
@@ -641,6 +646,7 @@ export function FeedView({
                   chainIndex={chainIndex}
                   chainLength={chainLength}
                   isLast={isLast}
+                  agentById={agentById}
                 />
               </div>
             ))}
@@ -653,7 +659,7 @@ export function FeedView({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {exitingTasks.filter((t) => t._fromCategory === 'active').map((task) => (
               <div key={`exit-${task.id}`} className="task-exit">
-                <ActiveTaskRow task={task} onClick={onOpenTaskConversation} followupForTaskId={followupForTaskId} setFollowupForTaskId={setFollowupForTaskId} onAddFollowup={onAddFollowup} />
+                <ActiveTaskRow task={task} onClick={onOpenTaskConversation} followupForTaskId={followupForTaskId} setFollowupForTaskId={setFollowupForTaskId} onAddFollowup={onAddFollowup} agentById={agentById} />
               </div>
             ))}
             {orderedActive.length > 0 ? (
@@ -668,6 +674,7 @@ export function FeedView({
                     chainIndex={chainIndex}
                     chainLength={chainLength}
                     isLast={isLast}
+                    agentById={agentById}
                   />
                 </div>
               ))

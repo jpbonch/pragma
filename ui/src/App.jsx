@@ -2611,6 +2611,7 @@ export default function App() {
                   loading={tasksLoading}
                   error={tasksError}
                   recipientAgents={recipientAgents}
+                  agentById={agentById}
                   plans={sidebarPlans}
                   plansLoading={sidebarPlansLoading}
                   activePlanThreadId={activePlanThreadId}
