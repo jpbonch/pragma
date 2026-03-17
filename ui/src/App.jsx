@@ -1132,6 +1132,11 @@ export default function App() {
         }
 
         scheduleTasksRefresh(250)
+
+        // Refresh plans sidebar when a plan-related status change occurs
+        if (status === 'planned' || status === 'planning' || status === 'waiting_for_question_response') {
+          void loadPlans()
+        }
       },
     })
 
