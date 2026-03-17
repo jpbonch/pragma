@@ -549,7 +549,7 @@ export function FeedView({
 
       {!loading && !error && (
         <>
-          <SectionLabel count={remainingPlans.length}>Plans</SectionLabel>
+          <SectionLabel count={remainingPlans.length}>Planning</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {plansLoading ? (
               <div className="muted">Loading plans...</div>
@@ -620,7 +620,7 @@ export function FeedView({
             )}
           </div>
 
-          <SectionLabel count={active.length}>Working on</SectionLabel>
+          <SectionLabel count={active.length}>In progress</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <AnimatePresence mode="popLayout">
               {orderedActive.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
