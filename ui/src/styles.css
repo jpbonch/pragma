@@ -681,6 +681,10 @@ select { cursor: pointer; }
   display: flex;
   align-items: center;
 }
+.needs-you-card-wrap > .followup-chain-number-wrap,
+.active-task-row-wrap > .followup-chain-number-wrap {
+  margin-top: -3px;
+}
 .needs-you-card-wrap > .needs-you-card,
 .active-task-row-wrap > .task-row {
   flex: 1;
