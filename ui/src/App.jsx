@@ -789,6 +789,7 @@ export default function App() {
   const [selectedServiceId, setSelectedServiceId] = useState('')
   const [runtimeServiceLogsById, setRuntimeServiceLogsById] = useState(() => ({}))
   const [runtimeServiceStreamError, setRuntimeServiceStreamError] = useState('')
+  const [taskFailureNotice, setTaskFailureNotice] = useState(null)
   const [hiddenChatsByWorkspace, setHiddenChatsByWorkspace] = useState(() =>
     loadHiddenChatsByWorkspace(),
   )
@@ -832,6 +833,7 @@ export default function App() {
   const prevThinkingChatIdsRef = useRef(new Set())
   const viewingChatIdRef = useRef('')
   const runtimeServiceStreamCloseRef = useRef(null)
+  const tasksRef = useRef(tasks)
   const pendingCount = useMemo(() => getPendingCount(tasks), [tasks])
   const orchestratorRuntime = useMemo(() => {
     return agents.find((agent) => agent?.id === ORCHESTRATOR_AGENT_ID) ?? null
@@ -940,6 +942,14 @@ export default function App() {
   useEffect(() => {
     threadIdRef.current = conversation.threadId
   }, [conversation.threadId])
+
+  useEffect(() => {
+    tasksRef.current = tasks
+  }, [tasks])
+
+  useEffect(() => {
+    setTaskFailureNotice(null)
+  }, [activeWorkspaceName])
 
   useEffect(() => {
     return () => {
@@ -1129,6 +1139,17 @@ export default function App() {
               updates.threadId = threadId
             }
             return updates
+          })
+        }
+
+        if (taskId && status === 'failed') {
+          const latestTasks = Array.isArray(tasksRef.current) ? tasksRef.current : []
+          const task = latestTasks.find((item) => item?.id === taskId) || null
+          const rawTitle = typeof task?.title === 'string' ? task.title : ''
+          const normalizedTitle = rawTitle ? normalizeTaskTitle(rawTitle) : ''
+          setTaskFailureNotice({
+            taskId,
+            taskTitle: normalizedTitle || taskId,
           })
         }
 
@@ -2459,6 +2480,32 @@ export default function App() {
     }
   }
 
+  async function handleOpenTaskConversationById(taskId) {
+    if (!taskId) {
+      return
+    }
+
+    const existingTask = tasks.find((task) => task?.id === taskId)
+    if (existingTask) {
+      await handleOpenTaskConversation(existingTask)
+      return
+    }
+
+    try {
+      const refreshedTasks = await fetchTasks(300)
+      setTasks(refreshedTasks)
+      const refreshedTask = refreshedTasks.find((task) => task?.id === taskId) || null
+      if (refreshedTask) {
+        await handleOpenTaskConversation(refreshedTask)
+        return
+      }
+    } catch {
+      // Fall through to workspace error.
+    }
+
+    setWorkspaceError(`Task not found: ${taskId}.`)
+  }
+
   const VALID_REVIEW_ACTIONS = new Set([
     'approve', 'approve_and_push', 'reopen', 'mark_completed',
     'approve_chain', 'approve_chain_and_push', 'mark_chain_completed',
@@ -2706,6 +2753,27 @@ export default function App() {
               />
             ) : (
               <>
+                {!tasksLoading && !tasksError && taskFailureNotice && (
+                  <div className="workspace-error">
+                    <span>
+                      Task failed: {taskFailureNotice.taskTitle}
+                    </span>
+                    <button
+                      style={{ marginLeft: 8 }}
+                      onClick={() => {
+                        void handleOpenTaskConversationById(taskFailureNotice.taskId)
+                      }}
+                    >
+                      Open task
+                    </button>
+                    <button
+                      style={{ marginLeft: 8 }}
+                      onClick={() => setTaskFailureNotice(null)}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
                 <div className="main-topbar">
                   <h1>Tasks</h1>
                 </div>

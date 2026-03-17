@@ -967,14 +967,24 @@ SELECT j.id,
        j.completed_at,
        j.followup_task_id,
        j.predecessor_task_id,
-       (
-         SELECT ct.id
-         FROM conversation_threads ct
-         WHERE ct.task_id = j.id
-         ORDER BY ct.created_at DESC
-         LIMIT 1
-       ) AS thread_id
+       latest_thread.id AS thread_id,
+       latest_error.payload_json AS failure_payload_json
 FROM tasks j
+LEFT JOIN LATERAL (
+  SELECT ct.id
+  FROM conversation_threads ct
+  WHERE ct.task_id = j.id
+  ORDER BY ct.created_at DESC
+  LIMIT 1
+) AS latest_thread ON TRUE
+LEFT JOIN LATERAL (
+  SELECT ce.payload_json
+  FROM conversation_events ce
+  WHERE ce.thread_id = latest_thread.id
+    AND ce.event_name = 'error'
+  ORDER BY ce.created_at DESC
+  LIMIT 1
+) AS latest_error ON TRUE
 `;
 
       if (status) {
@@ -996,9 +1006,25 @@ FROM tasks j
         followup_task_id: string | null;
         predecessor_task_id: string | null;
         thread_id: string | null;
+        failure_payload_json: string | null;
       }>(query, params);
 
-      return c.json({ tasks: result.rows });
+      return c.json({
+        tasks: result.rows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          status: row.status,
+          assigned_to: row.assigned_to,
+          output_dir: row.output_dir,
+          session_id: row.session_id,
+          created_at: row.created_at,
+          completed_at: row.completed_at,
+          followup_task_id: row.followup_task_id,
+          predecessor_task_id: row.predecessor_task_id,
+          thread_id: row.thread_id,
+          failure_message: extractTaskFailureMessage(row.failure_payload_json),
+        })),
+      });
     } finally {
       await db.close();
     }
@@ -4503,6 +4529,25 @@ function safeParseJson(value: string): unknown {
   } catch {
     return null;
   }
+}
+
+function extractTaskFailureMessage(payloadJson: string | null | undefined): string | null {
+  if (typeof payloadJson !== "string" || payloadJson.trim().length === 0) {
+    return null;
+  }
+
+  const parsed = safeParseJson(payloadJson) as { message?: unknown } | null;
+  const rawMessage = typeof parsed?.message === "string" ? parsed.message.trim() : "";
+  if (!rawMessage) {
+    return null;
+  }
+
+  const message = rawMessage.replace(/\s+/g, " ");
+
+  if (message.length > 280) {
+    return `${message.slice(0, 277)}...`;
+  }
+  return message;
 }
 
 function deriveChatTitle(userMessage: string, assistantMessage: string): string {
