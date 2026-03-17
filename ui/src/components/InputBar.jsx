@@ -38,6 +38,8 @@ export function InputBar({
   hideMode = false,
   value,
   onValueChange,
+  followupTask = null,
+  onCancelFollowup,
 }) {
   const [localInput, setLocalInput] = useState('')
   const isControlled = value !== undefined
@@ -96,6 +98,12 @@ export function InputBar({
     }
     setModeRaw((current) => (current === nextMode ? current : nextMode))
   }, [preferredMode, lockedMode, isModeLocked])
+
+  useEffect(() => {
+    if (followupTask) {
+      textareaRef.current?.focus()
+    }
+  }, [followupTask])
 
   useEffect(() => {
     if (!openMenu) {
@@ -179,17 +187,33 @@ export function InputBar({
   return (
     <div className={`input-wrap ${embedded ? 'input-wrap-embedded' : ''}`}>
       <div className="input-container">
+        {followupTask && (
+          <div className="followup-context-bar">
+            <span className="followup-context-text">
+              Adding a follow-up task to <strong>{followupTask.title}</strong>
+            </span>
+            <button
+              className="followup-context-cancel"
+              onClick={() => onCancelFollowup?.()}
+              aria-label="Cancel follow-up"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           className="input-textarea"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={
-            hideMode
-              ? 'Send a message...'
-              : mode === 'plan'
-                ? 'What should we plan?'
-                : 'Kick off a task...'
+            followupTask
+              ? 'Describe the follow-up task...'
+              : hideMode
+                ? 'Send a message...'
+                : mode === 'plan'
+                  ? 'What should we plan?'
+                  : 'Kick off a task...'
           }
           rows={1}
           onInput={(e) => {
@@ -198,6 +222,11 @@ export function InputBar({
           }}
           onPaste={handlePaste}
           onKeyDown={(e) => {
+            if (e.key === 'Escape' && followupTask) {
+              e.preventDefault()
+              onCancelFollowup?.()
+              return
+            }
             if (e.key === 'Tab' && e.shiftKey && !isModeLocked) {
               e.preventDefault()
               cycleMode()

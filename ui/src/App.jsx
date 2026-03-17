@@ -740,6 +740,7 @@ function OnboardingModal({ open, canClose, onClose, onSubmit, loading, error }) 
 export default function App() {
   const [activeTab, setActiveTab] = useState('feed')
   const [inputBarText, setInputBarText] = useState('')
+  const [followupForTaskId, setFollowupForTaskId] = useState('')
 
   const [tasks, setTasks] = useState([])
   const [tasksLoading, setTasksLoading] = useState(false)
@@ -1814,6 +1815,21 @@ export default function App() {
       conversation.mode === 'execute' &&
       Boolean(conversation.threadId)
 
+    if (followupForTaskId) {
+      const parentId = followupForTaskId
+      setFollowupForTaskId('')
+      try {
+        await createFollowupTask(parentId, {
+          prompt: finalMessage,
+          reasoning_effort: reasoningEffort,
+        })
+        await loadTasks()
+      } catch (error) {
+        setWorkspaceError(errorText(error))
+      }
+      return
+    }
+
     if (mode === 'execute' && !continueExistingExecute) {
       try {
         await createExecuteTask({
@@ -2509,6 +2525,8 @@ export default function App() {
               onAddFollowup={(parentTaskId, prompt) => {
                 void handleAddFollowup(parentTaskId, prompt)
               }}
+              followupForTaskId={followupForTaskId}
+              setFollowupForTaskId={setFollowupForTaskId}
             />
             <ConversationDrawer
               open={conversation.open && (conversation.mode === 'plan' || (conversation.mode === 'chat' && Boolean(conversation.taskId)))}
@@ -2568,6 +2586,8 @@ export default function App() {
                 }}
                 value={inputBarText}
                 onValueChange={setInputBarText}
+                followupTask={followupForTaskId ? tasks.find((t) => t.id === followupForTaskId) : null}
+                onCancelFollowup={() => setFollowupForTaskId('')}
               />
             )}
           </div>

@@ -1063,6 +1063,53 @@ select { cursor: pointer; }
   font-family: inherit;
 }
 
+/* ─── Follow-up Context Bar ─────────────────────────── */
+.followup-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background: #E8F0FE;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #37352F;
+  line-height: 1.4;
+}
+
+.followup-context-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-context-text strong {
+  font-weight: 600;
+}
+
+.followup-context-cancel {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: #6F6E69;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.followup-context-cancel:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #37352F;
+}
+
 /* ─── Input Bar ─────────────────────────────────────── */
 .input-wrap {
   padding: 8px 18px 24px;

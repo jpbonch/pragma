@@ -328,16 +328,6 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
           )}
         </div>
       </div>
-      {followupForTaskId === task.id && (
-        <FollowupPopover
-          taskId={task.id}
-          onSubmit={(id, prompt) => {
-            onAddFollowup?.(id, prompt)
-            setFollowupForTaskId?.('')
-          }}
-          onCancel={() => setFollowupForTaskId?.('')}
-        />
-      )}
     </div>
   )
 }
@@ -380,16 +370,6 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
           <span className="task-time">{getTimeAgo(task.created_at)}</span>
         </div>
       </div>
-      {followupForTaskId === task.id && (
-        <FollowupPopover
-          taskId={task.id}
-          onSubmit={(id, prompt) => {
-            onAddFollowup?.(id, prompt)
-            setFollowupForTaskId?.('')
-          }}
-          onCancel={() => setFollowupForTaskId?.('')}
-        />
-      )}
     </div>
   )
 }
@@ -480,11 +460,12 @@ export function FeedView({
   onOpenTaskConversation,
   onPickTaskRecipient,
   onAddFollowup,
+  followupForTaskId = '',
+  setFollowupForTaskId,
 }) {
   const DONE_DISPLAY_LIMIT = 5
   const [pickerTaskId, setPickerTaskId] = useState('')
   const [showAllDone, setShowAllDone] = useState(false)
-  const [followupForTaskId, setFollowupForTaskId] = useState('')
 
   const recipients = useMemo(() => {
     if (!Array.isArray(recipientAgents)) {
