@@ -1908,6 +1908,25 @@ select { cursor: pointer; }
   min-width: 0;
 }
 
+.conv-input-container {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: #F7F7F5;
+  border-radius: 14px;
+  padding: 10px;
+  width: 100%;
+  min-width: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.conv-input-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .conv-prompt-send {
   width: 28px;
   height: 28px;
@@ -1964,6 +1983,10 @@ select { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-top: 8px;
+}
+
+.inline-chat-view .conv-input-container {
   margin-top: 8px;
 }
 

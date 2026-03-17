@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, X, Sparkles, User, Info, Square, ChevronRight } from 'lucide-react'
+import { ArrowUp, X, Sparkles, User, Info, Square, ChevronRight, Plus } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
@@ -108,6 +108,9 @@ export function ConversationDrawer({
   }, [])
 
   const [prompt, setPrompt] = useState('')
+  const [attachments, setAttachments] = useState([])
+  const textareaRef = useRef(null)
+  const fileInputRef = useRef(null)
   const [approveLoading, setApproveLoading] = useState(false)
   const [approveError, setApproveError] = useState('')
   const [testCommands, setTestCommands] = useState([])
@@ -228,16 +231,54 @@ export function ConversationDrawer({
     }
   }, [open, taskId, showOutputPanel])
 
+  function handleFileSelect(e) {
+    const files = Array.from(e.target.files || [])
+    for (const file of files) {
+      setAttachments((prev) => [...prev, { file, name: file.name }])
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  function handlePaste(e) {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const imageFiles = []
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length === 0) return
+    e.preventDefault()
+    for (const file of imageFiles) {
+      const name = file.name && file.name !== 'image.png'
+        ? file.name
+        : `pasted-image-${Date.now()}.${file.type.split('/')[1] || 'png'}`
+      setAttachments((prev) => [...prev, { file, name }])
+    }
+  }
+
+  function removeAttachment(index) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index))
+  }
+
   function submitPrompt() {
     if (loading) {
       return
     }
     const message = prompt.trim()
-    if (!message) {
+    if (!message && attachments.length === 0) {
       return
     }
-    onPromptSubmit?.(message)
+    onPromptSubmit?.(message, attachments.length > 0 ? [...attachments] : undefined)
     setPrompt('')
+    setAttachments([])
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
   }
 
   async function submitReviewAction(action) {
@@ -438,9 +479,10 @@ export function ConversationDrawer({
                   {loading && <div className="conv-status"><span className="conv-streaming-label">Thinking...</span></div>}
                   {error && <div className="error" style={{ padding: '4px 0' }}>Error: {error}</div>}
                 </div>
-                <div className="conv-prompt-row">
-                  <input
-                    className="conv-prompt-input"
+                <div className="conv-input-container">
+                  <textarea
+                    ref={textareaRef}
+                    className="input-textarea"
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder={
@@ -449,31 +491,74 @@ export function ConversationDrawer({
                         : 'Continue this conversation...'
                     }
                     disabled={loading || isCompletedTask}
+                    rows={1}
+                    onInput={(e) => {
+                      e.target.style.height = 'auto'
+                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+                    }}
+                    onPaste={handlePaste}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()
                         submitPrompt()
                       }
                     }}
                   />
-                  {loading ? (
-                    <button
-                      className="conv-prompt-send conv-prompt-send-stop"
-                      onClick={() => onStop?.()}
-                      aria-label="Stop"
-                    >
-                      <Square size={12} fill="#fff" strokeWidth={0} />
-                    </button>
-                  ) : (
-                    <button
-                      className="conv-prompt-send"
-                      onClick={submitPrompt}
-                      disabled={isCompletedTask || !prompt.trim()}
-                      aria-label="Send"
-                    >
-                      <ArrowUp size={15} strokeWidth={2.5} />
-                    </button>
+                  {attachments.length > 0 && (
+                    <div className="attachment-chips">
+                      {attachments.map((att, i) => (
+                        <span key={i} className="attachment-chip">
+                          <span className="attachment-chip-name">{att.name}</span>
+                          <button
+                            className="attachment-chip-remove"
+                            onClick={() => removeAttachment(i)}
+                            aria-label={`Remove ${att.name}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
                   )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelect}
+                  />
+                  <div className="conv-input-bottom-row">
+                    <button
+                      className="attach-btn"
+                      title="Attach files"
+                      aria-label="Attach files"
+                      disabled={loading || isCompletedTask}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Plus size={14} />
+                    </button>
+                    <div className="input-actions">
+                      {loading ? (
+                        <button
+                          className="send-btn send-btn-stop"
+                          onClick={() => onStop?.()}
+                          aria-label="Stop"
+                        >
+                          <Square size={14} fill="#fff" strokeWidth={0} />
+                        </button>
+                      ) : (
+                        <button
+                          className="send-btn"
+                          style={{ background: '#2383e2' }}
+                          onClick={submitPrompt}
+                          disabled={isCompletedTask || (!prompt.trim() && attachments.length === 0)}
+                          aria-label="Send"
+                        >
+                          <ArrowUp size={18} strokeWidth={2.6} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="conv-output-side">
@@ -613,38 +698,82 @@ export function ConversationDrawer({
                 </div>
               </div>
             )}
-            <div className="conv-prompt-row">
-              <input
-                className="conv-prompt-input"
+            <div className="conv-input-container">
+              <textarea
+                ref={textareaRef}
+                className="input-textarea"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={mode === 'plan' ? 'Refine this plan...' : 'Continue this conversation...'}
                 disabled={loading}
+                rows={1}
+                onInput={(e) => {
+                  e.target.style.height = 'auto'
+                  e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+                }}
+                onPaste={handlePaste}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
                     submitPrompt()
                   }
                 }}
               />
-              {loading ? (
-                <button
-                  className="conv-prompt-send conv-prompt-send-stop"
-                  onClick={() => onStop?.()}
-                  aria-label="Stop"
-                >
-                  <Square size={12} fill="#fff" strokeWidth={0} />
-                </button>
-              ) : (
-                <button
-                  className="conv-prompt-send"
-                  onClick={submitPrompt}
-                  disabled={!prompt.trim()}
-                  aria-label="Send"
-                >
-                  <ArrowUp size={15} strokeWidth={2.5} />
-                </button>
+              {attachments.length > 0 && (
+                <div className="attachment-chips">
+                  {attachments.map((att, i) => (
+                    <span key={i} className="attachment-chip">
+                      <span className="attachment-chip-name">{att.name}</span>
+                      <button
+                        className="attachment-chip-remove"
+                        onClick={() => removeAttachment(i)}
+                        aria-label={`Remove ${att.name}`}
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
               )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+              />
+              <div className="conv-input-bottom-row">
+                <button
+                  className="attach-btn"
+                  title="Attach files"
+                  aria-label="Attach files"
+                  disabled={loading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Plus size={14} />
+                </button>
+                <div className="input-actions">
+                  {loading ? (
+                    <button
+                      className="send-btn send-btn-stop"
+                      onClick={() => onStop?.()}
+                      aria-label="Stop"
+                    >
+                      <Square size={14} fill="#fff" strokeWidth={0} />
+                    </button>
+                  ) : (
+                    <button
+                      className="send-btn"
+                      style={{ background: '#2383e2' }}
+                      onClick={submitPrompt}
+                      disabled={!prompt.trim() && attachments.length === 0}
+                      aria-label="Send"
+                    >
+                      <ArrowUp size={18} strokeWidth={2.6} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         )}
