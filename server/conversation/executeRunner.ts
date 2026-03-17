@@ -698,9 +698,23 @@ WHERE id = $1
                   reasoningEffort: input.reasoningEffort,
                 },
                 options,
-              ).catch((err: unknown) => {
+              ).catch(async (err: unknown) => {
                 const msg = err instanceof Error ? err.message : String(err);
                 console.error(`Follow-up task execution failed: ${msg}`);
+                try {
+                  const errDb = await openDatabase(input.workspaceName);
+                  await errDb.query(
+                    `UPDATE tasks SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+                    [followupTaskId],
+                  );
+                  await options.onTaskStatusChanged?.({
+                    workspaceName: input.workspaceName,
+                    taskId: followupTaskId,
+                    threadId: followupThread.id,
+                    status: "failed",
+                    source: "followup_start_failed",
+                  });
+                } catch { /* best-effort */ }
               });
             }
           }
