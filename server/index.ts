@@ -3280,7 +3280,7 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
         requestedRecipientAgentId,
       });
 
-      return c.json({ turn_id: turnId, thread_id: threadId });
+      return c.json({ turn_id: turnId, thread_id: threadId, task_id: thread.task_id ?? null });
     } finally {
       await db.close();
     }

@@ -36,6 +36,7 @@ import {
   stopRuntimeService as stopRuntimeServiceApi,
   setTaskRecipient,
   setActiveWorkspace,
+  createConversationTurn,
   streamConversationTurn,
   updateAgent,
   updateContextFile,
@@ -1942,6 +1943,54 @@ export default function App() {
       return
     }
 
+    const continueExistingPlan =
+      mode === 'plan' &&
+      conversation.open &&
+      !conversation.loading &&
+      conversation.mode === 'plan' &&
+      Boolean(conversation.threadId)
+
+    if (mode === 'plan' && !continueExistingPlan) {
+      try {
+        const runtime = orchestratorRuntime ?? (await resolveOrchestratorRuntime())
+        if (!runtime) {
+          setWorkspaceError('Orchestrator runtime is not available.')
+          return
+        }
+        const result = await createConversationTurn({
+          message: finalMessage,
+          mode: 'plan',
+          harness: runtime.harness,
+          model_label: runtime.model_label,
+          reasoning_effort: reasoningEffort,
+          recipient_agent_id: recipientAgentId || undefined,
+        })
+        const taskId = result?.task_id
+        if (taskId) {
+          const title = finalMessage.length > 100 ? `${finalMessage.slice(0, 97)}...` : finalMessage
+          setTasks((prev) => [{
+            id: taskId,
+            title,
+            status: 'planning',
+            assigned_to: null,
+            output_dir: null,
+            session_id: null,
+            created_at: new Date().toISOString(),
+            completed_at: null,
+            followup_task_id: null,
+            predecessor_task_id: null,
+            thread_id: result?.thread_id || null,
+          }, ...prev])
+        }
+        setActiveTab('feed')
+        scheduleTasksRefresh(500)
+        void loadPlans()
+      } catch (error) {
+        setWorkspaceError(errorText(error))
+      }
+      return
+    }
+
     const conversationStatus = String(conversation.taskStatus || '').toLowerCase()
     if (
       (mode === 'chat' || mode === 'plan') &&
@@ -1988,7 +2037,7 @@ export default function App() {
       conversation.mode === 'chat' &&
       Boolean(conversation.threadId)
 
-    const forceContinueExisting = forceContinueOpenChat || continueExistingExecute
+    const forceContinueExisting = forceContinueOpenChat || continueExistingExecute || continueExistingPlan
 
     if (!forceContinueExisting && !orchestratorRuntime) {
       const refreshedRuntime = await resolveOrchestratorRuntime()
