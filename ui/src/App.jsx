@@ -2429,11 +2429,10 @@ export default function App() {
     })
   }
 
-  function handleInlineChatPromptSubmit(message) {
+  function handleInlineChatSubmit(payload) {
     void handleInputSubmit({
-      message,
+      ...payload,
       mode: 'chat',
-      reasoningEffort: conversation.reasoningEffort,
     })
   }
 
@@ -2608,8 +2607,9 @@ export default function App() {
               entries={conversation.entries}
               loading={conversation.loading}
               error={conversation.error}
-              onPromptSubmit={handleInlineChatPromptSubmit}
+              onSubmit={handleInlineChatSubmit}
               onStop={handleStopStream}
+              onOpenOrchestratorConfig={handleOpenOrchestratorConfig}
               disabled={
                 workspacesLoading ||
                 agentsLoading ||
