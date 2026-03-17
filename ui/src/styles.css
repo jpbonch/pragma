@@ -1277,8 +1277,11 @@ select { cursor: pointer; }
   font-family: inherit;
   resize: none;
   overflow-y: hidden;
-  line-height: 1.5;
-  padding: 6px 2px 12px 6px;
+  line-height: 1.55;
+  padding: 6px 4px 10px 4px;
+}
+.input-textarea::placeholder {
+  color: #C4C3BF;
 }
 
 .input-bottom-row {
@@ -1297,25 +1300,27 @@ select { cursor: pointer; }
 .attach-btn {
   border: none;
   background: transparent;
-  color: #8d8b87;
-  border-radius: 6px;
-  width: 24px;
-  height: 24px;
+  color: #B0AFA8;
+  border-radius: 7px;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .attach-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(0, 0, 0, 0.04);
+  color: #6f6e69;
 }
 
 .attachment-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 6px 6px;
+  padding: 2px 4px 8px;
 }
 
 .attachment-chip {
@@ -1323,11 +1328,16 @@ select { cursor: pointer; }
   align-items: center;
   gap: 4px;
   background: #EDECE9;
-  border-radius: 6px;
-  padding: 3px 6px 3px 8px;
+  border-radius: 7px;
+  padding: 4px 6px 4px 9px;
   font-size: 12px;
+  font-weight: 500;
   color: #37352F;
   max-width: 200px;
+  transition: background 0.15s ease;
+}
+.attachment-chip:hover {
+  background: #e5e4e0;
 }
 
 .attachment-chip-name {
@@ -1339,16 +1349,17 @@ select { cursor: pointer; }
 .attachment-chip-remove {
   border: none;
   background: transparent;
-  color: #8d8b87;
+  color: #9B9A97;
   cursor: pointer;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: 4px;
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .attachment-chip-remove:hover {
@@ -1398,9 +1409,9 @@ select { cursor: pointer; }
 }
 
 .send-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   border: none;
   color: #fff;
   cursor: pointer;
@@ -1409,15 +1420,23 @@ select { cursor: pointer; }
   align-items: center;
   justify-content: center;
   padding: 0;
+  transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+}
+.send-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+.send-btn:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .send-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.4;
   cursor: default;
 }
 
 .send-btn-stop {
   background: #e03e3e !important;
+  border-radius: 10px;
 }
 .send-btn-stop:hover {
   background: #c73131 !important;
@@ -1430,28 +1449,30 @@ select { cursor: pointer; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: convPageIn 0.15s ease-out;
+  animation: convPageIn 0.2s ease-out;
+  background: #fff;
 }
 
 @keyframes convPageIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .conv-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 22px;
+  padding: 14px 24px;
   flex-shrink: 0;
   position: relative;
   z-index: 1;
+  border-bottom: 1px solid #f0efec;
 }
 
 .conv-header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   overflow: hidden;
 }
@@ -1464,50 +1485,58 @@ select { cursor: pointer; }
 }
 
 .conv-mode-indicator {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #B0AFA8;
+  background: #C4C3BF;
+  flex-shrink: 0;
+  position: relative;
 }
 .conv-mode-indicator.chat { background: #4B83D6; }
 .conv-mode-indicator.plan { background: #E09B3D; }
+.conv-mode-indicator.execute { background: #4B83D6; }
 
 .conv-header-title {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   color: #37352f;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  letter-spacing: -0.01em;
 }
 
 .conv-header-agent {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 2px 6px 2px 4px;
+  padding: 3px 8px 3px 4px;
   border-radius: 8px;
   background: #fafaf8;
-  border: 1px solid #f1f0ed;
+  border: 1px solid #f0efec;
+  transition: background 0.15s ease;
+}
+.conv-header-agent:hover {
+  background: #f3f2ef;
 }
 
 .conv-header-agent-avatar {
   width: 22px;
   height: 22px;
-  border-radius: 7px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  background: #f3f2ef;
+  font-size: 13px;
+  background: #f0efec;
   flex-shrink: 0;
 }
 
 .conv-header-agent-name {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: #6f6e69;
   max-width: 180px;
   white-space: nowrap;
@@ -1516,8 +1545,13 @@ select { cursor: pointer; }
 }
 
 @keyframes streamPulse {
-  0%, 100% { opacity: 0.3; }
+  0%, 100% { opacity: 0.25; }
   50% { opacity: 1; }
+}
+
+@keyframes streamDotBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
 }
 
 .conv-streaming-dot {
@@ -1525,41 +1559,69 @@ select { cursor: pointer; }
   height: 6px;
   border-radius: 50%;
   background: #4B83D6;
-  animation: streamPulse 1.2s ease-in-out infinite;
+  animation: streamPulse 1.2s ease-in-out infinite, streamDotBounce 1.2s ease-in-out infinite;
+  flex-shrink: 0;
 }
 
 .conv-streaming-label {
-  color: #B0AFA8;
+  color: #9B9A97;
   font-size: 12px;
   font-weight: 500;
   animation: streamPulse 1.5s ease-in-out infinite;
 }
 
+/* Thinking dots indicator */
+.conv-thinking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 4px 8px 36px;
+}
+
+@keyframes thinkingBounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.3; }
+  40% { transform: translateY(-4px); opacity: 1; }
+}
+
+.conv-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #B0AFA8;
+  animation: thinkingBounce 1.4s ease-in-out infinite;
+}
+.conv-thinking-dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.conv-thinking-dot:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
 .conv-back-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   border: none;
   background: transparent;
-  color: #6F6E69;
+  color: #9B9A97;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  padding: 4px 6px 4px 2px;
-  border-radius: 6px;
-  transition: background 0.1s, color 0.1s;
+  padding: 5px 8px 5px 4px;
+  border-radius: 7px;
+  transition: background 0.15s ease, color 0.15s ease;
   flex-shrink: 0;
 }
 .conv-back-btn:hover {
-  background: #f3f2ef;
+  background: #f5f4f2;
   color: #37352f;
 }
 
 .conv-header-separator {
   width: 1px;
   height: 16px;
-  background: #e3e2de;
+  background: #eeede9;
   flex-shrink: 0;
 }
 
@@ -1567,17 +1629,17 @@ select { cursor: pointer; }
 .conv-body {
   flex: 1;
   min-height: 0;
-  padding: 0 22px 12px;
+  padding: 0 24px 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .conv-body-split {
-  padding: 0 22px 12px;
+  padding: 0 24px 12px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 46%);
-  gap: 12px;
+  gap: 16px;
 }
 
 .conv-chat-side {
@@ -1585,7 +1647,7 @@ select { cursor: pointer; }
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .conv-chat-side .conv-messages {
@@ -1595,7 +1657,7 @@ select { cursor: pointer; }
 
 .conv-output-side {
   border-left: 1px solid #f0efec;
-  padding-left: 12px;
+  padding-left: 16px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1611,14 +1673,20 @@ select { cursor: pointer; }
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-right: 4px;
+  gap: 4px;
+  padding: 8px 4px 0;
 }
 
 .conv-msg {
   display: flex;
   gap: 10px;
   padding: 10px 4px;
+  animation: msgFadeIn 0.2s ease-out;
+}
+
+@keyframes msgFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .conv-msg-user {
@@ -1626,28 +1694,29 @@ select { cursor: pointer; }
 }
 
 .conv-msg-bubble {
-  max-width: 75%;
-  background: #2D2D2D;
+  max-width: 78%;
+  background: #37352F;
   color: #fff;
   border-radius: 18px 18px 4px 18px;
-  padding: 8px 14px;
+  padding: 10px 16px;
   overflow: hidden;
   word-break: break-word;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .conv-msg-avatar {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-top: 1px;
+  margin-top: 2px;
 }
 
 .conv-msg-avatar-emoji {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
 }
 
@@ -1656,7 +1725,7 @@ select { cursor: pointer; }
 }
 
 .conv-msg-assistant .conv-msg-avatar {
-  background: #EEF3FB;
+  background: #EDF2FB;
   color: #4B83D6;
 }
 
@@ -1668,23 +1737,25 @@ select { cursor: pointer; }
 
 .conv-msg-role {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: #B0AFA8;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .conv-msg-text {
   white-space: pre-wrap;
-  font-size: 13px;
+  font-size: 13.5px;
   color: #37352f;
-  line-height: 1.5;
+  line-height: 1.6;
   word-break: break-word;
 }
 
 .conv-msg-markdown {
-  font-size: 13px;
+  font-size: 13.5px;
   color: #37352f;
-  line-height: 1.5;
+  line-height: 1.6;
   overflow-x: hidden;
   word-break: break-word;
 }
@@ -1702,7 +1773,7 @@ select { cursor: pointer; }
 .conv-msg-markdown ol,
 .conv-msg-markdown pre,
 .conv-msg-markdown blockquote {
-  margin: 0.45em 0;
+  margin: 0.5em 0;
 }
 
 .conv-msg-markdown ul,
@@ -1710,55 +1781,77 @@ select { cursor: pointer; }
   padding-left: 1.25rem;
 }
 
+.conv-msg-markdown li {
+  margin: 0.15em 0;
+}
+
 .conv-msg-markdown code {
   font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
-  background: #f4f2ee;
-  border-radius: 4px;
-  padding: 0.1em 0.35em;
+  background: #f0eeea;
+  border-radius: 5px;
+  padding: 0.15em 0.4em;
+  color: #37352f;
 }
 
 .conv-msg-markdown pre {
   background: #f7f6f3;
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 10px;
+  padding: 12px 14px;
   overflow-x: auto;
+  border: 1px solid #eeedea;
 }
 
 .conv-msg-markdown pre code {
   font-size: 12px;
   background: transparent;
   padding: 0;
+  border-radius: 0;
 }
 
 .conv-msg-markdown a {
-  color: #1f6fbe;
+  color: #2383e2;
+  text-decoration: none;
+}
+.conv-msg-markdown a:hover {
+  text-decoration: underline;
+}
+
+.conv-msg-markdown blockquote {
+  border-left: 3px solid #e0dfdc;
+  padding-left: 12px;
+  color: #6f6e69;
 }
 
 .conv-msg-markdown table {
   border-collapse: collapse;
   width: 100%;
   max-width: 100%;
-  margin: 0.45em 0;
+  margin: 0.5em 0;
   font-size: 12px;
   display: block;
   overflow-x: auto;
+  border-radius: 8px;
 }
 
 .conv-msg-markdown th,
 .conv-msg-markdown td {
-  border: 1px solid #e3e0d8;
-  padding: 5px 8px;
+  border: 1px solid #eeedea;
+  padding: 6px 10px;
   text-align: left;
 }
 
 .conv-msg-markdown th {
   background: #f7f6f3;
   font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6f6e69;
 }
 
 .conv-msg-markdown tr:nth-child(even) {
-  background: #fafaf8;
+  background: #fcfcfb;
 }
 
 /* Tool events - inline, compact */
@@ -1766,22 +1859,24 @@ select { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 4px 4px 34px;
+  padding: 3px 4px 3px 36px;
   font-size: 12px;
-  color: #B0AFA8;
+  color: #C4C3BF;
   min-width: 0;
   overflow: hidden;
+  transition: color 0.15s ease;
 }
 
 .conv-tool-label {
   font-weight: 600;
-  color: #9B9A97;
+  color: #B0AFA8;
+  flex-shrink: 0;
 }
 
 .conv-tool-summary {
   font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
-  color: #B0AFA8;
+  color: #C4C3BF;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1793,15 +1888,17 @@ select { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 4px 4px 34px;
+  padding: 4px 4px 4px 36px;
   font-size: 12px;
   color: #B0AFA8;
   cursor: pointer;
   user-select: none;
+  border-radius: 6px;
+  transition: color 0.15s ease;
 }
 
 .conv-tool-group:hover {
-  color: #D4D3CF;
+  color: #9B9A97;
 }
 
 .conv-tool-group-summary {
@@ -1811,8 +1908,11 @@ select { cursor: pointer; }
 
 .conv-tool-group-chevron {
   opacity: 0.4;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.15s ease;
   flex-shrink: 0;
+}
+.conv-tool-group:hover .conv-tool-group-chevron {
+  opacity: 0.6;
 }
 
 .conv-tool-group-chevron.expanded {
@@ -1822,8 +1922,8 @@ select { cursor: pointer; }
 /* Expanded tool list within a group */
 .conv-tool-group-items {
   padding-left: 40px;
-  border-left: 2px solid rgba(176, 175, 168, 0.15);
-  margin-left: 39px;
+  border-left: 2px solid rgba(176, 175, 168, 0.12);
+  margin-left: 41px;
 }
 
 .conv-tool-group-items .conv-tool {
@@ -1834,8 +1934,8 @@ select { cursor: pointer; }
 .conv-status {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 4px 4px 34px;
+  gap: 7px;
+  padding: 6px 4px 6px 36px;
   font-size: 12px;
   color: #B0AFA8;
 }
@@ -1847,6 +1947,7 @@ select { cursor: pointer; }
   border: 1px solid #E8E7E4;
   border-radius: 10px;
   background: #FAFAF9;
+  animation: msgFadeIn 0.2s ease-out;
 }
 
 .conv-question-text {
@@ -1917,11 +2018,12 @@ select { cursor: pointer; }
 
 /* Footer */
 .conv-footer {
-  padding: 10px 22px 14px;
+  padding: 12px 24px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   flex-shrink: 0;
+  border-top: 1px solid #f0efec;
 }
 
 .conv-footer-row {
@@ -1948,40 +2050,44 @@ select { cursor: pointer; }
 }
 
 .conv-test-command-btn {
-  border: 1px solid #d9d8d2;
-  background: #f7f7f5;
+  border: 1px solid #e0dfdc;
+  background: #fff;
   color: #37352f;
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 7px 12px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .conv-test-command-btn:hover {
-  background: #efeee9;
+  background: #f7f7f5;
+  border-color: #d4d3cf;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .conv-test-command-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: default;
 }
 
 .conv-test-result {
   font-size: 12px;
-  padding: 4px 6px;
-  border-radius: 7px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 6px;
 }
 
 .conv-test-result.ok {
   color: #1c7a5c;
-  background: #e9f7f1;
+  background: #ecf8f2;
 }
 
 .conv-test-result.fail {
   color: #a83b34;
-  background: #fdeeee;
+  background: #fdf0f0;
 }
 
 .conv-recipient-picker {
@@ -1993,21 +2099,28 @@ select { cursor: pointer; }
 
 .conv-recipient-label {
   font-size: 11px;
-  font-weight: 700;
-  color: #B0AFA8;
+  font-weight: 600;
+  color: #9B9A97;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .conv-recipient-select {
-  height: 30px;
-  border: 1.5px solid #ECEBE8;
+  height: 32px;
+  border: 1px solid #e0dfdc;
   border-radius: 8px;
-  background: #FAFAF8;
+  background: #fff;
   color: #37352f;
-  padding: 0 8px;
+  padding: 0 10px;
   font-size: 12px;
   font-family: inherit;
   min-width: 160px;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.conv-recipient-select:focus {
+  border-color: #d4d3cf;
+  box-shadow: 0 0 0 3px rgba(35, 131, 226, 0.06);
 }
 
 .conv-execute-btn {
@@ -2015,39 +2128,48 @@ select { cursor: pointer; }
   background: #37352F;
   color: #fff;
   border-radius: 9px;
-  padding: 8px 16px;
+  padding: 8px 18px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.12s;
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 .conv-execute-btn:hover {
   background: #1a1917;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+  transform: translateY(-0.5px);
+}
+.conv-execute-btn:active {
+  transform: translateY(0);
 }
 .conv-execute-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
+  transform: none;
+  box-shadow: none;
 }
 
 .conv-delete-plan-btn {
-  border: 1px solid #E03E3E;
+  border: 1px solid #e8d5d5;
   background: transparent;
-  color: #E03E3E;
+  color: #c4443a;
   border-radius: 9px;
   padding: 8px 16px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .conv-delete-plan-btn:hover {
-  background: #E03E3E;
-  color: #fff;
+  background: #fdf0f0;
+  border-color: #e0a8a5;
+  color: #b83830;
 }
 .conv-delete-plan-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -2058,17 +2180,25 @@ select { cursor: pointer; }
   border-radius: 9px;
   padding: 8px 18px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.12s;
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 3px rgba(47, 166, 126, 0.2);
 }
 .conv-approve-btn:hover {
   background: #268f6c;
+  box-shadow: 0 2px 6px rgba(47, 166, 126, 0.25);
+  transform: translateY(-0.5px);
+}
+.conv-approve-btn:active {
+  transform: translateY(0);
 }
 .conv-approve-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
+  transform: none;
+  box-shadow: none;
 }
 
 .conv-reopen-btn {
@@ -2078,36 +2208,45 @@ select { cursor: pointer; }
   border-radius: 9px;
   padding: 8px 18px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.12s;
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.2);
 }
 .conv-reopen-btn:hover {
   background: #b85f05;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.25);
+  transform: translateY(-0.5px);
+}
+.conv-reopen-btn:active {
+  transform: translateY(0);
 }
 .conv-reopen-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
+  transform: none;
+  box-shadow: none;
 }
 
 .conv-delete-btn {
-  border: none;
-  background: #EB5757;
-  color: #fff;
+  border: 1px solid transparent;
+  background: none;
+  color: #c4443a;
   padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: 8px;
+  font-size: 12px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
   font-family: inherit;
-  transition: background 0.12s;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .conv-delete-btn:hover {
-  background: #d94444;
+  background: #fdf0f0;
+  color: #b83830;
 }
 .conv-delete-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -2116,29 +2255,31 @@ select { cursor: pointer; }
   background: none;
   color: #9B9A97;
   padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: 8px;
+  font-size: 12px;
   cursor: pointer;
   font-weight: 500;
   font-family: inherit;
-  transition: color 0.12s, border-color 0.12s;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 .conv-delete-cancel-btn:hover {
   color: #37352F;
-  border-color: #C4C3BF;
+  border-color: #d4d3cf;
+  background: #fafaf8;
 }
 .conv-delete-cancel-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
 .conv-prompt-row {
-  background: #F7F7F5;
-  border-radius: 10px;
-  padding: 6px 8px;
+  background: #F8F8F6;
+  border-radius: 12px;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
   gap: 8px;
+  border: 1px solid #eeedea;
 }
 
 .conv-prompt-input {
@@ -2156,12 +2297,18 @@ select { cursor: pointer; }
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  background: #F7F7F5;
-  border-radius: 14px;
-  padding: 10px;
+  background: #F8F8F6;
+  border-radius: 16px;
+  padding: 10px 12px;
   width: 100%;
   min-width: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  border: 1px solid #eeedea;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04), 0 0 0 0 transparent;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.conv-input-container:focus-within {
+  border-color: #d4d3cf;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 3px rgba(35, 131, 226, 0.06);
 }
 
 .conv-input-bottom-row {
@@ -2169,6 +2316,7 @@ select { cursor: pointer; }
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding-top: 2px;
 }
 
 .conv-prompt-send {
@@ -2208,7 +2356,7 @@ select { cursor: pointer; }
   min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 0 22px 0;
+  padding: 0 24px 0;
   overflow: hidden;
 }
 
@@ -2219,22 +2367,22 @@ select { cursor: pointer; }
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-right: 4px;
+  gap: 4px;
+  padding: 8px 4px 0;
 }
 
 .inline-chat-input-row {
-  background: #F7F7F5;
-  border-radius: 10px;
+  background: #F8F8F6;
+  border-radius: 12px;
   padding: 6px 8px;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .inline-chat-view .conv-input-container {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 /* Legacy conversation classes kept for OutputPanel compatibility */

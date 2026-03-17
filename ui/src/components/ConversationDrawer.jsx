@@ -500,7 +500,7 @@ export function ConversationDrawer({
                 <div className="conv-messages" ref={bodyRef} onScroll={handleMessagesScroll}>
                   {entries.length === 0 && <div className="muted" style={{ padding: '8px 0' }}>No messages yet.</div>}
                   {entries.map(renderEntry)}
-                  {loading && <div className="conv-status"><span className="conv-streaming-label">Thinking...</span></div>}
+                  {loading && <div className="conv-thinking-indicator"><span className="conv-thinking-dot" /><span className="conv-thinking-dot" /><span className="conv-thinking-dot" /></div>}
                   {error && <div className="error" style={{ padding: '4px 0' }}>Error: {error}</div>}
                 </div>
                 <div className={`conv-input-container${activeQuestionOptions ? ' conv-input-has-options' : ''}`}>
@@ -627,7 +627,7 @@ export function ConversationDrawer({
             <div className="conv-messages" ref={bodyRef} onScroll={handleMessagesScroll}>
               {entries.length === 0 && <div className="muted" style={{ padding: '8px 0' }}>No messages yet.</div>}
               {entries.map(renderEntry)}
-              {loading && <div className="conv-status"><span className="conv-streaming-label">Thinking...</span></div>}
+              {loading && <div className="conv-thinking-indicator"><span className="conv-thinking-dot" /><span className="conv-thinking-dot" /><span className="conv-thinking-dot" /></div>}
               {error && <div className="error" style={{ padding: '4px 0' }}>Error: {error}</div>}
             </div>
           )}

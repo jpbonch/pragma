@@ -129,8 +129,10 @@ export function InlineChatView({
         )}
         {entries.map(renderEntry)}
         {loading && (
-          <div className="conv-status">
-            <span className="conv-streaming-label">Thinking...</span>
+          <div className="conv-thinking-indicator">
+            <span className="conv-thinking-dot" />
+            <span className="conv-thinking-dot" />
+            <span className="conv-thinking-dot" />
           </div>
         )}
         {error && (
