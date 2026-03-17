@@ -490,6 +490,17 @@ ORDER BY seq ASC
   return result.rows;
 }
 
+export async function getMaxEventSeq(
+  db: PGlite,
+  threadId: string,
+): Promise<number> {
+  const result = await db.query<{ max_seq: number | null }>(
+    `SELECT MAX(seq) AS max_seq FROM conversation_events WHERE thread_id = $1`,
+    [threadId],
+  );
+  return result.rows[0]?.max_seq ?? 0;
+}
+
 export async function setThreadTaskId(db: PGlite, threadId: string, taskId: string): Promise<void> {
   await db.query(
     `

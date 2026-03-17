@@ -53,6 +53,7 @@ import {
   getThreadById,
   getThreadWithDetails,
   getEventsSince,
+  getMaxEventSeq,
   insertEvent,
   insertMessage,
   listChatThreads,
@@ -2986,6 +2987,10 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
         content: message,
       });
 
+      // Capture the current max event seq BEFORE the turn starts so we only
+      // stream events produced by this turn, not events from prior turns.
+      const seqBeforeTurn = await getMaxEventSeq(db, threadId);
+
       // Kick off the turn in the background
       turnRunner.execute({
         workspaceName,
@@ -3004,7 +3009,7 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
 
       // Stream events from DB to the client until the turn completes or fails
       return streamSSE(c, async (stream) => {
-        let lastSeq = 0;
+        let lastSeq = seqBeforeTurn;
         let closed = false;
 
         const writeEvent = async (
