@@ -1829,7 +1829,7 @@ export default function App() {
 
     const conversationStatus = String(conversation.taskStatus || '').toLowerCase()
     if (
-      mode === 'chat' &&
+      (mode === 'chat' || mode === 'plan') &&
       conversation.open &&
       conversation.taskId &&
       isWaitingForHumanResponse(conversationStatus)

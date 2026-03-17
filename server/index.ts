@@ -2356,6 +2356,18 @@ WHERE id = $1
       followUpMessage: string;
     } | null = null;
 
+    let planContinuation: {
+      threadId: string;
+      turnId: string;
+      userMessageId: string;
+      message: string;
+      harness: HarnessId;
+      modelLabel: string;
+      modelId: string;
+      reasoningEffort: ReasoningEffort;
+      requestedRecipientAgentId?: string | null;
+    } | null = null;
+
     try {
       await ensureConversationSchema(db);
       const taskResult = await db.query<{
@@ -2392,8 +2404,13 @@ LIMIT 1
         throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
       }
 
-      // Plan threads: transition back to planning — frontend will start a new streaming turn
+      // Plan threads: transition back to planning and start a continuation turn
       if (thread.mode === "plan") {
+        const latestPlanTurn = await getLatestPlanTurn(db, thread.id);
+
+        const continuationTurnId = `turn_${randomUUID().slice(0, 12)}`;
+        const continuationMsgId = `msg_${randomUUID().slice(0, 12)}`;
+
         await insertMessage(db, {
           id: `msg_${randomUUID().slice(0, 12)}`,
           threadId: thread.id,
@@ -2413,11 +2430,42 @@ LIMIT 1
           },
         });
 
+        const reasoningEffort = latestPlanTurn?.reasoning_effort ?? "high";
+
+        await createTurn(db, {
+          id: continuationTurnId,
+          threadId: thread.id,
+          mode: "plan",
+          userMessage: body.message,
+          reasoningEffort,
+          requestedRecipientAgentId: latestPlanTurn?.requested_recipient_agent_id ?? null,
+        });
+
+        await insertMessage(db, {
+          id: continuationMsgId,
+          threadId: thread.id,
+          turnId: continuationTurnId,
+          role: "user",
+          content: body.message,
+        });
+
         await db.query(
           `UPDATE tasks SET status = 'planning' WHERE id = $1`,
           [taskId],
         );
         emitTaskStatus(workspaceName, taskId, "planning", "plan_question_responded");
+
+        planContinuation = {
+          threadId: thread.id,
+          turnId: continuationTurnId,
+          userMessageId: continuationMsgId,
+          message: body.message,
+          harness: thread.harness,
+          modelLabel: thread.model_label,
+          modelId: thread.model_id,
+          reasoningEffort,
+          requestedRecipientAgentId: latestPlanTurn?.requested_recipient_agent_id ?? null,
+        };
       } else {
         // Execute threads: requeue via executeRunner
         if (!task.assigned_to) {
@@ -2495,6 +2543,23 @@ WHERE id = $1
         reasoningEffort: requeue.reasoningEffort,
         resumeWorkerSessionId: requeue.resumeWorkerSessionId,
         followUpMessage: requeue.followUpMessage,
+      });
+    }
+
+    if (planContinuation) {
+      turnRunner.execute({
+        workspaceName,
+        threadId: planContinuation.threadId,
+        turnId: planContinuation.turnId,
+        userMessageId: planContinuation.userMessageId,
+        isNewThread: false,
+        message: planContinuation.message,
+        mode: "plan",
+        harness: planContinuation.harness,
+        modelLabel: planContinuation.modelLabel,
+        modelId: planContinuation.modelId,
+        reasoningEffort: planContinuation.reasoningEffort,
+        requestedRecipientAgentId: planContinuation.requestedRecipientAgentId,
       });
     }
 
