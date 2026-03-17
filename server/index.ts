@@ -3060,6 +3060,26 @@ WHERE id = $1
         throw new PragmaError("INVALID_OPERATION", 400, "Only plan threads can be deleted.");
       }
       await closeThread(db, threadId);
+
+      // If the thread is associated with a task, cancel the task too
+      if (thread.task_id) {
+        const taskResult = await db.query<{ id: string; status: string }>(
+          `SELECT id, status FROM tasks WHERE id = $1 LIMIT 1`,
+          [thread.task_id],
+        );
+        const task = taskResult.rows[0];
+        if (task && task.status !== "cancelled" && task.status !== "completed" && task.status !== "failed") {
+          await db.query(
+            `UPDATE tasks SET status = 'cancelled', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [thread.task_id],
+          );
+          emitTaskStatus(workspaceName, thread.task_id, "cancelled", "plan_deleted");
+
+          const workspacePaths = getWorkspacePaths(workspaceName);
+          await deleteTaskWorktree({ workspacePaths, taskId: thread.task_id });
+        }
+      }
+
       return c.json({ ok: true });
     } finally {
       await db.close();

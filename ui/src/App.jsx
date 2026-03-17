@@ -2093,10 +2093,14 @@ export default function App() {
 
     try {
       const planThreadId = conversation.threadId
+      const taskId = conversation.taskId
       await deletePlanThread(planThreadId)
       setSidebarPlans((prev) => prev.filter((plan) => plan.id !== planThreadId))
       closeConversationDrawer()
       await loadPlans()
+      if (taskId) {
+        await loadTasks()
+      }
     } catch (error) {
       setConversation((prev) => ({
         ...prev,
