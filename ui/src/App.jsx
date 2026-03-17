@@ -2428,6 +2428,10 @@ export default function App() {
         [activeWorkspaceName]: [...existing, threadId],
       }
     })
+
+    if (activeTab === 'active-chat' && conversation.threadId === threadId) {
+      setActiveTab('feed')
+    }
   }
 
   function handleDrawerPromptSubmit(message) {
