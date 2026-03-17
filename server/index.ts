@@ -504,8 +504,6 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     listPlanWorkerCandidates,
     isDirectoryEmpty,
     getStoredPlanRecipientForTurn,
-    deriveChatTitle,
-    truncateChatText,
     buildConversationAgentEnv,
     emitTaskStatus,
   });
@@ -3274,6 +3272,30 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
         role: "user",
         content: message,
       });
+
+      // For chat mode: generate a title immediately from the user message,
+      // before the assistant responds, so the UI shows a title right away.
+      if (body.mode === "chat") {
+        const hasTitle = thread.chat_title && thread.chat_title !== "";
+        if (!hasTitle) {
+          const placeholder = deriveChatTitle(message, "");
+          await updateChatThreadMetadata(db, {
+            threadId,
+            title: placeholder,
+            lastMessageAt: new Date().toISOString(),
+          });
+
+          // Fire-and-forget: replace placeholder with AI-generated title
+          generateTitle(db, message, "").then((aiTitle) => {
+            updateChatThreadMetadata(db, {
+              threadId,
+              title: aiTitle,
+              lastMessageAt: new Date().toISOString(),
+              force: true,
+            }).catch(() => {});
+          }).catch(() => {});
+        }
+      }
 
       // Capture the current max event seq BEFORE the turn starts so we only
       // stream events produced by this turn, not events from prior turns.

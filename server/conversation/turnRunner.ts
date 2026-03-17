@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { getConversationAdapter } from "./adapters";
 import { buildPrompt } from "./prompts";
-import { generateTitle } from "./titleGenerator";
 import {
   completeTurn,
   ensureConversationSchema,
@@ -54,8 +53,6 @@ type TurnRunnerCallbacks = {
     db: Awaited<ReturnType<typeof openDatabase>>,
     turnId: string,
   ) => Promise<string | null>;
-  deriveChatTitle: (userMessage: string, assistantMessage: string) => string;
-  truncateChatText: (value: string, maxLength: number) => string;
   buildConversationAgentEnv: (input: {
     apiUrl: string;
     pragmaCliCommand: string;
@@ -297,34 +294,12 @@ async function runTurn(
     }
 
     if (input.mode === "chat") {
-      const existing = await db.query<{ chat_title: string | null }>(
-        `SELECT chat_title FROM conversation_threads WHERE id = $1 LIMIT 1`,
-        [input.threadId],
-      );
-      const hasTitle = existing.rows[0]?.chat_title && existing.rows[0].chat_title !== "";
-
-      if (!hasTitle) {
-        const placeholder = callbacks.deriveChatTitle(input.message, finalAssistantText);
-        await updateChatThreadMetadata(db, {
-          threadId: input.threadId,
-          title: placeholder,
-          lastMessageAt: new Date().toISOString(),
-        });
-
-        generateTitle(db, input.message, finalAssistantText).then((aiTitle) => {
-          updateChatThreadMetadata(db, {
-            threadId: input.threadId,
-            title: aiTitle,
-            lastMessageAt: new Date().toISOString(),
-            force: true,
-          }).catch(() => {});
-        }).catch(() => {});
-      } else {
-        await updateChatThreadMetadata(db, {
-          threadId: input.threadId,
-          lastMessageAt: new Date().toISOString(),
-        });
-      }
+      // Title generation is handled upstream (before the turn starts) so only
+      // update the lastMessageAt timestamp here.
+      await updateChatThreadMetadata(db, {
+        threadId: input.threadId,
+        lastMessageAt: new Date().toISOString(),
+      });
     }
 
     await updateThreadSession(db, {
