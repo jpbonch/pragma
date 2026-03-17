@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, X, Sparkles, User, Info, Square, ChevronRight, Plus } from 'lucide-react'
+import { ArrowUp, ArrowLeft, X, Sparkles, User, Info, Square, ChevronRight, Plus } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
@@ -444,29 +444,28 @@ export function ConversationDrawer({
   }
 
   return (
-    <div className="conversation-drawer-backdrop">
-      <div className="conv-drawer">
-        {/* Header */}
-        <div className="conv-header">
-          <div className="conv-header-left">
-            <div className={`conv-mode-indicator ${mode}`} />
-            <span className="conv-header-title">{taskTitle || headerStatusLabel}</span>
-            {loading && <span className="conv-streaming-dot" />}
-          </div>
-          <div className="conv-header-right">
-            {displayHeaderAgentName && (
-              <div className="conv-header-agent" title={displayHeaderAgentName}>
-                <span className="conv-header-agent-avatar">{displayHeaderAgentEmoji}</span>
-                <span className="conv-header-agent-name">{displayHeaderAgentName}</span>
-              </div>
-            )}
-            {(mode === 'chat' || mode === 'plan') && (
-              <button className="conv-close" onClick={onClose} aria-label="Close">
-                <X size={15} strokeWidth={2} />
-              </button>
-            )}
-          </div>
+    <div className="conv-page">
+      {/* Header */}
+      <div className="conv-header">
+        <div className="conv-header-left">
+          <button className="conv-back-btn" onClick={onClose} aria-label="Back to tasks">
+            <ArrowLeft size={16} strokeWidth={2} />
+            <span>Tasks</span>
+          </button>
+          <div className="conv-header-separator" />
+          <div className={`conv-mode-indicator ${mode}`} />
+          <span className="conv-header-title">{taskTitle || headerStatusLabel}</span>
+          {loading && <span className="conv-streaming-dot" />}
         </div>
+        <div className="conv-header-right">
+          {displayHeaderAgentName && (
+            <div className="conv-header-agent" title={displayHeaderAgentName}>
+              <span className="conv-header-agent-avatar">{displayHeaderAgentEmoji}</span>
+              <span className="conv-header-agent-name">{displayHeaderAgentName}</span>
+            </div>
+          )}
+        </div>
+      </div>
 
         {/* Body */}
         <div className={`conv-body ${showOutputPanel ? 'conv-body-split' : ''}`}>
@@ -777,7 +776,6 @@ export function ConversationDrawer({
             </div>
           </div>
         )}
-      </div>
     </div>
   )
 }

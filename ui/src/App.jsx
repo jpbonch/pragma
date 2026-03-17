@@ -2555,93 +2555,96 @@ export default function App() {
 
         {activeTab === 'feed' && (
           <div className="feed-page">
-            <div className="main-topbar">
-              <h1>Tasks</h1>
-            </div>
-            <FeedView
-              tasks={tasks}
-              loading={tasksLoading}
-              error={tasksError}
-              recipientAgents={recipientAgents}
-              plans={sidebarPlans}
-              plansLoading={sidebarPlansLoading}
-              activePlanThreadId={activePlanThreadId}
-              onOpenPlan={(threadId) => {
-                void handleOpenPlan(threadId)
-              }}
-              onOpenTaskConversation={(task) => {
-                void handleOpenTaskConversation(task)
-              }}
-              onPickTaskRecipient={(taskId, recipientAgentId) => {
-                void handleSetTaskRecipient(taskId, recipientAgentId)
-              }}
-              onAddFollowup={(parentTaskId, prompt) => {
-                void handleAddFollowup(parentTaskId, prompt)
-              }}
-              followupForTaskId={followupForTaskId}
-              setFollowupForTaskId={setFollowupForTaskId}
-            />
-            <ConversationDrawer
-              open={conversation.open && (conversation.mode === 'plan' || (conversation.mode === 'chat' && Boolean(conversation.taskId)))}
-              mode={conversation.mode}
-              entries={conversation.entries}
-              loading={conversation.loading}
-              planReady={conversation.planReady}
-              error={conversation.error}
-              taskId={conversation.taskId}
-              taskStatus={conversation.taskStatus}
-              taskTitle={conversation.taskTitle}
-              headerAgentName={conversationHeaderAgent.name}
-              headerAgentEmoji={conversationHeaderAgent.emoji}
-              onReviewAction={(taskId, action) => handleReviewTask(taskId, action)}
-              onDeleteTask={(taskId) => handleDeleteTask(taskId)}
-              isFollowupTask={Boolean(conversation.taskId && tasks.find((t) => t.id === conversation.taskId)?.predecessor_task_id)}
-              runtimeService={conversationRuntimeService}
-              runtimeServiceLogs={conversationRuntimeService ? selectedRuntimeServiceLogs : []}
-              runtimeServiceError={
-                conversationRuntimeService && selectedServiceId ? runtimeServiceStreamError : ''
-              }
-              onStopRuntimeService={handleStopRuntimeService}
-              onServiceStarted={handleRuntimeServiceStarted}
-              onClose={closeConversationDrawer}
-              recipientAgents={recipientAgents}
-              selectedRecipientAgentId={conversation.recipientAgentId}
-              onSelectRecipientAgentId={(recipientAgentId) => {
-                setConversation((prev) => ({
-                  ...prev,
-                  recipientAgentId,
-                }))
-              }}
-              onPromptSubmit={handleDrawerPromptSubmit}
-              onExecute={() => {
-                void handleExecuteFromPlan()
-              }}
-              onDeletePlan={() => {
-                void handleDeletePlan()
-              }}
-              executeDisabled={!conversation.threadId || !conversation.planReady}
-              onStop={handleStopStream}
-            />
-            {!(conversation.open && (conversation.mode === 'plan' || (conversation.mode === 'chat' && Boolean(conversation.taskId)))) && (
-              <InputBar
-                disabled={
-                  conversation.loading ||
-                  workspacesLoading ||
-                  agentsLoading ||
-                  !activeWorkspaceName
+            {conversation.open && (conversation.mode === 'plan' || (conversation.mode === 'chat' && Boolean(conversation.taskId))) ? (
+              <ConversationDrawer
+                open
+                mode={conversation.mode}
+                entries={conversation.entries}
+                loading={conversation.loading}
+                planReady={conversation.planReady}
+                error={conversation.error}
+                taskId={conversation.taskId}
+                taskStatus={conversation.taskStatus}
+                taskTitle={conversation.taskTitle}
+                headerAgentName={conversationHeaderAgent.name}
+                headerAgentEmoji={conversationHeaderAgent.emoji}
+                onReviewAction={(taskId, action) => handleReviewTask(taskId, action)}
+                onDeleteTask={(taskId) => handleDeleteTask(taskId)}
+                isFollowupTask={Boolean(conversation.taskId && tasks.find((t) => t.id === conversation.taskId)?.predecessor_task_id)}
+                runtimeService={conversationRuntimeService}
+                runtimeServiceLogs={conversationRuntimeService ? selectedRuntimeServiceLogs : []}
+                runtimeServiceError={
+                  conversationRuntimeService && selectedServiceId ? runtimeServiceStreamError : ''
                 }
-                loading={false}
-                onStop={handleStopStream}
-                agents={recipientAgents}
-                preferredMode={conversation.open ? conversation.mode : ''}
-                onSubmit={(payload) => {
-                  void handleInputSubmit(payload)
+                onStopRuntimeService={handleStopRuntimeService}
+                onServiceStarted={handleRuntimeServiceStarted}
+                onClose={closeConversationDrawer}
+                recipientAgents={recipientAgents}
+                selectedRecipientAgentId={conversation.recipientAgentId}
+                onSelectRecipientAgentId={(recipientAgentId) => {
+                  setConversation((prev) => ({
+                    ...prev,
+                    recipientAgentId,
+                  }))
                 }}
-                value={inputBarText}
-                onValueChange={setInputBarText}
-                followupTask={followupForTaskId ? tasks.find((t) => t.id === followupForTaskId) : null}
-                onCancelFollowup={() => setFollowupForTaskId('')}
+                onPromptSubmit={handleDrawerPromptSubmit}
+                onExecute={() => {
+                  void handleExecuteFromPlan()
+                }}
+                onDeletePlan={() => {
+                  void handleDeletePlan()
+                }}
+                executeDisabled={!conversation.threadId || !conversation.planReady}
+                onStop={handleStopStream}
               />
+            ) : (
+              <>
+                <div className="main-topbar">
+                  <h1>Tasks</h1>
+                </div>
+                <FeedView
+                  tasks={tasks}
+                  loading={tasksLoading}
+                  error={tasksError}
+                  recipientAgents={recipientAgents}
+                  plans={sidebarPlans}
+                  plansLoading={sidebarPlansLoading}
+                  activePlanThreadId={activePlanThreadId}
+                  onOpenPlan={(threadId) => {
+                    void handleOpenPlan(threadId)
+                  }}
+                  onOpenTaskConversation={(task) => {
+                    void handleOpenTaskConversation(task)
+                  }}
+                  onPickTaskRecipient={(taskId, recipientAgentId) => {
+                    void handleSetTaskRecipient(taskId, recipientAgentId)
+                  }}
+                  onAddFollowup={(parentTaskId, prompt) => {
+                    void handleAddFollowup(parentTaskId, prompt)
+                  }}
+                  followupForTaskId={followupForTaskId}
+                  setFollowupForTaskId={setFollowupForTaskId}
+                />
+                <InputBar
+                  disabled={
+                    conversation.loading ||
+                    workspacesLoading ||
+                    agentsLoading ||
+                    !activeWorkspaceName
+                  }
+                  loading={false}
+                  onStop={handleStopStream}
+                  agents={recipientAgents}
+                  preferredMode={conversation.open ? conversation.mode : ''}
+                  onSubmit={(payload) => {
+                    void handleInputSubmit(payload)
+                  }}
+                  value={inputBarText}
+                  onValueChange={setInputBarText}
+                  followupTask={followupForTaskId ? tasks.find((t) => t.id === followupForTaskId) : null}
+                  onCancelFollowup={() => setFollowupForTaskId('')}
+                />
+              </>
             )}
           </div>
         )}

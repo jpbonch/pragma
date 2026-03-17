@@ -1387,44 +1387,29 @@ select { cursor: pointer; }
   background: #c73131 !important;
 }
 
-.conversation-drawer-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 50;
-  padding: 12px 18px 24px;
-}
-
-/* ─── Conversation Drawer (Revamped) ───────────────── */
-.conv-drawer {
-  width: 100%;
-  height: 100%;
-  background: #ffffff;
-  border-radius: 14px;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.10), 0 0 0 1px rgba(0,0,0,0.04);
+/* ─── Conversation Page ───────────────── */
+.conv-page {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  animation: convPageIn 0.15s ease-out;
+}
+
+@keyframes convPageIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .conv-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 12px 22px;
   flex-shrink: 0;
   position: relative;
   z-index: 1;
-}
-
-.conv-header::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -8px;
-  height: 8px;
-  background: linear-gradient(to bottom, #ffffff, transparent);
-  pointer-events: none;
 }
 
 .conv-header-left {
@@ -1514,36 +1499,46 @@ select { cursor: pointer; }
   animation: streamPulse 1.5s ease-in-out infinite;
 }
 
-.conv-close {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  border: none;
-  background: transparent;
-  color: #B0AFA8;
+.conv-back-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-}
-.conv-close:hover {
-  background: #f3f2ef;
+  gap: 4px;
+  border: none;
+  background: transparent;
   color: #6F6E69;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 4px 6px 4px 2px;
+  border-radius: 6px;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+.conv-back-btn:hover {
+  background: #f3f2ef;
+  color: #37352f;
+}
+
+.conv-header-separator {
+  width: 1px;
+  height: 16px;
+  background: #e3e2de;
+  flex-shrink: 0;
 }
 
 /* Body */
 .conv-body {
   flex: 1;
   min-height: 0;
-  padding: 0 16px 12px;
+  padding: 0 22px 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .conv-body-split {
-  padding: 0 12px 12px;
+  padding: 0 22px 12px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 46%);
   gap: 12px;
@@ -1811,7 +1806,7 @@ select { cursor: pointer; }
 
 /* Footer */
 .conv-footer {
-  padding: 10px 16px 14px;
+  padding: 10px 22px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -5124,7 +5119,7 @@ select { cursor: pointer; }
 
 @media (max-width: 700px) {
   .conv-header {
-    padding: 10px 12px;
+    padding: 10px 14px;
   }
 
   .conv-header-agent-name {
@@ -5143,16 +5138,16 @@ select { cursor: pointer; }
     padding-top: 10px;
   }
 
-  .conversation-drawer-body.with-output {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(180px, 1fr) minmax(260px, 1fr);
+  .conv-body {
+    padding: 0 14px 12px;
   }
 
-  .conversation-output-pane {
-    border-left: none;
-    border-top: 1px solid #f0efec;
-    padding-left: 0;
-    padding-top: 10px;
+  .conv-body-split {
+    padding: 0 14px 12px;
+  }
+
+  .conv-footer {
+    padding: 10px 14px 14px;
   }
 
   .output-file-grid {
@@ -5163,15 +5158,7 @@ select { cursor: pointer; }
     min-height: 300px;
   }
 
-  .conv-drawer {
-    border-radius: 12px;
-  }
-
   .input-wrap {
     padding: 8px 12px 14px;
-  }
-
-  .conversation-drawer-backdrop {
-    padding: 8px 12px 16px;
   }
 }
