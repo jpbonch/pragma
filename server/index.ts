@@ -3214,6 +3214,12 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
           [planTaskId, planTitle],
         );
         emitTaskStatus(workspaceName, planTaskId, "planning", "plan_created");
+
+        // Fire-and-forget: generate an AI title from the prompt
+        generateTitle(db, body.message, "").then((aiTitle) => {
+          updateTaskTitle(db, planTaskId, aiTitle);
+        }).catch(() => {});
+
         await setThreadTaskId(db, threadId, planTaskId);
         thread = await getThreadById(db, threadId);
       }
@@ -3344,6 +3350,12 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
           [planTaskId, planTitle],
         );
         emitTaskStatus(workspaceName, planTaskId, "planning", "plan_created");
+
+        // Fire-and-forget: generate an AI title from the prompt
+        generateTitle(db, body.message, "").then((aiTitle) => {
+          updateTaskTitle(db, planTaskId, aiTitle);
+        }).catch(() => {});
+
         await setThreadTaskId(db, threadId, planTaskId);
         thread = await getThreadById(db, threadId);
       }
