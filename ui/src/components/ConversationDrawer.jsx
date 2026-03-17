@@ -134,6 +134,17 @@ export function ConversationDrawer({
     () => getHeaderStatusLabel({ taskStatus, mode, loading, planReady }),
     [taskStatus, mode, loading, planReady],
   )
+  const activeQuestionOptions = useMemo(() => {
+    const isWaiting = taskStatus === 'waiting_for_question_response' || taskStatus === 'waiting_for_help_response'
+    if (!isWaiting) return null
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i]
+      if (e.type === 'question' && Array.isArray(e.options) && e.options.length > 0) {
+        return { question: e.content, options: e.options }
+      }
+    }
+    return null
+  }, [entries, taskStatus])
   const displayHeaderAgentName =
     typeof headerAgentName === 'string' ? headerAgentName.trim() : ''
   const displayHeaderAgentEmoji =
@@ -399,25 +410,11 @@ export function ConversationDrawer({
     }
 
     if (entry.type === 'question') {
-      const isWaiting = taskStatus === 'waiting_for_question_response' || taskStatus === 'waiting_for_help_response'
       return (
         <div key={entry.id} className="conv-question-card">
           <div className="conv-question-text">{entry.content}</div>
           {entry.details && (
             <div className="conv-question-details">{entry.details}</div>
-          )}
-          {isWaiting && Array.isArray(entry.options) && entry.options.length > 0 && (
-            <div className="conv-question-options">
-              {entry.options.map((opt, i) => (
-                <button
-                  key={i}
-                  className="conv-question-option-btn"
-                  onClick={() => onPromptSubmit?.(opt)}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
           )}
         </div>
       )
@@ -506,7 +503,21 @@ export function ConversationDrawer({
                   {loading && <div className="conv-status"><span className="conv-streaming-label">Thinking...</span></div>}
                   {error && <div className="error" style={{ padding: '4px 0' }}>Error: {error}</div>}
                 </div>
-                <div className="conv-input-container">
+                <div className={`conv-input-container${activeQuestionOptions ? ' conv-input-has-options' : ''}`}>
+                  {activeQuestionOptions && (
+                    <div className="conv-input-options">
+                      <div className="conv-input-options-title">{activeQuestionOptions.question}</div>
+                      {activeQuestionOptions.options.map((opt, i) => (
+                        <button
+                          key={i}
+                          className="conv-input-option-btn"
+                          onClick={() => onPromptSubmit?.(opt)}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <textarea
                     ref={textareaRef}
                     className="input-textarea"
@@ -515,7 +526,9 @@ export function ConversationDrawer({
                     placeholder={
                       isCompletedTask
                         ? 'Task is completed.'
-                        : 'Continue this conversation...'
+                        : activeQuestionOptions
+                          ? 'Or type a custom response...'
+                          : 'Continue this conversation...'
                     }
                     disabled={loading || isCompletedTask}
                     rows={1}
@@ -726,13 +739,33 @@ export function ConversationDrawer({
                 </div>
               </div>
             )}
-            <div className="conv-input-container">
+            <div className={`conv-input-container${activeQuestionOptions ? ' conv-input-has-options' : ''}`}>
+              {activeQuestionOptions && (
+                <div className="conv-input-options">
+                  <div className="conv-input-options-title">{activeQuestionOptions.question}</div>
+                  {activeQuestionOptions.options.map((opt, i) => (
+                    <button
+                      key={i}
+                      className="conv-input-option-btn"
+                      onClick={() => onPromptSubmit?.(opt)}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              )}
               <textarea
                 ref={textareaRef}
                 className="input-textarea"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder={mode === 'plan' ? 'Refine this plan...' : 'Continue this conversation...'}
+                placeholder={
+                  activeQuestionOptions
+                    ? 'Or type a custom response...'
+                    : mode === 'plan'
+                      ? 'Refine this plan...'
+                      : 'Continue this conversation...'
+                }
                 disabled={loading}
                 rows={1}
                 onInput={(e) => {
