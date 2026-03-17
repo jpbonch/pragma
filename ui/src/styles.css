@@ -579,6 +579,19 @@ select { cursor: pointer; }
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.main-topbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 8px;
+  background: linear-gradient(to bottom, #fff, transparent);
+  pointer-events: none;
 }
 .main-topbar h1 {
   font-size: 22px;
