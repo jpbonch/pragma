@@ -607,31 +607,6 @@ export function FeedView({
       {!loading && !error && (
         <>
           <SectionLabel
-            count={remainingPlans.length}
-            collapsible
-            collapsed={collapsedSections.planning}
-            onToggleCollapse={() => toggleSection('planning')}
-          >Planning</SectionLabel>
-          {!collapsedSections.planning && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {plansLoading ? (
-                <SkeletonRows count={2} />
-              ) : remainingPlans.length > 0 ? (
-                remainingPlans.map((plan) => (
-                  <PlanRow
-                    key={plan.id}
-                    plan={plan}
-                    isActive={activePlanThreadId === plan.id}
-                    onClick={onOpenPlan}
-                  />
-                ))
-              ) : (
-                <div className="muted">No plans in progress</div>
-              )}
-            </div>
-          )}
-
-          <SectionLabel
             count={needsYou.length + readyPlans.length}
             badge
             collapsible
@@ -688,6 +663,31 @@ export function FeedView({
               </AnimatePresence>
               {needsYou.length + readyPlans.length === 0 && (
                 <div className="muted">You're all caught up</div>
+              )}
+            </div>
+          )}
+
+          <SectionLabel
+            count={remainingPlans.length}
+            collapsible
+            collapsed={collapsedSections.planning}
+            onToggleCollapse={() => toggleSection('planning')}
+          >Planning</SectionLabel>
+          {!collapsedSections.planning && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {plansLoading ? (
+                <SkeletonRows count={2} />
+              ) : remainingPlans.length > 0 ? (
+                remainingPlans.map((plan) => (
+                  <PlanRow
+                    key={plan.id}
+                    plan={plan}
+                    isActive={activePlanThreadId === plan.id}
+                    onClick={onOpenPlan}
+                  />
+                ))
+              ) : (
+                <div className="muted">No plans in progress</div>
               )}
             </div>
           )}
