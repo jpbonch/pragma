@@ -1677,6 +1677,7 @@ WHERE id = $1
         const nextStatus: TaskStatus = "completed";
         const workspacePaths = getWorkspacePaths(workspaceName);
         const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
+        await mkdir(mergedOutputDir, { recursive: true });
         await db.query(
           `
 UPDATE tasks
@@ -1718,6 +1719,7 @@ WHERE id = $1
 
         for (const chainId of chainTaskIds) {
           const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
+          await mkdir(mergedOutputDir, { recursive: true });
           await db.query(
             `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
             [chainId, mergedOutputDir],
@@ -4695,6 +4697,14 @@ async function resolveTaskOutputsRoot(
     throw new PragmaError("TASK_OUTPUT_DIR_INVALID", 409, `Task output directory is invalid: ${taskId}`);
   }
   if (!(await isDirectory(absolute))) {
+    if (isWithinRoot(mainRoot, absolute)) {
+      await mkdir(absolute, { recursive: true });
+      return absolute;
+    }
+    if (isWithinRoot(worktreeRoot, absolute)) {
+      await mkdir(mainRoot, { recursive: true });
+      return mainRoot;
+    }
     throw new PragmaError("TASK_OUTPUT_DIR_NOT_FOUND", 409, `Task output directory not found: ${taskId}`);
   }
   return absolute;
