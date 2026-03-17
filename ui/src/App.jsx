@@ -826,6 +826,7 @@ export default function App() {
   const conversationSyncRetryTimerRef = useRef(null)
   const tasksRefreshInFlightRef = useRef(false)
   const tasksRefreshQueuedRef = useRef(false)
+  const tasksInitialLoadDoneRef = useRef(false)
   const runtimeServicesPollTimerRef = useRef(null)
   const chatsPollTimerRef = useRef(null)
   const prevThinkingChatIdsRef = useRef(new Set())
@@ -1345,6 +1346,7 @@ export default function App() {
 
   function clearWorkspaceData() {
     setTasks([])
+    tasksInitialLoadDoneRef.current = false
     setAgents([])
     setHumans([])
     setContextData({ folders: [], files: [] })
@@ -1505,10 +1507,14 @@ export default function App() {
   }
 
   async function loadTasks() {
-    setTasksLoading(true)
+    // Only show loading spinner on initial load; subsequent refreshes are silent
+    if (!tasksInitialLoadDoneRef.current) {
+      setTasksLoading(true)
+    }
     setTasksError('')
     try {
       setTasks(await fetchTasks(300))
+      tasksInitialLoadDoneRef.current = true
     } catch (error) {
       if (error instanceof ApiError && error.code === 'NO_ACTIVE_WORKSPACE') {
         setTasks([])
@@ -1845,12 +1851,36 @@ export default function App() {
       const parentId = followupForTaskId
       setFollowupForTaskId('')
       try {
-        await createFollowupTask(parentId, {
+        const result = await createFollowupTask(parentId, {
           prompt: finalMessage,
           recipient_agent_id: recipientAgentId,
           reasoning_effort: reasoningEffort,
         })
-        await loadTasks()
+        // Optimistically add the new followup task
+        const taskId = result?.task_id
+        if (taskId) {
+          const title = finalMessage.length > 100 ? `${finalMessage.slice(0, 97)}...` : finalMessage
+          setTasks((prev) => {
+            const updated = prev.map((t) =>
+              t.id === parentId ? { ...t, followup_task_id: taskId } : t
+            )
+            return [{
+              id: taskId,
+              title,
+              status: 'queued',
+              assigned_to: null,
+              output_dir: null,
+              session_id: null,
+              created_at: new Date().toISOString(),
+              completed_at: null,
+              followup_task_id: null,
+              predecessor_task_id: parentId,
+              thread_id: null,
+            }, ...updated]
+          })
+        }
+        // Refresh in background to get server-canonical data
+        scheduleTasksRefresh(500)
       } catch (error) {
         setWorkspaceError(errorText(error))
       }
@@ -1859,13 +1889,32 @@ export default function App() {
 
     if (mode === 'execute' && !continueExistingExecute) {
       try {
-        await createExecuteTask({
+        const result = await createExecuteTask({
           prompt: finalMessage,
           recipient_agent_id: recipientAgentId,
           reasoning_effort: reasoningEffort,
         })
-        await loadTasks()
+        // Optimistically add the new task so it appears instantly
+        const taskId = result?.task_id
+        if (taskId) {
+          const title = finalMessage.length > 100 ? `${finalMessage.slice(0, 97)}...` : finalMessage
+          setTasks((prev) => [{
+            id: taskId,
+            title,
+            status: 'queued',
+            assigned_to: null,
+            output_dir: null,
+            session_id: null,
+            created_at: new Date().toISOString(),
+            completed_at: null,
+            followup_task_id: null,
+            predecessor_task_id: null,
+            thread_id: null,
+          }, ...prev])
+        }
         setActiveTab('feed')
+        // Refresh in background to get server-canonical data (e.g. AI-generated title)
+        scheduleTasksRefresh(500)
       } catch (error) {
         setWorkspaceError(errorText(error))
       }
@@ -1896,7 +1945,15 @@ export default function App() {
             },
           ],
         }))
-        await loadTasks()
+        // Optimistically update the task status in the list
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === conversation.taskId
+              ? { ...t, status: conversation.mode === 'plan' ? 'planning' : 'queued' }
+              : t
+          )
+        )
+        scheduleTasksRefresh(500)
       } catch (error) {
         setWorkspaceError(errorText(error))
       }
@@ -2445,11 +2502,34 @@ export default function App() {
       return
     }
     try {
-      await createFollowupTask(parentTaskId, {
+      const result = await createFollowupTask(parentTaskId, {
         prompt,
         reasoning_effort: 'high',
       })
-      await loadTasks()
+      // Optimistically add the new followup task
+      const taskId = result?.task_id
+      if (taskId) {
+        const title = prompt.length > 100 ? `${prompt.slice(0, 97)}...` : prompt
+        setTasks((prev) => {
+          const updated = prev.map((t) =>
+            t.id === parentTaskId ? { ...t, followup_task_id: taskId } : t
+          )
+          return [{
+            id: taskId,
+            title,
+            status: 'queued',
+            assigned_to: null,
+            output_dir: null,
+            session_id: null,
+            created_at: new Date().toISOString(),
+            completed_at: null,
+            followup_task_id: null,
+            predecessor_task_id: parentTaskId,
+            thread_id: null,
+          }, ...updated]
+        })
+      }
+      scheduleTasksRefresh(500)
     } catch (error) {
       setWorkspaceError(errorText(error))
     }
