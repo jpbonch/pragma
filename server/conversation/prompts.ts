@@ -102,6 +102,8 @@ export function buildPrompt(
       "Rules:",
       "- Use exactly one recipient selection command and choose a valid worker id.",
       "- Recipient reason must be one sentence.",
+      "- In the execution plan, direct task-specific deliverables (reports/docs/assets) to `outputs/$PRAGMA_TASK_ID/`, not `context/`.",
+      "- Reserve `context/` only for enduring project knowledge that should outlive a single task.",
       "- Write the plan as your natural response with clear steps.",
       reasoningLine,
       "User request:",

@@ -714,7 +714,7 @@ async function syncNonRepoCodeBackToWorkspace(input: {
   }
 }
 
-async function syncTaskOutputsBackToWorkspace(input: {
+export async function syncTaskOutputsBackToWorkspace(input: {
   workspacePaths: WorkspacePathsLike;
   taskId: string;
 }): Promise<void> {

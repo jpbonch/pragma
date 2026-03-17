@@ -37,6 +37,7 @@ import {
   parseTaskGitState,
   resolveRepoPath,
   saveDiffSnapshot,
+  syncTaskOutputsBackToWorkspace,
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
 import { resolvePragmaCliCommand } from "./conversation/pragmaCli";
@@ -1676,6 +1677,7 @@ WHERE id = $1
 
         const nextStatus: TaskStatus = "completed";
         const workspacePaths = getWorkspacePaths(workspaceName);
+        await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId });
         const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
         await mkdir(mergedOutputDir, { recursive: true });
         await db.query(
@@ -1718,6 +1720,7 @@ WHERE id = $1
         }
 
         for (const chainId of chainTaskIds) {
+          await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId: chainId });
           const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
           await mkdir(mergedOutputDir, { recursive: true });
           await db.query(
