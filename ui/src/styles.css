@@ -1351,6 +1351,16 @@ select { cursor: pointer; }
   cursor: default;
 }
 
+.agent-selector-btn {
+  max-width: 140px;
+}
+
+.agent-selector-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .send-btn {
   width: 34px;
   height: 34px;

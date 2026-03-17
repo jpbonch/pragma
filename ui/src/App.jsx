@@ -1792,7 +1792,7 @@ export default function App() {
     })
   }
 
-  async function handleInputSubmit({ message, mode, reasoningEffort, attachments }) {
+  async function handleInputSubmit({ message, mode, reasoningEffort, attachments, recipientAgentId }) {
     setWorkspaceError('')
 
     let finalMessage = message
@@ -1824,6 +1824,7 @@ export default function App() {
       try {
         await createFollowupTask(parentId, {
           prompt: finalMessage,
+          recipient_agent_id: recipientAgentId,
           reasoning_effort: reasoningEffort,
         })
         await loadTasks()
@@ -1837,6 +1838,7 @@ export default function App() {
       try {
         await createExecuteTask({
           prompt: finalMessage,
+          recipient_agent_id: recipientAgentId,
           reasoning_effort: reasoningEffort,
         })
         await loadTasks()
@@ -2630,7 +2632,7 @@ export default function App() {
                 }
                 loading={false}
                 onStop={handleStopStream}
-                onOpenOrchestratorConfig={handleOpenOrchestratorConfig}
+                agents={recipientAgents}
                 preferredMode={conversation.open ? conversation.mode : ''}
                 onSubmit={(payload) => {
                   void handleInputSubmit(payload)

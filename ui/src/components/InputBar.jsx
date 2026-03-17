@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, ChevronDown, Play, Plus, Route, Settings, Square, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Play, Plus, Route, Settings, Square, X, Bot } from 'lucide-react'
 
 const MODES = [
   { id: 'plan', icon: Route, label: 'Plan', desc: 'Break work into steps' },
@@ -16,6 +16,7 @@ const REASONING_EFFORTS = [
 
 const STORAGE_KEY_MODE = 'pragma.inputbar.mode'
 const STORAGE_KEY_REASONING = 'pragma.inputbar.reasoningEffort'
+const STORAGE_KEY_AGENT = 'pragma.inputbar.agent'
 
 function loadStored(key, validValues, fallback) {
   try {
@@ -40,6 +41,7 @@ export function InputBar({
   onValueChange,
   followupTask = null,
   onCancelFollowup,
+  agents = null,
 }) {
   const [localInput, setLocalInput] = useState('')
   const isControlled = value !== undefined
@@ -56,6 +58,17 @@ export function InputBar({
     ),
   )
   const [attachments, setAttachments] = useState([])
+  const [selectedAgentId, setSelectedAgentIdRaw] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY_AGENT) || ''
+    } catch {}
+    return ''
+  })
+
+  function setSelectedAgentId(id) {
+    setSelectedAgentIdRaw(id)
+    try { localStorage.setItem(STORAGE_KEY_AGENT, id) } catch {}
+  }
 
   function setMode(value) {
     const next = typeof value === 'function' ? value(mode) : value
@@ -79,6 +92,10 @@ export function InputBar({
   const selectedReasoning =
     REASONING_EFFORTS.find((option) => option.id === reasoningEffort) ?? REASONING_EFFORTS[1]
   const isModeLocked = Boolean(lockedMode && MODES.some((item) => item.id === lockedMode))
+  const showAgentSelector = Array.isArray(agents) && agents.length > 0
+  const selectedAgent = showAgentSelector ? agents.find((a) => a.id === selectedAgentId) : null
+  const agentDisplayName = selectedAgent ? (selectedAgent.name || selectedAgent.id) : 'Orchestrator'
+  const isAgentSelectorLocked = mode === 'plan' || hideMode
 
   function cycleMode() {
     setMode((current) => {
@@ -174,6 +191,7 @@ export function InputBar({
       mode,
       reasoningEffort,
       attachments: attachments.length > 0 ? [...attachments] : undefined,
+      recipientAgentId: mode === 'execute' && selectedAgentId ? selectedAgentId : undefined,
     })
     setInput('')
     setAttachments([])
@@ -349,15 +367,77 @@ export function InputBar({
           </div>
 
           <div className="input-actions">
-            <button
-              className="input-settings-btn"
-              onClick={() => onOpenOrchestratorConfig?.()}
-              disabled={disabled}
-              title="Open orchestrator settings"
-              aria-label="Open orchestrator settings"
-            >
-              <Settings size={16} strokeWidth={2.1} />
-            </button>
+            {showAgentSelector ? (
+              isAgentSelectorLocked ? (
+                <div className="selector-btn selector-btn-static agent-selector-btn">
+                  <Bot size={14} strokeWidth={2} />
+                  <span className="agent-selector-label">Orchestrator</span>
+                </div>
+              ) : (
+                <div className="input-selector">
+                  <button
+                    className="selector-btn agent-selector-btn"
+                    onClick={() => setOpenMenu(openMenu === 'agent' ? null : 'agent')}
+                  >
+                    {selectedAgent?.emoji ? (
+                      <span style={{ fontSize: 13, lineHeight: 1 }}>{selectedAgent.emoji}</span>
+                    ) : (
+                      <Bot size={14} strokeWidth={2} />
+                    )}
+                    <span className="agent-selector-label">{agentDisplayName}</span>
+                    <ChevronDown size={12} style={{ opacity: 0.5 }} />
+                  </button>
+                  {openMenu === 'agent' && (
+                    <div className="selector-dropdown selector-dropdown-right">
+                      <div className="selector-dropdown-title">Send to</div>
+                      <div
+                        className={`selector-option ${!selectedAgentId ? 'active' : ''}`}
+                        onClick={() => {
+                          setSelectedAgentId('')
+                          setOpenMenu(null)
+                        }}
+                      >
+                        <Bot size={16} strokeWidth={2} />
+                        <div className="selector-option-label">Orchestrator</div>
+                        {!selectedAgentId && (
+                          <Check size={14} style={{ marginLeft: 'auto', color: '#2383e2' }} />
+                        )}
+                      </div>
+                      {agents.map((agent) => (
+                        <div
+                          key={agent.id}
+                          className={`selector-option ${selectedAgentId === agent.id ? 'active' : ''}`}
+                          onClick={() => {
+                            setSelectedAgentId(agent.id)
+                            setOpenMenu(null)
+                          }}
+                        >
+                          {agent.emoji ? (
+                            <span style={{ fontSize: 15, lineHeight: 1 }}>{agent.emoji}</span>
+                          ) : (
+                            <Bot size={16} strokeWidth={2} />
+                          )}
+                          <div className="selector-option-label">{agent.name || agent.id}</div>
+                          {selectedAgentId === agent.id && (
+                            <Check size={14} style={{ marginLeft: 'auto', color: '#2383e2' }} />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            ) : onOpenOrchestratorConfig ? (
+              <button
+                className="input-settings-btn"
+                onClick={() => onOpenOrchestratorConfig?.()}
+                disabled={disabled}
+                title="Open orchestrator settings"
+                aria-label="Open orchestrator settings"
+              >
+                <Settings size={16} strokeWidth={2.1} />
+              </button>
+            ) : null}
             {loading ? (
               <button
                 className="send-btn send-btn-stop"
