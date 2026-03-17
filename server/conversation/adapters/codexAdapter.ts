@@ -65,19 +65,10 @@ const codexAdapter: ConversationAdapter = {
 function buildCodexArgs(input: AdapterSendTurnInput): string[] {
   const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
   const resolvedCwd = resolve(input.cwd);
-  const sandboxLevel = input.mode === "chat" ? "workspace-read" : "workspace-write";
-  const globalSandboxArgs = [
-    "-a",
-    "never",
-    "-s",
-    sandboxLevel,
-    "-C",
-    resolvedCwd,
-  ];
-
-  if (input.mode === "execute") {
-    globalSandboxArgs.push("--add-dir", resolvedCwd);
-  }
+  const globalSandboxArgs =
+    input.mode === "chat"
+      ? ["-s", "read-only", "-a", "never", "-C", resolvedCwd]
+      : ["--dangerously-bypass-approvals-and-sandbox", "-C", resolvedCwd];
 
   if (input.sessionId) {
     return [
