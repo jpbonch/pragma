@@ -250,6 +250,22 @@ export function openConversationThreadStream(
   }
 }
 
+export async function fetchWorkspaceOutputFiles() {
+  return fetchJson('/workspace/outputs/files')
+}
+
+export function workspaceOutputContentUrl(path) {
+  const params = new URLSearchParams()
+  params.set('path', path)
+  return `${API_BASE_URL}/workspace/outputs/file/content?${params.toString()}`
+}
+
+export function workspaceOutputDownloadUrl(path) {
+  const params = new URLSearchParams()
+  params.set('path', path)
+  return `${API_BASE_URL}/workspace/outputs/file/download?${params.toString()}`
+}
+
 export async function fetchTaskOutputChanges(taskId) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/output/changes`)
 }

@@ -46,7 +46,7 @@ import { ContextView } from './components/ContextView'
 import { ConversationDrawer } from './components/ConversationDrawer'
 import { InlineChatView } from './components/InlineChatView'
 import { ConnectionsView } from './components/ConnectionsView'
-import { EmptyPane } from './components/EmptyPane'
+import { FilesView } from './components/FilesView'
 import { FeedView } from './components/FeedView'
 import { InputBar } from './components/InputBar'
 import { RightPanel } from './components/RightPanel'
@@ -2882,7 +2882,7 @@ export default function App() {
             onPushFolder={handlePushCodeFolder}
           />
         )}
-        {activeTab === 'files' && <EmptyPane title="Files" />}
+        {activeTab === 'files' && <FilesView />}
 
         {activeTab === 'context' && (
           <ContextView

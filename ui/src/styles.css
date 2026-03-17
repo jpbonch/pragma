@@ -3971,6 +3971,152 @@ select { cursor: pointer; }
   justify-content: center;
 }
 
+/* ─── Files View ────────────────────────────────────── */
+.files-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.files-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.files-empty-inner {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.files-empty-icon {
+  color: #C4C3BF;
+  margin-bottom: 4px;
+}
+
+.files-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #37352f;
+}
+
+.files-empty-desc {
+  font-size: 13px;
+  color: #9b9a97;
+}
+
+.files-sidebar {
+  width: 240px;
+  border-right: 1px solid #F0EFEC;
+  padding: 18px 12px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.files-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #C4C3BF;
+}
+
+.files-count {
+  font-size: 11px;
+  color: #9b9a97;
+  font-weight: 600;
+}
+
+.files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.files-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: #9B9A97;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: background 0.1s;
+  font-family: inherit;
+}
+
+.files-item:hover {
+  background: #FAFAF8;
+}
+
+.files-item.active {
+  color: #37352F;
+  background: #F0EFEC;
+  font-weight: 600;
+}
+
+.files-item-icon {
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.files-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-item-size {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #C4C3BF;
+  font-weight: 500;
+}
+
+.files-content {
+  flex: 1;
+  padding: 20px 32px 32px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.files-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.files-preview-path {
+  font-size: 13px;
+  color: #5f5d58;
+  font-weight: 600;
+  min-width: 0;
+  word-break: break-all;
+}
+
 /* ─── Settings View ─────────────────────────────────── */
 .settings-layout {
   flex: 1;

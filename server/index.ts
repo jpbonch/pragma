@@ -3863,6 +3863,55 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     return c.json({ ok: true, folders });
   });
 
+  app.get("/workspace/outputs/files", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const paths = getWorkspacePaths(workspaceName);
+    const files = await listAllWorkspaceOutputFiles(paths.outputsDir);
+    return c.json({ files });
+  });
+
+  app.get("/workspace/outputs/file/content", validateQuery(outputFileQuerySchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const paths = getWorkspacePaths(workspaceName);
+    const { path: relativePath } = c.req.valid("query");
+    const { absolutePath, normalizedPath } = resolveOutputPath(paths.outputsDir, relativePath);
+    const fileInfo = await stat(absolutePath).catch(() => null);
+    if (!fileInfo?.isFile()) {
+      throw new PragmaError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
+    }
+    const mime = lookupMimeType(absolutePath);
+    if (!mime) {
+      throw new PragmaError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
+    }
+    const content = await readFile(absolutePath);
+    return c.body(content, 200, {
+      "content-type": mime,
+      "content-disposition": `inline; filename="${basename(absolutePath)}"`,
+      "cache-control": "no-store",
+    });
+  });
+
+  app.get("/workspace/outputs/file/download", validateQuery(outputFileQuerySchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const paths = getWorkspacePaths(workspaceName);
+    const { path: relativePath } = c.req.valid("query");
+    const { absolutePath, normalizedPath } = resolveOutputPath(paths.outputsDir, relativePath);
+    const fileInfo = await stat(absolutePath).catch(() => null);
+    if (!fileInfo?.isFile()) {
+      throw new PragmaError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
+    }
+    const mime = lookupMimeType(absolutePath);
+    if (!mime) {
+      throw new PragmaError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
+    }
+    const content = await readFile(absolutePath);
+    return c.body(content, 200, {
+      "content-type": mime,
+      "content-disposition": `attachment; filename="${basename(absolutePath)}"`,
+      "cache-control": "no-store",
+    });
+  });
+
   app.get("/context", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
     const paths = getWorkspacePaths(workspaceName);
@@ -4836,6 +4885,72 @@ async function walkOutputFiles(
     }
 
     if (!entry.isFile()) {
+      continue;
+    }
+
+    const fileInfo = await stat(fullPath).catch(() => null);
+    if (!fileInfo?.isFile()) {
+      continue;
+    }
+
+    const relPath = relative(rootDir, fullPath).split(sep).join("/");
+    files.push({
+      path: relPath,
+      size: fileInfo.size,
+      modified_at: fileInfo.mtime.toISOString(),
+    });
+    state.count += 1;
+  }
+}
+
+const WORKSPACE_OUTPUT_EXCLUDED_FILES = new Set(["events.jsonl"]);
+const WORKSPACE_OUTPUT_EXCLUDED_EXTENSIONS = new Set([".diff"]);
+
+async function listAllWorkspaceOutputFiles(
+  outputsDir: string,
+): Promise<Array<{ path: string; size: number; modified_at: string }>> {
+  if (!(await isDirectory(outputsDir))) {
+    return [];
+  }
+
+  const files: Array<{ path: string; size: number; modified_at: string }> = [];
+  await walkWorkspaceOutputFiles(outputsDir, outputsDir, files, { count: 0 }, 0);
+  files.sort((a, b) => b.modified_at.localeCompare(a.modified_at));
+  return files;
+}
+
+async function walkWorkspaceOutputFiles(
+  rootDir: string,
+  currentDir: string,
+  files: Array<{ path: string; size: number; modified_at: string }>,
+  state: { count: number },
+  depth: number,
+): Promise<void> {
+  if (depth > 12 || state.count > 5000) {
+    return;
+  }
+
+  const entries = await readdir(currentDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+    if (WORKSPACE_OUTPUT_EXCLUDED_FILES.has(entry.name)) {
+      continue;
+    }
+
+    const fullPath = join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      await walkWorkspaceOutputFiles(rootDir, fullPath, files, state, depth + 1);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const extension = extname(entry.name).toLowerCase();
+    if (WORKSPACE_OUTPUT_EXCLUDED_EXTENSIONS.has(extension)) {
       continue;
     }
 
