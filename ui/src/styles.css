@@ -675,6 +675,69 @@ select { cursor: pointer; }
 .needs-you-card-wrap,
 .active-task-row-wrap {
   position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.needs-you-card-wrap > .needs-you-card,
+.active-task-row-wrap > .task-row {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Reduced gap for follow-up items */
+.followup-item {
+  margin-top: -3px;
+}
+
+/* Numbered square box on far left of chain items */
+.followup-chain-number-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  overflow: visible;
+}
+/* Line extending downward to the next chain item */
+.followup-chain-number-wrap.has-line::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: calc(50% + 14px);
+  width: 1px;
+  background: #D5D4D0;
+  transform: translateX(-50%);
+  z-index: 0;
+}
+/* Line extending upward from non-first chain items */
+.followup-item .followup-chain-number-wrap::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 50%;
+  height: calc(50% + 14px);
+  width: 1px;
+  background: #D5D4D0;
+  transform: translateX(-50%);
+  z-index: 0;
+}
+.followup-chain-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: #F0EFF0;
+  color: #6B6A68;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
 }
 
 .followup-add-btn {
@@ -701,21 +764,7 @@ select { cursor: pointer; }
   background: #F0F6FF;
 }
 
-.followup-chain-label {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 4px;
-  margin-left: 6px;
-  background: #EDE8F9;
-  color: #7C6DD7;
-  vertical-align: middle;
-}
-.followup-chain-label.has-followup {
-  background: #E8F4F0;
-  color: #2FA67E;
-}
+/* followup-chain-label removed - replaced by followup-chain-number */
 
 .followup-popover {
   position: relative;

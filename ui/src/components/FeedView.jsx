@@ -177,17 +177,71 @@ function FollowupPopover({ taskId, onSubmit, onCancel }) {
   )
 }
 
-function FollowupChainLabel({ task }) {
-  if (task.predecessor_task_id) {
-    return <span className="followup-chain-label">Follow-up</span>
+/**
+ * Sort tasks so follow-ups appear directly after their predecessor.
+ * Returns an array of { task, chainIndex, chainLength, isFollowup } objects.
+ * chainIndex: 1-based position in the chain (1 = root, 2 = first follow-up, etc.)
+ * chainLength: total tasks in this chain
+ * isFollowup: true if this task has a predecessor
+ */
+function orderWithFollowupChains(taskList) {
+  const byId = new Map()
+  for (const t of taskList) byId.set(t.id, t)
+
+  // Find chain roots: tasks that have no predecessor OR whose predecessor is not in this list
+  const roots = []
+  const visited = new Set()
+
+  for (const t of taskList) {
+    if (!t.predecessor_task_id || !byId.has(t.predecessor_task_id)) {
+      roots.push(t)
+    }
   }
-  if (task.followup_task_id) {
-    return <span className="followup-chain-label has-followup">Has follow-up</span>
+
+  const result = []
+
+  for (const root of roots) {
+    // Walk the chain: root -> followup -> followup -> ...
+    const chain = []
+    let current = root
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id)
+      chain.push(current)
+      current = current.followup_task_id ? byId.get(current.followup_task_id) : null
+    }
+
+    const chainLength = chain.length
+    for (let i = 0; i < chain.length; i++) {
+      result.push({
+        task: chain[i],
+        chainIndex: chainLength > 1 ? i + 1 : 0, // 0 means not part of a chain
+        chainLength,
+        isFollowup: i > 0,
+        isLast: i === chain.length - 1,
+      })
+    }
   }
-  return null
+
+  // Add any tasks that weren't part of any chain (orphans)
+  for (const t of taskList) {
+    if (!visited.has(t.id)) {
+      result.push({ task: t, chainIndex: 0, chainLength: 1, isFollowup: false, isLast: true })
+    }
+  }
+
+  return result
 }
 
-function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pickerTaskId, setPickerTaskId, followupForTaskId, setFollowupForTaskId, onAddFollowup }) {
+function FollowupChainNumber({ chainIndex, chainLength, isLast }) {
+  if (chainIndex === 0) return null
+  return (
+    <div className={`followup-chain-number-wrap${isLast ? '' : ' has-line'}`}>
+      <span className="followup-chain-number">{chainIndex}</span>
+    </div>
+  )
+}
+
+function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pickerTaskId, setPickerTaskId, followupForTaskId, setFollowupForTaskId, onAddFollowup, chainIndex, chainLength, isLast }) {
   const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
@@ -199,6 +253,7 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      <FollowupChainNumber chainIndex={chainIndex} chainLength={chainLength} isLast={isLast} />
       <div
         className="needs-you-card"
         style={{ '--accent': color }}
@@ -207,7 +262,6 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
         <div style={{ flex: 1, minWidth: 0, cursor: isRecipientPick ? 'default' : 'pointer' }}>
           <div className="needs-you-title">
             {normalizeTaskTitle(task.title)}
-            <FollowupChainLabel task={task} />
           </div>
           <div className="needs-you-subtitle">
             {NEEDS_YOU_SUBTITLES[status]}
@@ -288,7 +342,7 @@ function NeedsYouCard({ task, onClick, onPickTaskRecipient, recipientAgents, pic
   )
 }
 
-function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId, onAddFollowup }) {
+function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId, onAddFollowup, chainIndex, chainLength, isLast }) {
   const status = String(task.status).toLowerCase()
   const color = getStatusColor(status)
   const [hovered, setHovered] = useState(false)
@@ -299,6 +353,7 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      <FollowupChainNumber chainIndex={chainIndex} chainLength={chainLength} isLast={isLast} />
       <div className="task-row" onClick={() => onClick?.(task)}>
         <div className="task-dot">
           <div className="task-dot-inner" style={{ background: color }} />
@@ -308,7 +363,6 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
         </div>
         <span className="task-title active">
           {normalizeTaskTitle(task.title)}
-          <FollowupChainLabel task={task} />
         </span>
         <div className="task-meta-right">
           {hovered && onAddFollowup && (
@@ -537,6 +591,9 @@ export function FeedView({
     return { needsYou, active, done }
   }, [tasks])
 
+  const orderedNeedsYou = useMemo(() => orderWithFollowupChains(needsYou), [needsYou])
+  const orderedActive = useMemo(() => orderWithFollowupChains(active), [active])
+
   return (
     <section className="feed">
       {loading && <div className="muted">Loading tasks...</div>}
@@ -586,8 +643,8 @@ export function FeedView({
                 />
               </div>
             ))}
-            {needsYou.map((task) => (
-              <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+            {orderedNeedsYou.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
+              <div key={task.id} className={`${newTaskIds.has(task.id) ? 'task-enter' : ''}${isFollowup ? ' followup-item' : ''}`}>
                 <NeedsYouCard
                   task={task}
                   onClick={onOpenTaskConversation}
@@ -598,6 +655,9 @@ export function FeedView({
                   followupForTaskId={followupForTaskId}
                   setFollowupForTaskId={setFollowupForTaskId}
                   onAddFollowup={onAddFollowup}
+                  chainIndex={chainIndex}
+                  chainLength={chainLength}
+                  isLast={isLast}
                 />
               </div>
             ))}
@@ -613,15 +673,18 @@ export function FeedView({
                 <ActiveTaskRow task={task} onClick={onOpenTaskConversation} followupForTaskId={followupForTaskId} setFollowupForTaskId={setFollowupForTaskId} onAddFollowup={onAddFollowup} />
               </div>
             ))}
-            {active.length > 0 ? (
-              active.map((task) => (
-                <div key={task.id} className={newTaskIds.has(task.id) ? 'task-enter' : undefined}>
+            {orderedActive.length > 0 ? (
+              orderedActive.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
+                <div key={task.id} className={`${newTaskIds.has(task.id) ? 'task-enter' : ''}${isFollowup ? ' followup-item' : ''}`}>
                   <ActiveTaskRow
                     task={task}
                     onClick={onOpenTaskConversation}
                     followupForTaskId={followupForTaskId}
                     setFollowupForTaskId={setFollowupForTaskId}
                     onAddFollowup={onAddFollowup}
+                    chainIndex={chainIndex}
+                    chainLength={chainLength}
+                    isLast={isLast}
                   />
                 </div>
               ))
