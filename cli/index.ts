@@ -226,6 +226,7 @@ taskCommand
   .description("Pause execution and ask the human a clarification question")
   .requiredOption("--question <text>", "Question for the human")
   .option("--details <text>", "Optional context details")
+  .option("--option <text>", "Add a selectable answer option (repeatable)", (val: string, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
   .option("--task-id <id>", "Task id")
   .option("--turn-id <id>", "Turn id")
   .option("--api-url <url>", "Pragma API base URL")
@@ -233,6 +234,7 @@ taskCommand
     async (options: {
       question: string;
       details?: string;
+      option: string[];
       taskId?: string;
       turnId?: string;
       apiUrl?: string;
@@ -250,6 +252,7 @@ taskCommand
             details: options.details,
             turn_id: turnId,
             agent_id: agentId,
+            options: options.option.length > 0 ? options.option : undefined,
           }),
         },
       );

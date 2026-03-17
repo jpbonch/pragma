@@ -501,6 +501,24 @@ function buildEntriesFromThreadData(data, agentById) {
       continue
     }
 
+    if (event.event_name === 'worker_question_requested') {
+      const question = event.payload?.question || 'Question from agent'
+      const options = Array.isArray(event.payload?.options) ? event.payload.options : null
+      const details = event.payload?.details || null
+      timeline.push({
+        createdAt: toTimestamp(event.created_at),
+        order: 4,
+        entry: {
+          id: event.id || nextEntryId('question'),
+          type: 'question',
+          content: question,
+          details,
+          options,
+        },
+      })
+      continue
+    }
+
     const statusText = summarizeStatusEvent(event.event_name, event.payload)
     if (statusText) {
       timeline.push({

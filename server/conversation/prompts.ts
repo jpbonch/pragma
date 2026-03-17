@@ -61,7 +61,7 @@ export function buildPrompt(
   if (mode === "plan") {
     const planRecipientCommand = `${cli} task plan-select-recipient --agent-id "<candidate_id>" --reason "<one sentence reason>"`;
     const listAgentsCommand = `${cli} list-agents`;
-    const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"]`;
+    const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"] [--option "<choice>" --option "<choice>" ...]`;
     const dbQueryCommand = `${cli} db-query --sql "<SELECT statement>"`;
     const candidates = Array.isArray(options.planCandidates) ? options.planCandidates : [];
     const candidateLines = candidates.map((candidate, index) => {
@@ -84,6 +84,7 @@ export function buildPrompt(
       "Before producing any plan, assess the user's request for ambiguities, missing context, or decisions that could reasonably go multiple ways.",
       "If the request is unclear, underspecified, or you are uncertain about the right approach, ask the user a clarifying question:",
       askQuestionCommand,
+      "Use --option flags when there are a small number of concrete choices (2-5). Omit --option for open-ended questions.",
       "After asking a question, STOP immediately. Do not produce a plan. Do not select a recipient. Output only the question and nothing else. Wait for the user to respond.",
       "To inspect workspace state (tasks, events, threads, messages), run read-only SQL queries:",
       dbQueryCommand,
@@ -183,7 +184,7 @@ export function buildWorkerPrompt(input: {
   const cli = input.pragmaCliCommand?.trim() || "pragma";
   const preferredCodePath = input.preferredCodePath?.trim() || "";
   const taskWorkspaceDir = input.taskWorkspaceDir?.trim() || "";
-  const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"]`;
+  const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"] [--option "<choice>" --option "<choice>" ...]`;
   const requestHelpCommand = `${cli} task request-help --summary "<short summary>" [--details "<optional context>"]`;
   const submitTestsCommand = `${cli} task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]`;
   const dbQueryCommand = `${cli} db-query --sql "<SELECT statement>"`;
@@ -213,6 +214,7 @@ export function buildWorkerPrompt(input: {
     "Before making changes, check if the project has uninstalled dependencies (e.g. missing node_modules/, .venv/, vendor/, etc.) and install them using the appropriate package manager.",
     "If you need clarification from the human, run:",
     askQuestionCommand,
+    "Use --option flags when there are a small number of concrete choices (2-5). Omit --option for open-ended questions.",
     "If you are blocked and need human help, run:",
     requestHelpCommand,
     "If you changed code, submit at least one runnable validation command for the task window.",

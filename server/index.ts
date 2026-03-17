@@ -2585,6 +2585,7 @@ WHERE id = $1
           payload: {
             question: body.question,
             details: body.details ?? null,
+            options: body.options ?? null,
             agent_id: body.agent_id ?? task.assigned_to ?? null,
             previous_status: previousStatus,
           },

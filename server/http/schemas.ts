@@ -113,6 +113,7 @@ export const agentAskQuestionSchema = z
   .object({
     question: nonEmptyString,
     details: nonEmptyString.optional(),
+    options: z.array(nonEmptyString).max(6).optional(),
     turn_id: nonEmptyString.optional(),
     agent_id: nonEmptyString.optional(),
   })

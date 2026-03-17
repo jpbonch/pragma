@@ -1804,6 +1804,52 @@ select { cursor: pointer; }
   color: #B0AFA8;
 }
 
+/* Question card */
+.conv-question-card {
+  margin: 8px 22px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.conv-question-text {
+  font-size: 13px;
+  color: #E0DFD8;
+  line-height: 1.45;
+}
+
+.conv-question-details {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #8A8880;
+  line-height: 1.4;
+}
+
+.conv-question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.conv-question-option-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #D0CFD0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.conv-question-option-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
 /* Footer */
 .conv-footer {
   padding: 10px 22px 14px;

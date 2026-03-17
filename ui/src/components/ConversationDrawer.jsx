@@ -395,6 +395,31 @@ export function ConversationDrawer({
       )
     }
 
+    if (entry.type === 'question') {
+      const isWaiting = taskStatus === 'waiting_for_question_response' || taskStatus === 'waiting_for_help_response'
+      return (
+        <div key={entry.id} className="conv-question-card">
+          <div className="conv-question-text">{entry.content}</div>
+          {entry.details && (
+            <div className="conv-question-details">{entry.details}</div>
+          )}
+          {isWaiting && Array.isArray(entry.options) && entry.options.length > 0 && (
+            <div className="conv-question-options">
+              {entry.options.map((opt, i) => (
+                <button
+                  key={i}
+                  className="conv-question-option-btn"
+                  onClick={() => onPromptSubmit?.(opt)}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    }
+
     if (entry.type === 'status') {
       return (
         <div key={entry.id} className="conv-status">
