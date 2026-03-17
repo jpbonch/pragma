@@ -1,6 +1,6 @@
 export type ConversationMode = "chat" | "plan" | "execute";
 
-export type HarnessId = "codex" | "claude_code";
+export type HarnessId = string;
 export type ReasoningEffort = "low" | "medium" | "high" | "extra_high";
 
 export const TASK_STATUS_VALUES = [

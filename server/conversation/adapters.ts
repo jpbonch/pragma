@@ -2,142 +2,15 @@ import type {
   AdapterSendTurnInput,
   AdapterSendTurnResult,
   ConversationAdapter,
-  HarnessId,
 } from "./types";
+import { getAdapterDefinition } from "./adapterRegistry";
 import { spawnCommand } from "../process/runCommand";
-import { resolve } from "node:path";
 
-export function getConversationAdapter(harness: HarnessId): ConversationAdapter {
-  if (harness === "codex") {
-    return codexAdapter;
-  }
-  return claudeAdapter;
+export function getConversationAdapter(harness: string): ConversationAdapter {
+  return getAdapterDefinition(harness).createAdapter();
 }
 
-const codexAdapter: ConversationAdapter = {
-  async sendTurn(input: AdapterSendTurnInput): Promise<AdapterSendTurnResult> {
-    const sandboxRoot = resolveSandboxRoot(input);
-    const args = buildCodexArgs(input, sandboxRoot);
-    return runAdapterCommand({
-      command: "codex",
-      args,
-      cwd: input.cwd,
-      env: input.env,
-      abortSignal: input.abortSignal,
-      onJsonLine: async (line, state) => {
-        const eventType = readString(line, "type");
-        if (eventType === "thread.started") {
-          const threadId = readString(line, "thread_id");
-          if (threadId) {
-            state.sessionId = threadId;
-          }
-          return;
-        }
-
-        if (eventType === "item.completed") {
-          const item = readObject(line, "item");
-          const itemType = readString(item, "type");
-
-          if (itemType === "agent_message") {
-            const text = readString(item, "text") ?? "";
-            if (text) {
-              state.finalText = appendText(state.finalText, text);
-              await input.onEvent({ type: "assistant_text", delta: text });
-            }
-            return;
-          }
-
-          if (shouldEmitCodexToolEvent(itemType, item)) {
-            await input.onEvent({
-              type: "tool_event",
-              name: `item.${itemType || "unknown"}`,
-              payload: item,
-            });
-          }
-          return;
-        }
-
-        if (eventType === "error" || eventType === "turn.failed") {
-          state.commandError = readString(line, "message") || JSON.stringify(line);
-          return;
-        }
-
-        // Ignore non-tool lifecycle noise like turn.started/turn.completed.
-      },
-    });
-  },
-};
-
-const claudeAdapter: ConversationAdapter = {
-  async sendTurn(input: AdapterSendTurnInput): Promise<AdapterSendTurnResult> {
-    const sandboxRoot = resolveSandboxRoot(input);
-    const args = buildClaudeArgs(input, sandboxRoot);
-    return runAdapterCommand({
-      command: "claude",
-      args,
-      cwd: input.cwd,
-      env: input.env,
-      abortSignal: input.abortSignal,
-      onJsonLine: async (line, state) => {
-        const eventType = readString(line, "type");
-
-        if (eventType === "system") {
-          const subtype = readString(line, "subtype");
-          if (subtype === "init") {
-            const sessionId = readString(line, "session_id");
-            if (sessionId) {
-              state.sessionId = sessionId;
-            }
-          }
-          return;
-        }
-
-        if (eventType === "assistant") {
-          const message = readObject(line, "message");
-          const content = readArray(message, "content");
-
-          for (const block of content) {
-            if (typeof block !== "object" || block === null) {
-              continue;
-            }
-
-            const blockType = readString(block, "type");
-            if (blockType === "text") {
-              const text = readString(block, "text") ?? "";
-              if (text) {
-                state.finalText = appendText(state.finalText, text);
-                await input.onEvent({ type: "assistant_text", delta: text });
-              }
-              continue;
-            }
-
-            await input.onEvent({
-              type: "tool_event",
-              name: `assistant.${blockType || "block"}`,
-              payload: block as Record<string, unknown>,
-            });
-          }
-          return;
-        }
-
-        if (eventType === "result") {
-          const isError = Boolean(readBoolean(line, "is_error"));
-          const resultText = readString(line, "result") ?? "";
-          if (resultText && !state.finalText) {
-            state.finalText = resultText;
-          }
-          if (isError) {
-            state.commandError = resultText || "Claude CLI returned an error.";
-          }
-          return;
-        }
-        // Ignore non-tool lifecycle noise (user/result/system echoes).
-      },
-    });
-  },
-};
-
-type RunAdapterCommandInput = {
+export type RunAdapterCommandInput = {
   command: string;
   args: string[];
   cwd: string;
@@ -146,13 +19,13 @@ type RunAdapterCommandInput = {
   onJsonLine: (line: Record<string, unknown>, state: RunState) => Promise<void>;
 };
 
-type RunState = {
+export type RunState = {
   sessionId: string | null;
   finalText: string;
   commandError: string | null;
 };
 
-async function runAdapterCommand(input: RunAdapterCommandInput): Promise<AdapterSendTurnResult> {
+export async function runAdapterCommand(input: RunAdapterCommandInput): Promise<AdapterSendTurnResult> {
   const state: RunState = {
     sessionId: null,
     finalText: "",
@@ -270,100 +143,7 @@ async function runAdapterCommand(input: RunAdapterCommandInput): Promise<Adapter
   };
 }
 
-function buildCodexArgs(input: AdapterSendTurnInput, sandboxRoot: string): string[] {
-  const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
-  const sandboxLevel = input.mode === "chat" ? "workspace-read" : "workspace-write";
-  const globalSandboxArgs = [
-    "-a",
-    "never",
-    "-s",
-    sandboxLevel,
-    "-C",
-    sandboxRoot,
-  ];
-
-  if (input.sessionId) {
-    return [
-      ...globalSandboxArgs,
-      "exec",
-      "resume",
-      "--json",
-      "--skip-git-repo-check",
-      "--model",
-      input.modelId,
-      input.sessionId,
-      prompt,
-    ];
-  }
-
-  return [
-    ...globalSandboxArgs,
-    "exec",
-    "--json",
-    "--skip-git-repo-check",
-    "--model",
-    input.modelId,
-    prompt,
-  ];
-}
-
-/**
- * Tools that mutate files. Blocked in chat mode so the agent can only read.
- */
-const CHAT_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"];
-
-function buildClaudeArgs(input: AdapterSendTurnInput, sandboxRoot: string): string[] {
-  const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
-  const args = [
-    "-p",
-    "--output-format",
-    "stream-json",
-    "--verbose",
-    "--allow-dangerously-skip-permissions",
-    "--dangerously-skip-permissions",
-    "--permission-mode",
-    "bypassPermissions",
-    "--add-dir",
-    sandboxRoot,
-    "--model",
-    input.modelId,
-  ];
-
-  if (input.mode === "chat") {
-    args.push("--disallowedTools", CHAT_DISALLOWED_TOOLS.join(","));
-  }
-
-  if (input.sessionId) {
-    args.push("--resume", input.sessionId);
-  }
-
-  args.push("--", prompt);
-  return args;
-}
-
-function resolveSandboxRoot(input: AdapterSendTurnInput): string {
-  const resolvedCwd = resolve(input.cwd);
-  if (input.mode !== "execute") {
-    return resolvedCwd;
-  }
-
-  const rawTaskWorkspace = input.env?.PRAGMA_TASK_WORKSPACE;
-  const taskWorkspace = typeof rawTaskWorkspace === "string" ? rawTaskWorkspace.trim() : "";
-  if (!taskWorkspace) {
-    throw new Error("Execute mode requires PRAGMA_TASK_WORKSPACE.");
-  }
-
-  const resolvedTaskWorkspace = resolve(taskWorkspace);
-  if (resolvedCwd !== resolvedTaskWorkspace) {
-    throw new Error(
-      `Execute mode must run inside the active task worktree. cwd=${resolvedCwd}; task_workspace=${resolvedTaskWorkspace}`,
-    );
-  }
-
-  return resolvedTaskWorkspace;
-}
-
-function withReasoningEffort(
+export function withReasoningEffort(
   prompt: string,
   reasoningEffort: AdapterSendTurnInput["reasoningEffort"],
 ): string {
@@ -376,7 +156,7 @@ function withReasoningEffort(
   return `Reasoning effort is ${readable}. Follow that effort level in your internal reasoning depth.\n\n${prompt}`;
 }
 
-function safeJsonParse(text: string): unknown {
+export function safeJsonParse(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
@@ -384,7 +164,7 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-function appendText(current: string, next: string): string {
+export function appendText(current: string, next: string): string {
   if (!current) {
     return next;
   }
@@ -394,7 +174,7 @@ function appendText(current: string, next: string): string {
   return `${current}\n${next}`;
 }
 
-function readObject(
+export function readObject(
   value: unknown,
   key: string,
 ): Record<string, unknown> {
@@ -410,7 +190,7 @@ function readObject(
   return candidate as Record<string, unknown>;
 }
 
-function readArray(value: unknown, key: string): unknown[] {
+export function readArray(value: unknown, key: string): unknown[] {
   if (!value || typeof value !== "object") {
     return [];
   }
@@ -419,7 +199,7 @@ function readArray(value: unknown, key: string): unknown[] {
   return Array.isArray(candidate) ? candidate : [];
 }
 
-function readString(value: unknown, key: string): string | null {
+export function readString(value: unknown, key: string): string | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -428,7 +208,7 @@ function readString(value: unknown, key: string): string | null {
   return typeof candidate === "string" ? candidate : null;
 }
 
-function readBoolean(value: unknown, key: string): boolean | null {
+export function readBoolean(value: unknown, key: string): boolean | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -437,30 +217,8 @@ function readBoolean(value: unknown, key: string): boolean | null {
   return typeof candidate === "boolean" ? candidate : null;
 }
 
-function shouldEmitCodexToolEvent(
-  itemType: string | null,
-  item: Record<string, unknown>,
-): boolean {
-  if (!itemType) {
-    return false;
-  }
-
-  // Hide reasoning and other verbose metadata events.
-  if (itemType === "reasoning" || itemType === "plan") {
-    return false;
-  }
-
-  if (itemType.includes("tool")) {
-    return true;
-  }
-
-  // Some codex event variants may include command/file ops without "tool" in type.
-  if (typeof item.command === "string") {
-    return true;
-  }
-  if (typeof item.file_path === "string") {
-    return true;
-  }
-
-  return false;
-}
+// Side-effect requires: load adapter registrations.
+// Using require() instead of import so they execute after all exports are defined,
+// avoiding circular-dependency issues with CommonJS module resolution.
+require("./adapters/codexAdapter");
+require("./adapters/claudeAdapter");

@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { TASK_STATUS_VALUES } from "../conversation/types";
+import { getRegisteredHarnessIds } from "../conversation/adapterRegistry";
 
-const harnessSchema = z.enum(["codex", "claude_code"]);
+const harnessSchema = z.string().trim().min(1).refine(
+  (value) => getRegisteredHarnessIds().includes(value),
+  { message: "Unknown harness" },
+);
 const reasoningEffortSchema = z.enum(["low", "medium", "high", "extra_high"]);
 const taskStatusSchema = z.enum(TASK_STATUS_VALUES);
 

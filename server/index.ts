@@ -40,6 +40,7 @@ import {
   syncTaskOutputsBackToWorkspace,
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
+import { allAdapterDefinitions } from "./conversation/adapterRegistry";
 import { resolvePragmaCliCommand } from "./conversation/pragmaCli";
 import {
   closeThread,
@@ -516,10 +517,11 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     const execFileAsync = promisify(execFile);
     const whichCommand = process.platform === "win32" ? "where" : "which";
 
-    const clis: { id: string; command: string; available: boolean }[] = [
-      { id: "claude_code", command: "claude", available: false },
-      { id: "codex", command: "codex", available: false },
-    ];
+    const clis = allAdapterDefinitions().map((def) => ({
+      id: def.id,
+      command: def.command,
+      available: false,
+    }));
 
     await Promise.all(
       clis.map(async (cli) => {

@@ -2,7 +2,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { homedir } from "node:os";
 import { DEFAULT_AGENT_ID } from "../db";
 import { getConversationAdapter } from "./adapters";
-import type { HarnessId } from "./types";
+import { getAdapterDefinition } from "./adapterRegistry";
 
 const TITLE_SYSTEM_PROMPT = [
   "Generate a concise title (3-8 words) that summarizes the conversation.",
@@ -26,8 +26,9 @@ export async function generateTitle(
       return deriveChatTitleFallback(userMessage, assistantMessage);
     }
 
-    const harness = agent.harness as HarnessId;
-    const modelId = harness === "claude_code" ? "haiku" : agent.model_id;
+    const harness = agent.harness;
+    const def = getAdapterDefinition(harness);
+    const modelId = def.titleModelId ?? agent.model_id;
     const adapter = getConversationAdapter(harness);
 
     const prompt = buildTitlePrompt(userMessage, assistantMessage);
