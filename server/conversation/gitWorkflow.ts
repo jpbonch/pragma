@@ -165,6 +165,7 @@ export async function prepareTaskWorkspace(input: {
   const taskCodeDir = join(taskWorkspaceDir, "code");
   await mkdir(taskCodeDir, { recursive: true });
   await mkdir(join(taskWorkspaceDir, "outputs"), { recursive: true });
+  await mkdir(join(taskWorkspaceDir, "context"), { recursive: true });
   await seedNonRepoCodeIntoTaskWorkspace({
     sourceCodeDir: input.workspacePaths.codeDir,
     targetCodeDir: taskCodeDir,

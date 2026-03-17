@@ -76,6 +76,7 @@ export function buildPrompt(
       "You are planning work for an implementation agent.",
       "Plan mode is planning-only.",
       workspaceInstruction,
+      "The `context/` directory in the workspace may contain markdown knowledge files written by previous agents. Check it for relevant prior context before planning.",
       "Do not execute implementation work and do not modify files.",
       `Use this Pragma CLI command prefix: ${cli}`,
       "",
@@ -174,6 +175,7 @@ export function buildWorkerPrompt(input: {
   preferredCodePath?: string | null;
   taskWorkspaceDir?: string;
   skills?: Array<{ name: string; description: string | null }>;
+  contextIndex?: string;
 }): string {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
@@ -225,6 +227,9 @@ export function buildWorkerPrompt(input: {
     "To inspect workspace state (tasks, events, conversation history), run read-only SQL queries:",
     dbQueryCommand,
     reasoningLine,
+    "Shared context: the `context/` directory contains markdown knowledge files written by previous agents.",
+    "Before starting work, check `context/` for relevant files. Before finishing, create or update context files to document: architecture decisions, non-obvious patterns, gotchas, or integration points that would help future agents. Do not duplicate what is obvious from reading the code.",
+    input.contextIndex ? `Current context files:\n${input.contextIndex}` : "(No context files yet.)",
     "Agent instructions:",
     agentFile || "(No agent file provided. Use pragmatic software engineering judgement.)",
   ];

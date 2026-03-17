@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
 import { getConversationAdapter } from "./adapters";
@@ -521,6 +521,23 @@ WHERE id = $1
 
     const workerAdapter = getConversationAdapter(selectedWorker.harness);
     const workerSkills = await listAgentSkills(db, selectedWorker.id);
+    const contextDir = join(taskWorkspaceDir, "context");
+    const contextEntries = await readdir(contextDir, { withFileTypes: true }).catch(() => []);
+    const contextLines: string[] = [];
+    for (const entry of contextEntries) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        contextLines.push(`- context/${entry.name}`);
+      } else if (entry.isDirectory()) {
+        const nested = await readdir(join(contextDir, entry.name), { withFileTypes: true }).catch(() => []);
+        for (const n of nested) {
+          if (n.isFile() && n.name.endsWith(".md")) {
+            contextLines.push(`- context/${entry.name}/${n.name}`);
+          }
+        }
+      }
+    }
+    const contextIndex = contextLines.length > 0 ? contextLines.join("\n") : "";
+
     const workerPrompt = buildWorkerPrompt({
       task,
       workerName: selectedWorker.name,
@@ -530,6 +547,7 @@ WHERE id = $1
       preferredCodePath,
       taskWorkspaceDir,
       skills: workerSkills,
+      contextIndex,
     });
 
     let workerText = "";
