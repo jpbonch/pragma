@@ -42,6 +42,7 @@ export function InputBar({
   followupTask = null,
   onCancelFollowup,
   agents = null,
+  orchestratorEmoji = '',
 }) {
   const [localInput, setLocalInput] = useState('')
   const isControlled = value !== undefined
@@ -367,13 +368,7 @@ export function InputBar({
           </div>
 
           <div className="input-actions">
-            {showAgentSelector ? (
-              isAgentSelectorLocked ? (
-                <div className="selector-btn selector-btn-static agent-selector-btn">
-                  <Bot size={14} strokeWidth={2} />
-                  <span className="agent-selector-label">Orchestrator</span>
-                </div>
-              ) : (
+            {showAgentSelector && !isAgentSelectorLocked ? (
                 <div className="input-selector">
                   <button
                     className="selector-btn agent-selector-btn"
@@ -381,6 +376,8 @@ export function InputBar({
                   >
                     {selectedAgent?.emoji ? (
                       <span style={{ fontSize: 13, lineHeight: 1 }}>{selectedAgent.emoji}</span>
+                    ) : orchestratorEmoji ? (
+                      <span style={{ fontSize: 13, lineHeight: 1 }}>{orchestratorEmoji}</span>
                     ) : (
                       <Bot size={14} strokeWidth={2} />
                     )}
@@ -397,7 +394,11 @@ export function InputBar({
                           setOpenMenu(null)
                         }}
                       >
-                        <Bot size={16} strokeWidth={2} />
+                        {orchestratorEmoji ? (
+                          <span style={{ fontSize: 15, lineHeight: 1 }}>{orchestratorEmoji}</span>
+                        ) : (
+                          <Bot size={16} strokeWidth={2} />
+                        )}
                         <div className="selector-option-label">Orchestrator</div>
                         {!selectedAgentId && (
                           <Check size={14} style={{ marginLeft: 'auto', color: '#2383e2' }} />
@@ -426,7 +427,6 @@ export function InputBar({
                     </div>
                   )}
                 </div>
-              )
             ) : onOpenOrchestratorConfig ? (
               <button
                 className="input-settings-btn"

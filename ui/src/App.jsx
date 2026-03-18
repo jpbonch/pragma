@@ -3070,6 +3070,7 @@ export default function App() {
                   loading={false}
                   onStop={handleStopStream}
                   agents={recipientAgents}
+                  orchestratorEmoji={orchestratorRuntime?.emoji || ''}
                   preferredMode={conversation.open ? conversation.mode : ''}
                   onSubmit={(payload) => {
                     void handleInputSubmit(payload)
