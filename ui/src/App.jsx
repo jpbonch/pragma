@@ -36,6 +36,7 @@ import {
   reviewTask,
   deleteTask,
   stopRuntimeService as stopRuntimeServiceApi,
+  stopTask,
   setTaskRecipient,
   setActiveWorkspace,
   createConversationTurn,
@@ -1001,6 +1002,7 @@ export default function App() {
     }
 
     let cancelled = false
+    let throttledSyncTimer = null
     const scheduleConversationRetry = (delayMs = 150) => {
       if (cancelled || conversationSyncRetryTimerRef.current) {
         return
@@ -1074,12 +1076,79 @@ export default function App() {
       }
     }
 
+    // Throttled version: at most once per 2 seconds for thread_updated events
+    const throttledSync = () => {
+      if (cancelled || throttledSyncTimer) return
+      throttledSyncTimer = setTimeout(() => {
+        throttledSyncTimer = null
+        void syncOpenConversation()
+      }, 2000)
+    }
+
+    // Resolve agent identity for streaming events
+    const resolveAgentIdentity = (workerAgentId) => {
+      const resolvedId = (typeof workerAgentId === 'string' && workerAgentId) || ORCHESTRATOR_AGENT_ID
+      const agent = agentById && typeof agentById === 'object' ? agentById[resolvedId] : null
+      return {
+        agentId: resolvedId,
+        agentName:
+          (agent && typeof agent.name === 'string' && agent.name) ||
+          (resolvedId === ORCHESTRATOR_AGENT_ID ? 'Orchestrator' : '') ||
+          resolvedId,
+        agentEmoji:
+          (agent && typeof agent.emoji === 'string' && agent.emoji) ||
+          iconForAgent(resolvedId),
+      }
+    }
+
     const closeStream = openConversationThreadStream(conversation.threadId, {
       onReady: () => {
         void syncOpenConversation()
       },
       onThreadUpdated: () => {
-        void syncOpenConversation()
+        throttledSync()
+      },
+      onEvent: ({ event, data }) => {
+        setConversation((prev) => {
+          if (!prev.open || prev.threadId !== threadIdRef.current || cancelled) {
+            return prev
+          }
+
+          if (event === 'worker_text' || event === 'assistant_text') {
+            const delta = typeof data?.delta === 'string' ? data.delta : ''
+            if (!delta) return prev
+            const workerAgentId = typeof data?.worker_agent_id === 'string' ? data.worker_agent_id : ''
+            const identity = resolveAgentIdentity(workerAgentId)
+            return {
+              ...prev,
+              entries: appendAssistantDelta(prev.entries, delta, identity),
+            }
+          }
+
+          if (event === 'worker_tool_event' || event === 'tool_event') {
+            const summary = summarizeToolEvent(data?.name, data?.payload)
+            if (!summary) return prev
+            return {
+              ...prev,
+              entries: appendToolEntryStreaming(prev.entries, {
+                id: nextEntryId('tool'),
+                type: 'tool',
+                label: summary.label,
+                summary: summary.summary,
+              }),
+            }
+          }
+
+          if (event === 'error') {
+            return { ...prev, error: typeof data?.message === 'string' ? data.message : 'Task error' }
+          }
+
+          return prev
+        })
+      },
+      onError: () => {
+        // SSE reconnection is handled by createReconnectingEventSource;
+        // onReady will trigger a full sync on reconnect.
       },
     })
 
@@ -1090,6 +1159,10 @@ export default function App() {
       if (conversationSyncRetryTimerRef.current) {
         clearTimeout(conversationSyncRetryTimerRef.current)
         conversationSyncRetryTimerRef.current = null
+      }
+      if (throttledSyncTimer) {
+        clearTimeout(throttledSyncTimer)
+        throttledSyncTimer = null
       }
       conversationSyncPendingRef.current = false
       closeStream()
@@ -1845,6 +1918,27 @@ export default function App() {
     }))
   }
 
+  async function handleStopTask() {
+    if (!conversation.taskId) return
+    try {
+      await stopTask(conversation.taskId)
+      setConversation((prev) => ({
+        ...prev,
+        taskStatus: 'waiting_for_question_response',
+        loading: false,
+      }))
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === conversation.taskId
+            ? { ...t, status: 'waiting_for_question_response' }
+            : t
+        )
+      )
+    } catch (error) {
+      setWorkspaceError(errorText(error))
+    }
+  }
+
   function closeConversationDrawer() {
     viewingChatIdRef.current = ''
     streamAbortRef.current?.abort()
@@ -2046,6 +2140,37 @@ export default function App() {
             t.id === conversation.taskId
               ? { ...t, status: conversation.mode === 'plan' ? 'planning' : 'queued' }
               : t
+          )
+        )
+        scheduleTasksRefresh(500)
+      } catch (error) {
+        setWorkspaceError(errorText(error))
+      }
+      return
+    }
+
+    // If the user sends a message while a task is actively running, stop and redirect
+    if (
+      mode === 'chat' &&
+      conversation.open &&
+      conversation.taskId &&
+      isTaskActivelyRunning(conversationStatus)
+    ) {
+      try {
+        await stopTask(conversation.taskId, finalMessage)
+        setConversation((prev) => ({
+          ...prev,
+          taskStatus: 'queued',
+          loading: true,
+          entries: [
+            ...prev.entries,
+            { id: nextEntryId('user'), type: 'user', content: finalMessage },
+            { id: nextEntryId('status'), type: 'status', content: 'Task redirected with your message.' },
+          ],
+        }))
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === conversation.taskId ? { ...t, status: 'queued' } : t
           )
         )
         scheduleTasksRefresh(500)
@@ -2870,7 +2995,7 @@ export default function App() {
                   void handleDeletePlan()
                 }}
                 executeDisabled={!conversation.threadId || !conversation.planReady}
-                onStop={handleStopStream}
+                onStop={conversation.taskId && conversation.mode !== 'plan' ? handleStopTask : handleStopStream}
                 planProposal={conversation.planProposal}
                 onUpdatePlanProposal={(updated) => {
                   setConversation((prev) => ({

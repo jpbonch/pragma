@@ -195,59 +195,112 @@ function parseEventPayload(event) {
   }
 }
 
-export function openTasksStream({ onReady, onTaskStatusChanged, onError } = {}) {
-  const stream = new EventSource(`${API_BASE_URL}/tasks/stream`)
+function createReconnectingEventSource(url, {
+  onOpen,
+  onError,
+  eventListeners = {},
+  maxRetryMs = 30000,
+  initialRetryMs = 1000,
+} = {}) {
+  let stream = null
+  let retryMs = initialRetryMs
+  let retryTimer = null
+  let closed = false
+  let lastEventId = null
 
-  stream.addEventListener('ready', (event) => {
-    const payload = parseEventPayload(event)
-    onReady?.(payload)
-  })
+  function connect() {
+    if (closed) return
 
-  stream.addEventListener('task_status_changed', (event) => {
-    const payload = parseEventPayload(event)
-    if (!payload || typeof payload !== 'object') {
-      return
+    const connectUrl = lastEventId
+      ? `${url}${url.includes('?') ? '&' : '?'}_lastEventId=${encodeURIComponent(lastEventId)}`
+      : url
+
+    stream = new EventSource(connectUrl)
+
+    stream.onopen = () => {
+      retryMs = initialRetryMs
+      onOpen?.()
     }
-    onTaskStatusChanged?.(payload)
-  })
 
-  stream.addEventListener('error', (event) => {
-    onError?.(event)
-  })
+    stream.onerror = () => {
+      stream.close()
+      onError?.()
+      if (!closed) {
+        retryTimer = setTimeout(() => {
+          retryMs = Math.min(retryMs * 2, maxRetryMs)
+          connect()
+        }, retryMs)
+      }
+    }
+
+    for (const [eventName, handler] of Object.entries(eventListeners)) {
+      stream.addEventListener(eventName, (event) => {
+        if (event.lastEventId) {
+          lastEventId = event.lastEventId
+        }
+        handler(event)
+      })
+    }
+  }
+
+  connect()
 
   return () => {
-    stream.close()
+    closed = true
+    if (retryTimer) clearTimeout(retryTimer)
+    stream?.close()
   }
+}
+
+export function openTasksStream({ onReady, onTaskStatusChanged, onError } = {}) {
+  return createReconnectingEventSource(`${API_BASE_URL}/tasks/stream`, {
+    onError: () => onError?.(),
+    eventListeners: {
+      ready: (event) => onReady?.(parseEventPayload(event)),
+      task_status_changed: (event) => {
+        const payload = parseEventPayload(event)
+        if (payload && typeof payload === 'object') {
+          onTaskStatusChanged?.(payload)
+        }
+      },
+    },
+  })
 }
 
 export function openConversationThreadStream(
   threadId,
-  { onReady, onThreadUpdated, onError } = {},
+  { onReady, onThreadUpdated, onEvent, onError } = {},
 ) {
-  const stream = new EventSource(
-    `${API_BASE_URL}/conversations/${encodeURIComponent(threadId)}/stream`,
-  )
+  const streamEventNames = [
+    'worker_text', 'worker_tool_event', 'assistant_text', 'tool_event',
+    'worker_completed', 'worker_question_requested', 'worker_help_requested',
+    'error', 'recipient_selected', 'worker_started', 'human_response_received',
+    'orchestrator_started',
+  ]
 
-  stream.addEventListener('ready', (event) => {
-    const payload = parseEventPayload(event)
-    onReady?.(payload)
-  })
-
-  stream.addEventListener('thread_updated', (event) => {
-    const payload = parseEventPayload(event)
-    if (!payload || typeof payload !== 'object') {
-      return
-    }
-    onThreadUpdated?.(payload)
-  })
-
-  stream.addEventListener('error', (event) => {
-    onError?.(event)
-  })
-
-  return () => {
-    stream.close()
+  const eventListeners = {
+    ready: (event) => onReady?.(parseEventPayload(event)),
+    thread_updated: (event) => {
+      const payload = parseEventPayload(event)
+      if (payload && typeof payload === 'object') {
+        onThreadUpdated?.(payload)
+      }
+    },
   }
+
+  for (const name of streamEventNames) {
+    eventListeners[name] = (event) => {
+      const payload = parseEventPayload(event)
+      if (payload) {
+        onEvent?.({ event: name, data: payload, id: event.lastEventId })
+      }
+    }
+  }
+
+  return createReconnectingEventSource(
+    `${API_BASE_URL}/conversations/${encodeURIComponent(threadId)}/stream`,
+    { onError: () => onError?.(), eventListeners },
+  )
 }
 
 export async function fetchWorkspaceOutputFiles() {
@@ -337,29 +390,17 @@ export async function stopRuntimeService(serviceId) {
 }
 
 export function openRuntimeServiceStream(serviceId, { onReady, onLog, onStatus, onError } = {}) {
-  const stream = new EventSource(
+  return createReconnectingEventSource(
     `${API_BASE_URL}/services/${encodeURIComponent(serviceId)}/stream`,
+    {
+      onError: () => onError?.(),
+      eventListeners: {
+        ready: (event) => onReady?.(parseEventPayload(event)),
+        log: (event) => onLog?.(parseEventPayload(event)),
+        status: (event) => onStatus?.(parseEventPayload(event)),
+      },
+    },
   )
-
-  stream.addEventListener('ready', (event) => {
-    onReady?.(parseEventPayload(event))
-  })
-
-  stream.addEventListener('log', (event) => {
-    onLog?.(parseEventPayload(event))
-  })
-
-  stream.addEventListener('status', (event) => {
-    onStatus?.(parseEventPayload(event))
-  })
-
-  stream.addEventListener('error', (event) => {
-    onError?.(event)
-  })
-
-  return () => {
-    stream.close()
-  }
 }
 
 export async function reviewTask(taskId, action) {
@@ -373,6 +414,14 @@ export async function reviewTask(taskId, action) {
 export async function deleteTask(taskId) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}`, {
     method: 'DELETE',
+  })
+}
+
+export async function stopTask(taskId, message) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/stop`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(message ? { message } : {}),
   })
 }
 

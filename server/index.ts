@@ -90,6 +90,7 @@ import {
   executeFromThreadSchema,
   tasksQuerySchema,
   taskRespondSchema,
+  stopTaskSchema,
   openOutputFolderSchema,
   outputFileQuerySchema,
   planProposeSchema,
@@ -2789,6 +2790,125 @@ WHERE id = $1
     } finally {
       await db.close();
     }
+  });
+
+  app.post("/tasks/:taskId/stop", validateJson(stopTaskSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const taskId = c.req.param("taskId");
+    const body = c.req.valid("json");
+
+    const db = await openDatabase(workspaceName);
+    let requeue: {
+      threadId: string;
+      prompt: string;
+      recipientAgentId: string;
+      reasoningEffort: ReasoningEffort;
+      resumeWorkerSessionId: string | null;
+      followUpMessage: string;
+    } | null = null;
+
+    try {
+      await ensureConversationSchema(db);
+      const taskResult = await db.query<{
+        id: string;
+        status: TaskStatus;
+        assigned_to: string | null;
+      }>(
+        `SELECT id, status, assigned_to FROM tasks WHERE id = $1 LIMIT 1`,
+        [taskId],
+      );
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+      }
+
+      const stoppable = task.status === "running" || task.status === "orchestrating" || task.status === "queued";
+      if (!stoppable) {
+        throw new PragmaError(
+          "TASK_NOT_STOPPABLE",
+          409,
+          `Task is not in a stoppable state (${task.status}): ${taskId}`,
+        );
+      }
+
+      executeRunner.abort(taskId);
+
+      const thread = await getThreadByTaskId(db, taskId);
+
+      if (body.message && thread) {
+        // User sent a redirect message — insert it and requeue
+        await insertMessage(db, {
+          id: `msg_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: null,
+          role: "user",
+          content: body.message,
+        });
+
+        await insertEvent(db, {
+          id: `evt_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: null,
+          eventName: "task_stopped",
+          payload: { message: body.message, previous_status: task.status },
+        });
+
+        await db.query(`UPDATE tasks SET status = 'queued' WHERE id = $1`, [taskId]);
+        emitTaskStatus(workspaceName, taskId, "queued", "task_stopped");
+        publishThreadUpdated(workspaceName, thread.id, "task_stopped");
+
+        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+        if (latestExecuteTurn && task.assigned_to) {
+          requeue = {
+            threadId: thread.id,
+            prompt: latestExecuteTurn.user_message,
+            recipientAgentId: task.assigned_to,
+            reasoningEffort: requireReasoningEffort(
+              latestExecuteTurn.reasoning_effort,
+              `latest execute turn for task ${taskId}`,
+            ),
+            resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
+            followUpMessage: body.message,
+          };
+        }
+      } else {
+        // No message — just stop
+        if (thread) {
+          await insertEvent(db, {
+            id: `evt_${randomUUID().slice(0, 12)}`,
+            threadId: thread.id,
+            turnId: null,
+            eventName: "task_stopped",
+            payload: { previous_status: task.status },
+          });
+          publishThreadUpdated(workspaceName, thread.id, "task_stopped");
+        }
+
+        await db.query(
+          `UPDATE tasks SET status = 'waiting_for_question_response' WHERE id = $1`,
+          [taskId],
+        );
+        emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "task_stopped");
+      }
+    } finally {
+      await db.close();
+    }
+
+    if (requeue) {
+      executeRunner.execute({
+        workspaceName,
+        taskId,
+        threadId: requeue.threadId,
+        prompt: requeue.prompt,
+        requestedRecipientAgentId: requeue.recipientAgentId,
+        reasoningEffort: requeue.reasoningEffort,
+        resumeWorkerSessionId: requeue.resumeWorkerSessionId,
+        followUpMessage: requeue.followUpMessage,
+      });
+      return c.json({ ok: true, status: "queued" });
+    }
+
+    return c.json({ ok: true, status: "waiting_for_question_response" });
   });
 
   app.post("/tasks/:taskId/respond", validateJson(taskRespondSchema), async (c) => {

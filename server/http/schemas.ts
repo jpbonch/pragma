@@ -184,6 +184,12 @@ export const taskRespondSchema = z
   })
   .strict();
 
+export const stopTaskSchema = z
+  .object({
+    message: nonEmptyString.optional(),
+  })
+  .strict();
+
 export const reviewTaskSchema = z
   .object({
     action: z.enum(["approve", "approve_and_push", "reopen", "mark_completed", "approve_chain", "approve_chain_and_push", "mark_chain_completed"]),
