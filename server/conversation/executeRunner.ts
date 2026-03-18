@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { appendFile, mkdir, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
 import { getConnectorBinDir } from "../connectorBinaries";
 import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "../connectorRegistry";
@@ -17,7 +19,7 @@ import {
 } from "./gitWorkflow";
 import type { TaskGitState } from "./gitWorkflow";
 import { runCommand } from "../process/runCommand";
-import { buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
+import { buildConversationHistoryBlock, buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
 import {
   closeThread,
   completeTurn,
@@ -25,6 +27,7 @@ import {
   failTurn,
   getFirstExecuteTurn,
   getThreadByTaskId,
+  getThreadMessages,
   insertEvent,
   insertMessage,
   reopenThread,
@@ -576,7 +579,28 @@ WHERE id = $1
     }
     const contextIndex = contextLines.length > 0 ? contextLines.join("\n") : "";
 
-    const workerPrompt = buildWorkerPrompt({
+    // Check if the resume session file actually exists on disk.
+    // The adapter silently drops --resume when the file is missing, so the worker
+    // would get zero prior context. In that case, inject conversation history.
+    let conversationHistoryBlock = "";
+    if (input.resumeWorkerSessionId) {
+      const cwdSlug = resolve(taskWorkspaceDir).replace(/\//g, "-");
+      const sessionFile = join(
+        homedir(),
+        ".claude",
+        "projects",
+        cwdSlug,
+        `${input.resumeWorkerSessionId}.jsonl`,
+      );
+      if (!existsSync(sessionFile)) {
+        const priorMessages = await getThreadMessages(db, input.threadId, 40);
+        if (priorMessages.length > 0) {
+          conversationHistoryBlock = buildConversationHistoryBlock(priorMessages) || "";
+        }
+      }
+    }
+
+    let workerPrompt = buildWorkerPrompt({
       task,
       workerName: selectedWorker.name,
       workerAgentFile: selectedWorker.agent_file ?? "",
@@ -587,6 +611,10 @@ WHERE id = $1
       skills: allSkills,
       contextIndex,
     });
+
+    if (conversationHistoryBlock) {
+      workerPrompt = conversationHistoryBlock + "\n\n" + workerPrompt;
+    }
 
     // Build connector env vars (token injection + PATH extension)
     const connectorEnv: Record<string, string> = {};
