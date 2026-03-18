@@ -6083,6 +6083,20 @@ select { cursor: pointer; }
 .cn-disconnect-btn { color: #6f6e69; }
 .cn-disconnect-btn:hover { border-color: #dc2626; color: #dc2626; }
 
+.cn-manual-config-link {
+  background: none; border: none; padding: 0; margin: 0;
+  font-size: 11px; color: #9b9a97; cursor: pointer;
+  font-family: inherit; text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+.cn-manual-config-link:hover { color: #37352f; }
+
+.cn-manual-config-hint {
+  font-size: 12px; color: #9b9a97; margin: 0 0 12px;
+  line-height: 1.5;
+}
+
 .cn-card-meta {
   display: flex; gap: 8px; margin-bottom: 8px;
 }

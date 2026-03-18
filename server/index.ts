@@ -4817,11 +4817,12 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       throw new Error("No refresh token available — connector needs re-authorization");
     }
 
-    // Check if this connector uses the OAuth proxy
+    // Check if this connector uses the OAuth proxy (only if no custom credentials)
     const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
+    const hasCustomCredentials = !!connector.oauth_client_id && !!connector.oauth_client_secret;
     let response: Response;
 
-    if (registryDef?.proxyProvider) {
+    if (registryDef?.proxyProvider && !hasCustomCredentials) {
       response = await fetch(`${OAUTH_PROXY_URL}/refresh/${registryDef.proxyProvider}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4885,8 +4886,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         provider: string;
         status: string;
         auth_type: string;
+        oauth_client_id: string | null;
+        oauth_client_secret: string | null;
       }>(
-        `SELECT id, name, display_name, description, provider, status, auth_type
+        `SELECT id, name, display_name, description, provider, status, auth_type,
+                oauth_client_id, oauth_client_secret
          FROM connectors ORDER BY name ASC`,
       );
 
@@ -4901,6 +4905,8 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
           status: row.status,
           auth_type: row.auth_type,
           has_proxy: !!registryDef?.proxyProvider,
+          has_client_id: !!row.oauth_client_id,
+          has_client_secret: !!row.oauth_client_secret,
         };
       });
 
@@ -4937,24 +4943,18 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
           [body.access_token, connectorId],
         );
       } else {
-        // Reject OAuth credential changes for proxy-managed connectors
-        const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
-        if (registryDef?.proxyProvider) {
-          throw new PragmaError("PROXY_MANAGED", 400, "OAuth credentials are managed by the proxy");
-        }
-
-        // OAuth connectors — store client credentials
+        // OAuth connectors — store client credentials (including proxy-managed connectors for manual config)
         const sets: string[] = [];
         const params: unknown[] = [connectorId];
         let paramIndex = 2;
 
         if (body.oauth_client_id !== undefined) {
           sets.push(`oauth_client_id = $${paramIndex++}`);
-          params.push(body.oauth_client_id);
+          params.push(body.oauth_client_id || null);
         }
         if (body.oauth_client_secret !== undefined) {
           sets.push(`oauth_client_secret = $${paramIndex++}`);
-          params.push(body.oauth_client_secret);
+          params.push(body.oauth_client_secret || null);
         }
 
         if (sets.length > 0) {
@@ -5003,9 +5003,10 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         throw new PragmaError("INVALID_AUTH_TYPE", 400, "This connector does not use OAuth2");
       }
 
-      // Check if this connector uses the OAuth proxy
+      // Check if this connector uses the OAuth proxy (only if no custom credentials are configured)
       const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
-      if (registryDef?.proxyProvider) {
+      const hasCustomCredentials = !!connector.oauth_client_id && !!connector.oauth_client_secret;
+      if (registryDef?.proxyProvider && !hasCustomCredentials) {
         const proxyUrl = `${OAUTH_PROXY_URL}/auth/${registryDef.proxyProvider}?connector_id=${connectorId}&port=${options.port}`;
         return c.json({ url: proxyUrl });
       }

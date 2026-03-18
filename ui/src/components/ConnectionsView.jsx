@@ -377,6 +377,20 @@ export function ConnectionsView() {
     }
   }
 
+  async function handleClearManualConfig(connector) {
+    setActionError('')
+    try {
+      await configureConnector(connector.id, {
+        oauth_client_id: '',
+        oauth_client_secret: '',
+      })
+      const connList = await fetchConnectors()
+      setConnectors(connList)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function handleConnect(connector) {
     if (connecting) return
     setConnecting(connector.id)
@@ -744,9 +758,11 @@ export function ConnectionsView() {
                         CONNECTOR_STATUS_STYLES.disconnected
                       const isOAuth = connector.auth_type === 'oauth2'
                       const hasProxy = !!connector.has_proxy
-                      const needsConfig = isOAuth && !hasProxy && (!connector.has_client_id || !connector.has_client_secret)
-                      const canConnect = isOAuth && (hasProxy || (connector.has_client_id && connector.has_client_secret)) && connector.status !== 'connected'
+                      const hasCustomCreds = !!connector.has_client_id && !!connector.has_client_secret
+                      const needsConfig = isOAuth && !hasProxy && !hasCustomCreds
+                      const canConnect = isOAuth && (hasProxy || hasCustomCreds) && connector.status !== 'connected'
                       const isConnected = connector.status === 'connected'
+                      const showManualLink = isOAuth && hasProxy && !hasCustomCreds && !isConnected
 
                       return (
                         <div key={connector.id} className={`cn-conn-row ${isConnected ? 'cn-conn-row--connected' : ''}`}>
@@ -810,6 +826,22 @@ export function ConnectionsView() {
                               >
                                 <Unlink size={13} />
                                 <span>Disconnect</span>
+                              </button>
+                            )}
+                            {showManualLink && (
+                              <button
+                                className="cn-manual-config-link"
+                                onClick={() => handleOpenConfig(connector)}
+                              >
+                                Configure manually
+                              </button>
+                            )}
+                            {hasProxy && hasCustomCreds && !isConnected && (
+                              <button
+                                className="cn-manual-config-link"
+                                onClick={() => handleClearManualConfig(connector)}
+                              >
+                                Use default
                               </button>
                             )}
                           </div>
@@ -903,6 +935,11 @@ export function ConnectionsView() {
           >
             <h2>Configure {connectorDisplayName(showConfigModal)}</h2>
             <p>{showConfigModal.description}</p>
+            {showConfigModal.auth_type === 'oauth2' && showConfigModal.has_proxy && (
+              <p className="cn-manual-config-hint">
+                Enter your own OAuth client credentials to connect directly instead of using the Pragma proxy.
+              </p>
+            )}
 
             {showConfigModal.auth_type === 'api_key' ? (
               <>
