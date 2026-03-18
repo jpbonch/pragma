@@ -272,6 +272,7 @@ export async function mergeApprovedTask(input: {
 }
 
 export async function saveDiffSnapshot(input: {
+  db: { query: (sql: string, params?: unknown[]) => Promise<unknown> };
   workspacePaths: WorkspacePathsLike;
   taskId: string;
   gitState: TaskGitState;
@@ -288,9 +289,7 @@ export async function saveDiffSnapshot(input: {
     })
     .join("\n\n");
 
-  const outputDir = getTaskMainOutputDir(input.workspacePaths, input.taskId);
-  await mkdir(outputDir, { recursive: true });
-  await writeFile(join(outputDir, ".changes.diff"), combinedDiff, "utf-8");
+  await input.db.query(`UPDATE tasks SET changes_diff = $1 WHERE id = $2`, [combinedDiff, input.taskId]);
 }
 
 export async function deleteTaskWorktree(input: {
@@ -723,13 +722,18 @@ export async function syncTaskOutputsBackToWorkspace(input: {
     return;
   }
 
+  const entries = await readdir(sourceOutputDir, { withFileTypes: true }).catch(() => []);
+  const copyable = entries.filter((e) => !e.name.startsWith(".") && e.name !== "events.jsonl");
+  if (copyable.length === 0) {
+    return;
+  }
+
   const targetOutputDir = getTaskMainOutputDir(input.workspacePaths, input.taskId);
   await mkdir(input.workspacePaths.outputsDir, { recursive: true });
   await rm(targetOutputDir, { recursive: true, force: true });
   await mkdir(targetOutputDir, { recursive: true });
 
-  const entries = await readdir(sourceOutputDir, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
+  for (const entry of copyable) {
     const sourcePath = join(sourceOutputDir, entry.name);
     const targetPath = join(targetOutputDir, entry.name);
     await cp(sourcePath, targetPath, { recursive: true, force: true });

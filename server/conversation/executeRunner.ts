@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readdir } from "node:fs/promises";
+import { mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
@@ -175,7 +175,6 @@ LIMIT 1
   const gitState = prepared.gitState;
   const preferredCodePath = resolvePreferredCodePath(gitState);
   const serializedGitState = serializeTaskGitState(gitState);
-  const logFile = join(outputDir, "events.jsonl");
   await mkdir(outputDir, { recursive: true });
 
   const turnId = `turn_${randomUUID().slice(0, 12)}`;
@@ -320,10 +319,6 @@ WHERE id = $1
       selectedWorker = requestedWorker;
       selectionStatus = "auto_selected";
       selectionReason = "Recipient manually selected.";
-      await appendJsonLine(logFile, {
-        type: "recipient_selected_from_plan",
-        selected_agent_id: selectedWorker.id,
-      });
     } else {
       await insertThreadEvent({
         id: `evt_${randomUUID().slice(0, 12)}`,
@@ -338,14 +333,6 @@ WHERE id = $1
           model_id: orchestrator.model_id,
           reasoning_effort: reasoningEffort,
         },
-      });
-
-      await appendJsonLine(logFile, {
-        type: "orchestrator_started",
-        task_id: input.taskId,
-        thread_id: input.threadId,
-        turn_id: turnId,
-        orchestrator_agent_id: orchestrator.id,
       });
 
       const orchestratorSkills = await listAgentSkills(db, orchestrator.id);
@@ -390,10 +377,6 @@ WHERE id = $1
         abortSignal: abortController.signal,
         onEvent: async (event) => {
           if (abortController.signal.aborted) return;
-          await appendJsonLine(logFile, {
-            phase: "orchestrator",
-            ...event,
-          });
 
           if (event.type === "assistant_text") {
             orchestratorText = appendText(orchestratorText, event.delta);
@@ -486,11 +469,6 @@ WHERE id = $1
           [input.taskId, orchestratorResult.sessionId],
         );
         await notifyTaskStatus("waiting_for_recipient", "execute_runner");
-
-        await appendJsonLine(logFile, {
-          type: "recipient_required",
-          reason,
-        });
         return;
       }
     }
@@ -651,10 +629,6 @@ WHERE id = $1
       abortSignal: abortController.signal,
       onEvent: async (event) => {
         if (abortController.signal.aborted) return;
-        await appendJsonLine(logFile, {
-          phase: "worker",
-          ...event,
-        });
 
         if (event.type === "assistant_text") {
           workerText = appendText(workerText, event.delta);
@@ -829,8 +803,6 @@ WHERE id = $1
       [input.taskId],
     );
     await notifyTaskStatus("failed", "execute_runner");
-
-    await appendJsonLine(logFile, { type: "error", message });
   } finally {
     ACTIVE_TASK_ABORTS.delete(input.taskId);
     await db.close();
@@ -1150,7 +1122,7 @@ async function autoMergeAfterConflictResolution(
       });
     }
 
-    await saveDiffSnapshot({ workspacePaths: paths, taskId: input.taskId, gitState });
+    await saveDiffSnapshot({ db, workspacePaths: paths, taskId: input.taskId, gitState });
 
     for (const chainId of chainTaskIds) {
       ACTIVE_TASK_ABORTS.delete(chainId);
@@ -1184,16 +1156,6 @@ function isWaitingForHumanResponseStatus(status: TaskStatus | null): boolean {
   return status === "waiting_for_question_response" || status === "waiting_for_help_response";
 }
 
-async function appendJsonLine(filePath: string, payload: unknown): Promise<void> {
-  try {
-    await appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf8");
-  } catch (err: unknown) {
-    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
-      return; // Worktree was deleted; silently skip
-    }
-    throw err;
-  }
-}
 
 function appendText(current: string, next: string): string {
   if (!current) {

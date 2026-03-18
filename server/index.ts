@@ -1335,9 +1335,9 @@ LEFT JOIN LATERAL (
     const db = await openDatabase(workspaceName);
 
     try {
-      const taskResult = await db.query<{ id: string; status: string; git_state_json: string | null }>(
+      const taskResult = await db.query<{ id: string; status: string; git_state_json: string | null; changes_diff: string | null }>(
         `
-SELECT id, status, git_state_json
+SELECT id, status, git_state_json, changes_diff
 FROM tasks
 WHERE id = $1
 LIMIT 1
@@ -1351,18 +1351,12 @@ LIMIT 1
 
       const workspacePaths = getWorkspacePaths(workspaceName);
 
-      if (task.status === "completed" || task.status === "cancelled") {
-        const snapshotPath = join(getTaskMainOutputDir(workspacePaths, taskId), ".changes.diff");
-        try {
-          const savedDiff = await readFile(snapshotPath, "utf-8");
-          return c.json({
-            roots: [join(workspacePaths.worktreesDir, taskId, "workspace")],
-            repos: [],
-            diff: savedDiff,
-          });
-        } catch {
-          // Snapshot not found, fall through to live diff
-        }
+      if ((task.status === "completed" || task.status === "cancelled") && task.changes_diff != null) {
+        return c.json({
+          roots: [join(workspacePaths.worktreesDir, taskId, "workspace")],
+          repos: [],
+          diff: task.changes_diff,
+        });
       }
 
       const gitState = parseTaskGitState(task.git_state_json);
@@ -1905,7 +1899,7 @@ WHERE id = $1
           }
 
           // Save diff snapshot for the current task
-          await saveDiffSnapshot({ workspacePaths, taskId, gitState });
+          await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
 
           // Delete worktrees for all chain tasks
           for (const chainId of chainTaskIds) {
@@ -2055,7 +2049,7 @@ WHERE id = $1
           [taskId, nextStatus, mergedOutputDir],
         );
         emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
-        await saveDiffSnapshot({ workspacePaths, taskId, gitState });
+        await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
         executeRunner.abort(taskId);
         await deleteTaskWorktree({ workspacePaths, taskId });
 
@@ -2224,6 +2218,7 @@ WHERE id = $1
 
       executeRunner.abort(taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
+      await rm(getTaskMainOutputDir(workspacePaths, taskId), { recursive: true, force: true });
 
       return c.json({ ok: true, status: "cancelled" });
     } finally {
@@ -6027,9 +6022,6 @@ async function walkOutputFiles(
     if (entry.name.startsWith(".")) {
       continue;
     }
-    if (entry.name === "events.jsonl") {
-      continue;
-    }
 
     const fullPath = join(currentDir, entry.name);
     if (entry.isDirectory()) {
@@ -6055,9 +6047,6 @@ async function walkOutputFiles(
     state.count += 1;
   }
 }
-
-const WORKSPACE_OUTPUT_EXCLUDED_FILES = new Set(["events.jsonl"]);
-const WORKSPACE_OUTPUT_EXCLUDED_EXTENSIONS = new Set([".diff"]);
 
 async function listAllWorkspaceOutputFiles(
   outputsDir: string,
@@ -6088,9 +6077,6 @@ async function walkWorkspaceOutputFiles(
     if (entry.name.startsWith(".")) {
       continue;
     }
-    if (WORKSPACE_OUTPUT_EXCLUDED_FILES.has(entry.name)) {
-      continue;
-    }
 
     const fullPath = join(currentDir, entry.name);
     if (entry.isDirectory()) {
@@ -6099,11 +6085,6 @@ async function walkWorkspaceOutputFiles(
     }
 
     if (!entry.isFile()) {
-      continue;
-    }
-
-    const extension = extname(entry.name).toLowerCase();
-    if (WORKSPACE_OUTPUT_EXCLUDED_EXTENSIONS.has(extension)) {
       continue;
     }
 
