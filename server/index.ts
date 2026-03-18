@@ -451,8 +451,47 @@ function stopRuntimeService(service: RuntimeServiceRecord): void {
   }, 5000);
 }
 
+async function recoverOrphanedTasks(): Promise<void> {
+  const workspaces = await listWorkspaceNames();
+  for (const workspaceName of workspaces) {
+    const db = await openDatabase(workspaceName);
+
+    // 1. Fail all orphaned running turns (chat, plan, and execute threads)
+    const orphanedTurns = await db.query<{ id: string; thread_id: string }>(
+      `SELECT ct.id, ct.thread_id
+       FROM conversation_turns ct
+       WHERE ct.status = 'running'`,
+    );
+    for (const turn of orphanedTurns.rows) {
+      await failTurn(db, turn.id, "Server restarted while turn was in progress");
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId: turn.thread_id,
+        turnId: turn.id,
+        eventName: "error",
+        payload: { code: "SERVER_RESTART", message: "Server restarted while turn was in progress" },
+      });
+    }
+
+    // 2. Fail orphaned tasks in active execution states
+    await db.query(
+      `UPDATE tasks
+       SET status = 'failed',
+           completed_at = CURRENT_TIMESTAMP
+       WHERE status IN ('running', 'orchestrating', 'queued')`,
+    );
+
+    if (orphanedTurns.rows.length > 0) {
+      console.log(
+        `[recovery] ${workspaceName}: failed ${orphanedTurns.rows.length} orphaned turn(s)`,
+      );
+    }
+  }
+}
+
 export async function startServer(options: StartServerOptions): Promise<void> {
   await setupPragma();
+  await recoverOrphanedTasks();
   const apiUrl = process.env.PRAGMA_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
   const pragmaCliCommand = resolvePragmaCliCommand(__dirname);
   const executeRunner = new ExecuteRunner({
