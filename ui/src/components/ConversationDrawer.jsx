@@ -734,7 +734,7 @@ export function ConversationDrawer({
                   </div>
                 </div>
               </div>
-              <div className="conv-output-side">
+              <div className="conv-output-side conv-output-side-execute">
                 <OutputPanel
                   taskId={taskId}
                   taskStatus={taskStatus}
@@ -754,6 +754,80 @@ export function ConversationDrawer({
                   runtimeServiceError={runtimeServiceError}
                   onStopRuntimeService={onStopRuntimeService}
                 />
+                <div className="conv-execute-actions">
+                  {approveError && <div className="error" style={{ padding: '0 0 4px' }}>Error: {approveError}</div>}
+                  <div className="conv-execute-actions-row">
+                    <div>
+                      {deleteConfirming ? (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            className="conv-delete-btn"
+                            onClick={() => { void handleDeleteTask() }}
+                            disabled={deleteLoading}
+                          >
+                            {deleteLoading ? 'Deleting...' : 'Confirm Delete'}
+                          </button>
+                          <button
+                            className="conv-delete-cancel-btn"
+                            onClick={() => setDeleteConfirming(false)}
+                            disabled={deleteLoading}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="conv-delete-btn"
+                          onClick={() => setDeleteConfirming(true)}
+                        >
+                          Delete Task
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      {canApprove && (
+                        <button
+                          className="conv-approve-btn"
+                          onClick={() => { void submitReviewAction(isFollowupTask ? 'approve_chain' : 'approve') }}
+                          disabled={approveLoading}
+                          title={isFollowupTask ? 'Approve chain' : 'Approve'}
+                        >
+                          {approveLoading ? 'Approving...' : isFollowupTask ? 'Approve Chain ✓' : 'Approve ✓'}
+                        </button>
+                      )}
+                      {canApprove && hasChanges === true && (
+                        <button
+                          className="conv-approve-btn"
+                          onClick={() => { void submitReviewAction(isFollowupTask ? 'approve_chain_and_push' : 'approve_and_push') }}
+                          disabled={approveLoading}
+                          title={isFollowupTask ? 'Approve chain and push to origin' : 'Approve and push to origin'}
+                        >
+                          {approveLoading ? 'Approving...' : isFollowupTask ? 'Approve Chain & Push' : 'Approve & Push'}
+                        </button>
+                      )}
+                      {canMarkCompleted && !isCompletedTask && (
+                        <button
+                          className="conv-approve-btn"
+                          onClick={() => { void submitReviewAction(isFollowupTask ? 'mark_chain_completed' : 'mark_completed') }}
+                          disabled={approveLoading}
+                          title={isFollowupTask ? 'Mark task and predecessors as completed' : 'Mark task as completed'}
+                        >
+                          {approveLoading ? 'Completing...' : isFollowupTask ? 'Mark Task and Predecessors Completed' : 'Mark Task Completed'}
+                        </button>
+                      )}
+                      {isCompletedTask && (
+                        <button
+                          className="conv-approve-btn"
+                          onClick={() => { void submitReviewAction('reopen') }}
+                          disabled={approveLoading}
+                          title="Reopen task"
+                        >
+                          {approveLoading ? 'Reopening...' : 'Reopen'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
           ) : (
@@ -767,82 +841,7 @@ export function ConversationDrawer({
         </div>
 
         {/* Footer */}
-        {showProposalPanel ? null : showOutputPanel ? (
-          <div className="conv-footer">
-            {approveError && <div className="error" style={{ padding: '0 4px 4px' }}>Error: {approveError}</div>}
-            <div className="conv-footer-row">
-              <div>
-                {deleteConfirming ? (
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button
-                      className="conv-delete-btn"
-                      onClick={() => { void handleDeleteTask() }}
-                      disabled={deleteLoading}
-                    >
-                      {deleteLoading ? 'Deleting...' : 'Confirm Delete'}
-                    </button>
-                    <button
-                      className="conv-delete-cancel-btn"
-                      onClick={() => setDeleteConfirming(false)}
-                      disabled={deleteLoading}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className="conv-delete-btn"
-                    onClick={() => setDeleteConfirming(true)}
-                  >
-                    Delete Task
-                  </button>
-                )}
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {canApprove && (
-                  <button
-                    className="conv-approve-btn"
-                    onClick={() => { void submitReviewAction(isFollowupTask ? 'approve_chain' : 'approve') }}
-                    disabled={approveLoading}
-                    title={isFollowupTask ? 'Approve chain' : 'Approve'}
-                  >
-                    {approveLoading ? 'Approving...' : isFollowupTask ? 'Approve Chain ✓' : 'Approve ✓'}
-                  </button>
-                )}
-                {canApprove && hasChanges === true && (
-                  <button
-                    className="conv-approve-btn"
-                    onClick={() => { void submitReviewAction(isFollowupTask ? 'approve_chain_and_push' : 'approve_and_push') }}
-                    disabled={approveLoading}
-                    title={isFollowupTask ? 'Approve chain and push to origin' : 'Approve and push to origin'}
-                  >
-                    {approveLoading ? 'Approving...' : isFollowupTask ? 'Approve Chain & Push' : 'Approve & Push'}
-                  </button>
-                )}
-                {canMarkCompleted && !isCompletedTask && (
-                  <button
-                    className="conv-approve-btn"
-                    onClick={() => { void submitReviewAction(isFollowupTask ? 'mark_chain_completed' : 'mark_completed') }}
-                    disabled={approveLoading}
-                    title={isFollowupTask ? 'Mark task and predecessors as completed' : 'Mark task as completed'}
-                  >
-                    {approveLoading ? 'Completing...' : isFollowupTask ? 'Mark Task and Predecessors Completed' : 'Mark Task Completed'}
-                  </button>
-                )}
-                {isCompletedTask && (
-                  <button
-                    className="conv-approve-btn"
-                    onClick={() => { void submitReviewAction('reopen') }}
-                    disabled={approveLoading}
-                    title="Reopen task"
-                  >
-                    {approveLoading ? 'Reopening...' : 'Reopen'}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : (
+        {showProposalPanel || showOutputPanel ? null : (
           <div className="conv-footer">
             <div className={`conv-input-container${activeQuestionOptions ? ' conv-input-has-options' : ''}`}>
               {activeQuestionOptions && (

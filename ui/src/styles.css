@@ -1619,6 +1619,27 @@ select { cursor: pointer; }
   border-top: 1px solid #f0efec;
   flex-shrink: 0;
 }
+.conv-output-side-execute {
+  justify-content: space-between;
+}
+.conv-output-side-execute .output-panel {
+  flex: 1;
+  min-height: 0;
+}
+.conv-execute-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 4px;
+  border-top: 1px solid #f0efec;
+  flex-shrink: 0;
+}
+.conv-execute-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
 
 /* Messages */
 .conv-messages {
