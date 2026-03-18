@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { getConversationAdapter } from "./adapters";
-import { buildPrompt } from "./prompts";
+import { buildConversationHistoryBlock, buildPrompt } from "./prompts";
 import {
   completeTurn,
   ensureConversationSchema,
   failTurn,
   getThreadById,
+  getThreadMessages,
   insertEvent,
   insertMessage,
   updateChatThreadMetadata,
@@ -171,7 +172,25 @@ async function runTurn(
             .map((e) => e.name)
             .sort()
         : [];
-    const prompt = buildPrompt(input.mode, input.message, input.reasoningEffort, callbacks.pragmaCliCommand, {
+    // Fetch prior messages for conversation history fallback
+    const hasSessionId = Boolean(thread.harness_session_id);
+    let conversationHistory: Array<{ role: string; content: string }> | undefined;
+
+    if (!hasSessionId) {
+      // No session ID — full history fallback (last 40 messages)
+      const priorMessages = await getThreadMessages(db, input.threadId, 40);
+      if (priorMessages.length > 0) {
+        conversationHistory = priorMessages;
+      }
+    } else if (input.mode === "chat") {
+      // Session ID exists — include brief history as safety net (last 10 messages)
+      const priorMessages = await getThreadMessages(db, input.threadId, 10);
+      if (priorMessages.length > 0) {
+        conversationHistory = priorMessages;
+      }
+    }
+
+    let prompt = buildPrompt(input.mode, input.message, input.reasoningEffort, callbacks.pragmaCliCommand, {
       planCandidates: planPromptCandidates.map((candidate) => ({
         id: candidate.id,
         name: candidate.name,
@@ -182,7 +201,16 @@ async function runTurn(
       workspaceIsEmpty,
       workspaceDir: paths.workspaceDir,
       codeRepos: chatCodeRepos,
+      conversationHistory: hasSessionId ? conversationHistory : undefined,
     });
+
+    // When no session ID, prepend full history block directly to the prompt
+    if (!hasSessionId && conversationHistory && conversationHistory.length > 0) {
+      const historyBlock = buildConversationHistoryBlock(conversationHistory);
+      if (historyBlock) {
+        prompt = historyBlock + "\n\n" + prompt;
+      }
+    }
 
     const result = await adapter.sendTurn({
       prompt,

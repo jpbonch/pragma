@@ -19,6 +19,7 @@ export function buildPrompt(
     workspaceIsEmpty?: boolean;
     workspaceDir?: string;
     codeRepos?: string[];
+    conversationHistory?: Array<{ role: string; content: string }>;
   } = {},
 ): string {
   const cleanMessage = message.trim();
@@ -51,9 +52,16 @@ export function buildPrompt(
       "Use exploratory probing when useful to understand existing code, context, and constraints before acting.",
       "Answer clearly and concisely.",
       reasoningLine,
-      "User message:",
-      cleanMessage,
     );
+
+    const historyBlock = options.conversationHistory
+      ? buildConversationHistoryBlock(options.conversationHistory)
+      : "";
+    if (historyBlock) {
+      chatParts.push(historyBlock);
+    }
+
+    chatParts.push("User message:", cleanMessage);
 
     return chatParts.join("\n\n");
   }
@@ -256,6 +264,40 @@ export function buildWorkerPrompt(input: {
   parts.push("Task:", task, "Return a concise final result.");
 
   return parts.join("\n\n");
+}
+
+const MAX_HISTORY_CHARS = 50_000;
+const MAX_SINGLE_MESSAGE_CHARS = 2_000;
+
+export function buildConversationHistoryBlock(
+  messages: Array<{ role: string; content: string }>,
+): string {
+  if (messages.length === 0) return "";
+
+  const lines: string[] = [];
+  let totalChars = 0;
+
+  for (const msg of messages) {
+    const label = msg.role === "assistant" ? "Assistant" : "User";
+    let content = msg.content.trim();
+    if (content.length > MAX_SINGLE_MESSAGE_CHARS) {
+      content = content.slice(0, MAX_SINGLE_MESSAGE_CHARS) + "... [truncated]";
+    }
+    const line = `${label}: ${content}`;
+    if (totalChars + line.length > MAX_HISTORY_CHARS) break;
+    lines.push(line);
+    totalChars += line.length;
+  }
+
+  if (lines.length === 0) return "";
+
+  return [
+    "<conversation_history>",
+    ...lines,
+    "</conversation_history>",
+    "",
+    "Continue this conversation. The user's new message follows.",
+  ].join("\n");
 }
 
 function formatSkillIndex(

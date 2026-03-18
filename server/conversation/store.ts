@@ -349,7 +349,6 @@ export async function reopenThread(db: PGlite, threadId: string): Promise<void> 
     `
 UPDATE conversation_threads
 SET status = 'open',
-    harness_session_id = NULL,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 `,
@@ -749,6 +748,22 @@ ORDER BY seq ASC
     messages: messagesResult.rows,
     events: eventsResult.rows,
   };
+}
+
+export async function getThreadMessages(
+  db: PGlite,
+  threadId: string,
+  limit = 40,
+): Promise<Array<{ role: string; content: string; created_at: string }>> {
+  const result = await db.query<{ role: string; content: string; created_at: string }>(
+    `SELECT role, content, created_at
+     FROM conversation_messages
+     WHERE thread_id = $1
+     ORDER BY created_at ASC
+     LIMIT $2`,
+    [threadId, limit],
+  );
+  return result.rows;
 }
 
 export async function storePlanProposal(

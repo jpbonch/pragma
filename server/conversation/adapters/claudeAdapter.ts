@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
 import type { AdapterSendTurnInput, AdapterSendTurnResult, ConversationAdapter } from "../types";
 import { registerAdapter } from "../adapterRegistry";
 import {
@@ -107,7 +109,11 @@ function buildClaudeArgs(input: AdapterSendTurnInput): string[] {
   }
 
   if (input.sessionId) {
-    args.push("--resume", input.sessionId);
+    const slug = resolvedCwd.replace(/\//g, "-");
+    const sessionFile = join(homedir(), ".claude", "projects", slug, `${input.sessionId}.jsonl`);
+    if (existsSync(sessionFile)) {
+      args.push("--resume", input.sessionId);
+    }
   }
 
   args.push("--", prompt);
