@@ -1604,6 +1604,21 @@ select { cursor: pointer; }
   display: flex;
   flex-direction: column;
 }
+.conv-output-side-plan {
+  justify-content: space-between;
+}
+.conv-output-side-plan .plan-proposal-panel {
+  flex: 1;
+  min-height: 0;
+}
+.conv-plan-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 0 4px;
+  border-top: 1px solid #f0efec;
+  flex-shrink: 0;
+}
 
 /* Messages */
 .conv-messages {

@@ -505,14 +505,117 @@ export function ConversationDrawer({
                   {loading && <div className="conv-thinking-indicator"><span className="conv-thinking-dot" /><span className="conv-thinking-dot" /><span className="conv-thinking-dot" /></div>}
                   {error && <div className="error" style={{ padding: '4px 0' }}>Error: {error}</div>}
                 </div>
+                <div className={`conv-input-container${activeQuestionOptions ? ' conv-input-has-options' : ''}`}>
+                  {activeQuestionOptions && (
+                    <div className="conv-input-options">
+                      <div className="conv-input-options-title">{activeQuestionOptions.question}</div>
+                      {activeQuestionOptions.options.map((opt, i) => (
+                        <button
+                          key={i}
+                          className="conv-input-option-btn"
+                          onClick={() => onPromptSubmit?.(opt)}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    ref={textareaRef}
+                    className="input-textarea"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder={
+                      activeQuestionOptions
+                        ? 'Or type a custom response...'
+                        : 'Refine this plan...'
+                    }
+                    disabled={loading}
+                    rows={1}
+                    onInput={(e) => {
+                      e.target.style.height = 'auto'
+                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+                    }}
+                    onPaste={handlePaste}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        submitPrompt()
+                      }
+                    }}
+                  />
+                  {attachments.length > 0 && (
+                    <div className="attachment-chips">
+                      {attachments.map((att, i) => (
+                        <span key={i} className="attachment-chip">
+                          <span className="attachment-chip-name">{att.name}</span>
+                          <button
+                            className="attachment-chip-remove"
+                            onClick={() => removeAttachment(i)}
+                            aria-label={`Remove ${att.name}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelect}
+                  />
+                  <div className="conv-input-bottom-row">
+                    <button
+                      className="attach-btn"
+                      title="Attach files"
+                      aria-label="Attach files"
+                      disabled={loading}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Plus size={14} />
+                    </button>
+                    <div className="input-actions">
+                      {loading ? (
+                        <button
+                          className="send-btn send-btn-stop"
+                          onClick={() => onStop?.()}
+                          aria-label="Stop"
+                        >
+                          <Square size={14} fill="#fff" strokeWidth={0} />
+                        </button>
+                      ) : (
+                        <button
+                          className="send-btn"
+                          style={{ background: '#2383e2' }}
+                          onClick={submitPrompt}
+                          disabled={!prompt.trim() && attachments.length === 0}
+                          aria-label="Send"
+                        >
+                          <ArrowUp size={18} strokeWidth={2.6} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="conv-output-side">
+              <div className="conv-output-side conv-output-side-plan">
                 <PlanProposalPanel
                   proposal={planProposal}
                   agents={recipientAgents}
                   onUpdate={onUpdatePlanProposal}
                   disabled={loading}
                 />
+                <div className="conv-plan-actions">
+                  <button className="conv-delete-plan-btn" onClick={onDeletePlan} disabled={loading}>
+                    Delete Plan
+                  </button>
+                  <button className="conv-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
+                    Execute →
+                  </button>
+                </div>
               </div>
             </>
           ) : showOutputPanel ? (
@@ -655,7 +758,7 @@ export function ConversationDrawer({
         </div>
 
         {/* Footer */}
-        {showOutputPanel ? (
+        {showProposalPanel ? null : showOutputPanel ? (
           <div className="conv-footer">
             {approveError && <div className="error" style={{ padding: '0 4px 4px' }}>Error: {approveError}</div>}
             <div className="conv-footer-row">
