@@ -751,7 +751,7 @@ export function ConnectionsView() {
               <div className="cn-col">
                 <div className="cn-section">
                   <h2 className="cn-section-title">Connector Skills</h2>
-                  <p className="cn-section-desc">CConnect your agents to external services. When you authenticate, Pragma handles the connection. Your credentials are sent back to your computer and never stored on Pragma's servers. You can also provide your own credentials by clicking ‘Configure manually’.</p>
+                  <p className="cn-section-desc">Connect your agents to external services. When you authenticate, Pragma handles the connection. Your credentials are sent back to your computer and never stored on Pragma's servers. You can also provide your own credentials by clicking ‘Configure manually’.</p>
                   <div className="cn-list">
                     {connectors.map((connector) => {
                       const statusInfo = CONNECTOR_STATUS_STYLES[connector.status] ||
