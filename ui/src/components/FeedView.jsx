@@ -672,7 +672,7 @@ export function FeedView({
                       task={{
                         id: `plan-${plan.id}`,
                         title: plan.plan_title || 'New plan',
-                        status: plan.latest_turn_status === 'running' ? 'running' : 'planning',
+                        status: 'planning',
                         created_at: plan.created_at,
                         assigned_to: null,
                         _isPlan: true,
