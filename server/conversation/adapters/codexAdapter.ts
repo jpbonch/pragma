@@ -65,15 +65,19 @@ const codexAdapter: ConversationAdapter = {
 function buildCodexArgs(input: AdapterSendTurnInput): string[] {
   const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
   const resolvedCwd = resolve(input.cwd);
-  const globalSandboxArgs =
+  const topLevelArgs =
     input.mode === "chat"
       ? ["-s", "read-only", "-a", "never", "-C", resolvedCwd]
-      : ["--dangerously-bypass-approvals-and-sandbox", "-C", resolvedCwd];
+      : ["-C", resolvedCwd];
+
+  const execSandboxArgs =
+    input.mode === "chat" ? [] : ["-s", "danger-full-access"];
 
   if (input.sessionId) {
     return [
-      ...globalSandboxArgs,
+      ...topLevelArgs,
       "exec",
+      ...execSandboxArgs,
       "resume",
       "--json",
       "--skip-git-repo-check",
@@ -85,8 +89,9 @@ function buildCodexArgs(input: AdapterSendTurnInput): string[] {
   }
 
   return [
-    ...globalSandboxArgs,
+    ...topLevelArgs,
     "exec",
+    ...execSandboxArgs,
     "--json",
     "--skip-git-repo-check",
     "--model",
