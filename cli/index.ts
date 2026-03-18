@@ -222,6 +222,56 @@ taskCommand
   );
 
 taskCommand
+  .command("plan-propose")
+  .description("Submit a structured plan proposal with a chain of tasks")
+  .option("--task <json>", "Task JSON object (repeatable: {title, prompt, recipient})", (val: string, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
+  .option("--thread-id <id>", "Conversation thread id")
+  .option("--turn-id <id>", "Conversation turn id")
+  .option("--api-url <url>", "Pragma API base URL")
+  .action(
+    async (options: {
+      task: string[];
+      threadId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, threadId, turnId } = resolveThreadTurnCommandContext(options);
+
+      if (!options.task || options.task.length === 0) {
+        console.error("Error: At least one --task flag is required.");
+        process.exit(1);
+      }
+
+      const tasks: Array<{ title: string; prompt: string; recipient: string }> = [];
+      for (const raw of options.task) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (!parsed.title || !parsed.prompt || !parsed.recipient) {
+            console.error(`Error: Each --task JSON must have title, prompt, and recipient fields. Got: ${raw}`);
+            process.exit(1);
+          }
+          tasks.push({ title: parsed.title, prompt: parsed.prompt, recipient: parsed.recipient });
+        } catch {
+          console.error(`Error: Invalid JSON for --task: ${raw}`);
+          process.exit(1);
+        }
+      }
+
+      const result = await apiRequest<{ ok?: boolean; task_count?: number }>(
+        apiUrl,
+        `/conversations/${encodeURIComponent(threadId)}/turns/${encodeURIComponent(turnId)}/agent/plan-propose`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ tasks }),
+        },
+      );
+
+      console.log(`Plan proposal submitted with ${result.task_count ?? tasks.length} task(s) for turn ${turnId}.`);
+    },
+  );
+
+taskCommand
   .command("ask-question")
   .description("Pause execution and ask the human a clarification question")
   .requiredOption("--question <text>", "Question for the human")

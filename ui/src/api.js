@@ -512,6 +512,22 @@ export async function executeFromPlanThread(threadId, { recipient_agent_id, reas
   })
 }
 
+export async function fetchPlanProposal(threadId) {
+  const data = asObject(
+    await fetchJson(`/conversations/${encodeURIComponent(threadId)}/plan-proposal`),
+    'Invalid plan proposal response.',
+  )
+  return data.proposal
+}
+
+export async function executePlanProposal(threadId, { tasks, reasoning_effort }) {
+  return fetchJson(`/conversations/${encodeURIComponent(threadId)}/execute-proposal`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tasks, reasoning_effort }),
+  })
+}
+
 export async function deletePlanThread(threadId) {
   return fetchJson(`/conversations/${encodeURIComponent(threadId)}`, {
     method: 'DELETE',

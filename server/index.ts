@@ -56,12 +56,14 @@ import {
   getThreadWithDetails,
   getEventsSince,
   getMaxEventSeq,
+  getPlanProposal,
   insertEvent,
   insertMessage,
   listChatThreads,
   listOpenPlanThreads,
   reopenThread,
   setThreadTaskId,
+  storePlanProposal,
   updateChatThreadMetadata,
   updateThreadSession,
   completeTurn,
@@ -90,8 +92,10 @@ import {
   taskRespondSchema,
   openOutputFolderSchema,
   outputFileQuerySchema,
+  planProposeSchema,
   plansQuerySchema,
   planSelectRecipientSchema,
+  executePlanProposalSchema,
   reviewTaskSchema,
   runTaskTestCommandSchema,
   updateTaskTestCommandsSchema,
@@ -3102,6 +3106,231 @@ WHERE id = $1
       });
 
       return c.json({ ok: true, selected_agent_id: selectedAgentId });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // Plan proposal: agent submits a structured list of tasks
+  app.post(
+    "/conversations/:threadId/turns/:turnId/agent/plan-propose",
+    validateJson(planProposeSchema),
+    async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const threadId = c.req.param("threadId");
+    const turnId = c.req.param("turnId");
+    const body = c.req.valid("json");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      await ensureConversationSchema(db);
+
+      const turnResult = await db.query<{
+        id: string;
+        thread_id: string;
+        mode: "chat" | "plan" | "execute";
+      }>(
+        `SELECT id, thread_id, mode FROM conversation_turns WHERE id = $1 AND thread_id = $2 LIMIT 1`,
+        [turnId, threadId],
+      );
+
+      const turn = turnResult.rows[0];
+      if (!turn) {
+        throw new PragmaError("TURN_NOT_FOUND", 404, `Conversation turn not found: ${turnId}`);
+      }
+      if (turn.mode !== "plan") {
+        throw new PragmaError("TURN_NOT_PLAN_MODE", 409, `Turn is not in plan mode: ${turnId}`);
+      }
+
+      // Validate all recipient agent ids
+      for (const task of body.tasks) {
+        const recipient = await getAgentRow(db, task.recipient);
+        if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+          const candidates = await listPlanWorkerCandidates(db);
+          const validAgentIds = candidates.map((c) => c.id);
+          return c.json(
+            {
+              error: "INVALID_RECIPIENT",
+              message: `Invalid recipient agent id: ${task.recipient}. Valid worker ids: ${validAgentIds.join(", ")}.`,
+              valid_agent_ids: validAgentIds,
+            },
+            400,
+          );
+        }
+      }
+
+      // Store proposal on the turn
+      await storePlanProposal(db, turnId, { tasks: body.tasks });
+
+      // Also set selected_agent_id to the first task's recipient for backwards compatibility
+      await db.query(
+        `UPDATE conversation_turns SET selected_agent_id = $2, selection_status = 'auto_selected' WHERE id = $1`,
+        [turnId, body.tasks[0].recipient],
+      );
+
+      // Emit event
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId,
+        turnId,
+        eventName: "plan_proposal_submitted",
+        payload: {
+          source: "cli",
+          tasks: body.tasks,
+        },
+      });
+
+      publishThreadUpdated(workspaceName, threadId, "plan_proposal_submitted");
+
+      return c.json({ ok: true, task_count: body.tasks.length });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // Read the plan proposal for a thread
+  app.get("/conversations/:threadId/plan-proposal", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const threadId = c.req.param("threadId");
+    const db = await openDatabase(workspaceName);
+
+    try {
+      await ensureConversationSchema(db);
+      const proposal = await getPlanProposal(db, threadId);
+      return c.json({ proposal });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // Execute a plan proposal as a chain of tasks
+  app.post(
+    "/conversations/:threadId/execute-proposal",
+    validateJson(executePlanProposalSchema),
+    async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const threadId = c.req.param("threadId");
+    const body = c.req.valid("json");
+    const reasoningEffort = body.reasoning_effort;
+
+    const db = await openDatabase(workspaceName);
+    const taskIds: string[] = [];
+
+    try {
+      await ensureConversationSchema(db);
+
+      const thread = await getThreadById(db, threadId);
+      if (!thread) {
+        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+      }
+
+      const latestPlanTurn = await getLatestCompletedPlanTurn(db, threadId);
+      const planText = latestPlanTurn?.assistant_message?.trim() || null;
+
+      // Validate all recipients
+      for (const task of body.tasks) {
+        const recipient = await getAgentRow(db, task.recipient_agent_id);
+        if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+          throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${task.recipient_agent_id}`);
+        }
+      }
+
+      // Create tasks as a chain
+      let previousTaskId: string | null = thread.task_id || null;
+      let firstTaskId = "";
+
+      for (let i = 0; i < body.tasks.length; i++) {
+        const taskSpec = body.tasks[i];
+        const recipient = await getAgentRow(db, taskSpec.recipient_agent_id);
+        if (!recipient) continue;
+
+        const newTaskId = `task_${randomUUID().slice(0, 8)}`;
+        const taskTitle = taskSpec.title.length > 80 ? `${taskSpec.title.slice(0, 77)}...` : taskSpec.title;
+
+        if (i === 0 && previousTaskId) {
+          // First task: update the existing plan task
+          await db.query(
+            `UPDATE tasks SET status = 'running', assigned_to = $2, plan = $3, title = $4 WHERE id = $1`,
+            [previousTaskId, recipient.id, taskSpec.prompt, taskTitle],
+          );
+          emitTaskStatus(workspaceName, previousTaskId, "running", "execute_proposal");
+          firstTaskId = previousTaskId;
+          taskIds.push(previousTaskId);
+
+          // Create execute thread for first task
+          const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
+          await createThread(db, {
+            id: execThreadId,
+            mode: "execute",
+            harness: recipient.harness,
+            modelLabel: recipient.model_label,
+            modelId: recipient.model_id,
+            sourceThreadId: threadId,
+            taskId: previousTaskId,
+          });
+          await setThreadTaskId(db, execThreadId, previousTaskId);
+
+          executeRunner.execute({
+            workspaceName,
+            taskId: previousTaskId,
+            threadId: execThreadId,
+            prompt: taskSpec.prompt,
+            requestedRecipientAgentId: recipient.id,
+            reasoningEffort,
+            skipOrchestratorSelection: true,
+          });
+        } else if (i === 0) {
+          // First task: create new task
+          await db.query(
+            `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan) VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)`,
+            [newTaskId, taskTitle, recipient.id, taskSpec.prompt],
+          );
+          emitTaskStatus(workspaceName, newTaskId, "queued", "execute_proposal_created");
+          firstTaskId = newTaskId;
+          taskIds.push(newTaskId);
+
+          const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
+          await createThread(db, {
+            id: execThreadId,
+            mode: "execute",
+            harness: recipient.harness,
+            modelLabel: recipient.model_label,
+            modelId: recipient.model_id,
+            sourceThreadId: threadId,
+            taskId: newTaskId,
+          });
+          await setThreadTaskId(db, execThreadId, newTaskId);
+
+          executeRunner.execute({
+            workspaceName,
+            taskId: newTaskId,
+            threadId: execThreadId,
+            prompt: taskSpec.prompt,
+            requestedRecipientAgentId: recipient.id,
+            reasoningEffort,
+            skipOrchestratorSelection: true,
+          });
+          previousTaskId = newTaskId;
+        } else {
+          // Subsequent tasks: create as followups
+          await db.query(
+            `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan, predecessor_task_id) VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3, $4)`,
+            [newTaskId, taskTitle, taskSpec.prompt, previousTaskId],
+          );
+          await db.query(
+            `UPDATE tasks SET followup_task_id = $2 WHERE id = $1`,
+            [previousTaskId!, newTaskId],
+          );
+          emitTaskStatus(workspaceName, newTaskId, "queued", "proposal_followup_created");
+          taskIds.push(newTaskId);
+          previousTaskId = newTaskId;
+        }
+      }
+
+      // Close the plan thread
+      await closeThread(db, threadId);
+
+      return c.json({ task_ids: taskIds }, 201);
     } finally {
       await db.close();
     }

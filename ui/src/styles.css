@@ -2113,6 +2113,209 @@ select { cursor: pointer; }
   cursor: default;
 }
 
+/* Plan Proposal Panel */
+.plan-proposal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.plan-proposal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+.plan-proposal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #37352F;
+}
+.plan-proposal-count {
+  font-size: 11px;
+  color: #9b9a97;
+}
+.plan-proposal-empty {
+  font-size: 12px;
+  color: #9b9a97;
+  padding: 16px 4px;
+}
+.plan-proposal-tasks {
+  display: flex;
+  flex-direction: column;
+}
+.plan-proposal-task {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.plan-proposal-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d4d3cf;
+  padding: 4px 0;
+}
+.plan-proposal-task-card {
+  width: 100%;
+  border: 1px solid #e8e7e4;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-proposal-task-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plan-proposal-task-number {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: #37352F;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.plan-proposal-task-title-input {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #37352F;
+  padding: 2px 0;
+}
+.plan-proposal-task-title-input::placeholder {
+  color: #c8c7c3;
+}
+.plan-proposal-task-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.plan-proposal-task-action-btn {
+  border: none;
+  background: transparent;
+  color: #9b9a97;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.plan-proposal-task-action-btn:hover {
+  background: #f0efec;
+  color: #37352F;
+}
+.plan-proposal-task-action-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.plan-proposal-task-action-btn:disabled:hover {
+  background: transparent;
+  color: #9b9a97;
+}
+.plan-proposal-task-delete-btn:hover {
+  color: #c4443a;
+  background: #fdf0f0;
+}
+.plan-proposal-task-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.plan-proposal-task-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9b9a97;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.plan-proposal-task-select {
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px solid #e8e7e4;
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: #37352F;
+  background: #fafafa;
+  cursor: pointer;
+}
+.plan-proposal-task-select:focus {
+  border-color: #d4d3cf;
+  outline: none;
+}
+.plan-proposal-prompt-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.plan-proposal-prompt-chevron {
+  color: #9b9a97;
+  transition: transform 0.15s ease;
+}
+.plan-proposal-prompt-chevron.expanded {
+  transform: rotate(180deg);
+}
+.plan-proposal-task-textarea {
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px solid #e8e7e4;
+  border-radius: 6px;
+  padding: 8px;
+  color: #37352F;
+  background: #fafafa;
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.5;
+}
+.plan-proposal-task-textarea:focus {
+  border-color: #d4d3cf;
+  outline: none;
+}
+.plan-proposal-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed #d4d3cf;
+  background: transparent;
+  color: #9b9a97;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.plan-proposal-add-btn:hover {
+  border-color: #37352F;
+  color: #37352F;
+}
+.plan-proposal-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .conv-approve-btn {
   border: none;
   background: #2FA67E;

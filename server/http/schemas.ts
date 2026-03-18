@@ -113,6 +113,37 @@ export const planSelectRecipientSchema = z
   })
   .strict();
 
+export const planProposeSchema = z
+  .object({
+    tasks: z
+      .array(
+        z.object({
+          title: z.string().trim().min(1),
+          prompt: z.string().trim().min(1),
+          recipient: z.string().trim().min(1),
+        }).strict(),
+      )
+      .min(1)
+      .max(20),
+  })
+  .strict();
+
+export const executePlanProposalSchema = z
+  .object({
+    tasks: z
+      .array(
+        z.object({
+          title: z.string().trim().min(1),
+          prompt: z.string().trim().min(1),
+          recipient_agent_id: z.string().trim().min(1),
+        }).strict(),
+      )
+      .min(1)
+      .max(20),
+    reasoning_effort: reasoningEffortSchema,
+  })
+  .strict();
+
 export const agentAskQuestionSchema = z
   .object({
     question: nonEmptyString,

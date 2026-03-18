@@ -3,6 +3,7 @@ import { ArrowUp, ArrowLeft, X, Sparkles, User, Info, Square, ChevronRight, Plus
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
+import { PlanProposalPanel } from './PlanProposalPanel'
 import { fetchTaskPlan, fetchTaskTestCommands, runTaskTestCommand, updateTaskTestCommands } from '../api'
 
 const HEADER_STATUS_LABELS = {
@@ -95,6 +96,8 @@ export function ConversationDrawer({
   onStopRuntimeService,
   onServiceStarted,
   onStop,
+  planProposal = null,
+  onUpdatePlanProposal,
 }) {
   const bodyRef = useRef(null)
   const isNearBottomRef = useRef(true)
@@ -125,6 +128,7 @@ export function ConversationDrawer({
   const [hasChanges, setHasChanges] = useState(null)
   const [hasOutputFiles, setHasOutputFiles] = useState(null)
   const showOutputPanel = Boolean(taskId) && (mode === 'chat' || mode === 'execute')
+  const showProposalPanel = mode === 'plan' && planProposal != null && Array.isArray(planProposal.tasks) && planProposal.tasks.length > 0
   const isPendingReview = showOutputPanel && taskStatus === 'pending_review'
   const hasOutputs = hasChanges === true || hasOutputFiles === true
   const canApprove = isPendingReview && hasOutputs
@@ -493,8 +497,27 @@ export function ConversationDrawer({
       </div>
 
         {/* Body */}
-        <div className={`conv-body ${showOutputPanel ? 'conv-body-split' : ''}`}>
-          {showOutputPanel ? (
+        <div className={`conv-body ${showOutputPanel || showProposalPanel ? 'conv-body-split' : ''}`}>
+          {showProposalPanel ? (
+            <>
+              <div className="conv-chat-side">
+                <div className="conv-messages" ref={bodyRef} onScroll={handleMessagesScroll}>
+                  {entries.length === 0 && <div className="muted" style={{ padding: '8px 0' }}>No messages yet.</div>}
+                  {entries.map(renderEntry)}
+                  {loading && <div className="conv-thinking-indicator"><span className="conv-thinking-dot" /><span className="conv-thinking-dot" /><span className="conv-thinking-dot" /></div>}
+                  {error && <div className="error" style={{ padding: '4px 0' }}>Error: {error}</div>}
+                </div>
+              </div>
+              <div className="conv-output-side">
+                <PlanProposalPanel
+                  proposal={planProposal}
+                  agents={recipientAgents}
+                  onUpdate={onUpdatePlanProposal}
+                  disabled={loading}
+                />
+              </div>
+            </>
+          ) : showOutputPanel ? (
             <>
               <div className="conv-chat-side">
                 <div className="conv-messages" ref={bodyRef} onScroll={handleMessagesScroll}>
@@ -713,22 +736,25 @@ export function ConversationDrawer({
           <div className="conv-footer">
             {mode === 'plan' && (
               <div className="conv-footer-row">
-                <div className="conv-recipient-picker">
-                  <label className="conv-recipient-label">Recipient</label>
-                  <select
-                    className="conv-recipient-select"
-                    value={selectedRecipientAgentId}
-                    onChange={(e) => onSelectRecipientAgentId?.(e.target.value)}
-                    disabled={loading}
-                  >
-                    <option value="">Auto-select</option>
-                    {recipientAgents.map((agent) => (
-                      <option key={agent.id} value={agent.id}>
-                        {agent.name || agent.id}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {!showProposalPanel && (
+                  <div className="conv-recipient-picker">
+                    <label className="conv-recipient-label">Recipient</label>
+                    <select
+                      className="conv-recipient-select"
+                      value={selectedRecipientAgentId}
+                      onChange={(e) => onSelectRecipientAgentId?.(e.target.value)}
+                      disabled={loading}
+                    >
+                      <option value="">Auto-select</option>
+                      {recipientAgents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name || agent.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {showProposalPanel && <div />}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="conv-delete-plan-btn" onClick={onDeletePlan} disabled={loading}>
                     Delete Plan

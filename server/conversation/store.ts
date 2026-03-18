@@ -93,6 +93,19 @@ END $$;
   await db.exec(`
 CREATE INDEX IF NOT EXISTS idx_conversation_events_seq ON conversation_events(thread_id, seq ASC);
 `);
+
+  // Migration: add plan_proposal_json column to conversation_turns if it doesn't exist
+  await db.exec(`
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'conversation_turns' AND column_name = 'plan_proposal_json'
+  ) THEN
+    ALTER TABLE conversation_turns ADD COLUMN plan_proposal_json TEXT;
+  END IF;
+END $$;
+`);
 }
 
 export async function createThread(
@@ -736,4 +749,42 @@ ORDER BY seq ASC
     messages: messagesResult.rows,
     events: eventsResult.rows,
   };
+}
+
+export async function storePlanProposal(
+  db: PGlite,
+  turnId: string,
+  proposal: unknown,
+): Promise<void> {
+  await db.query(
+    `UPDATE conversation_turns SET plan_proposal_json = $2 WHERE id = $1`,
+    [turnId, JSON.stringify(proposal)],
+  );
+}
+
+export async function getPlanProposal(
+  db: PGlite,
+  threadId: string,
+): Promise<unknown | null> {
+  const result = await db.query<{ plan_proposal_json: string | null }>(
+    `
+SELECT plan_proposal_json
+FROM conversation_turns
+WHERE thread_id = $1
+  AND mode = 'plan'
+  AND plan_proposal_json IS NOT NULL
+ORDER BY created_at DESC
+LIMIT 1
+`,
+    [threadId],
+  );
+  const row = result.rows[0];
+  if (!row?.plan_proposal_json) {
+    return null;
+  }
+  try {
+    return JSON.parse(row.plan_proposal_json);
+  } catch {
+    return null;
+  }
 }

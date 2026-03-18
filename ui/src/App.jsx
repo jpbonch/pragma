@@ -14,6 +14,7 @@ import {
   fetchAvailableClis,
   deletePlanThread,
   executeFromPlanThread,
+  executePlanProposal,
   fetchAgents,
   fetchChats,
   fetchHumans,
@@ -23,6 +24,7 @@ import {
   fetchRuntimeServices,
   fetchContextFiles,
   fetchConversationThread,
+  fetchPlanProposal,
   fetchTasks,
   openRuntimeServiceStream,
   pickLocalCodeFolder,
@@ -557,6 +559,10 @@ function summarizeStatusEvent(name, payload) {
     const id = requireEventString(payload?.selected_agent_id, 'selected_agent_id')
     return `Plan recipient selected: ${id}`
   }
+  if (name === 'plan_proposal_submitted') {
+    const count = Array.isArray(payload?.tasks) ? payload.tasks.length : 0
+    return `Plan proposal submitted with ${count} task${count !== 1 ? 's' : ''}.`
+  }
   if (name === 'recipient_selected_via_cli') {
     return ''
   }
@@ -823,6 +829,7 @@ export default function App() {
     loading: false,
     error: '',
     planReady: false,
+    planProposal: null,
   })
 
   const streamAbortRef = useRef(null)
@@ -1029,6 +1036,17 @@ export default function App() {
 
         const nextEntries = buildEntriesFromThreadData(data, agentById)
         const turnsRunning = hasRunningTurn(data.turns)
+
+        // Fetch plan proposal if this is a plan thread
+        let proposal = null
+        if (data.thread.mode === 'plan') {
+          try {
+            proposal = await fetchPlanProposal(currentThreadId)
+          } catch {
+            // Proposal fetch failure is non-critical
+          }
+        }
+
         setConversation((prev) => {
           if (!prev.open || prev.threadId !== threadIdRef.current || cancelled) {
             return prev
@@ -1042,6 +1060,7 @@ export default function App() {
             modelLabel: data.thread.model_label,
             loading: nextLoading,
             entries: nextEntries,
+            ...(data.thread.mode === 'plan' && proposal ? { planProposal: proposal, planReady: true } : {}),
           }
         })
       } catch {
@@ -1845,6 +1864,7 @@ export default function App() {
       loading: false,
       error: '',
       planReady: false,
+      planProposal: null,
     })
   }
 
@@ -2225,10 +2245,27 @@ export default function App() {
 
     try {
       const planThreadId = conversation.threadId
-      await executeFromPlanThread(conversation.threadId, {
-        recipient_agent_id: conversation.recipientAgentId || undefined,
-        reasoning_effort: conversation.reasoningEffort,
-      })
+      const proposal = conversation.planProposal
+
+      if (proposal && Array.isArray(proposal.tasks) && proposal.tasks.length > 0) {
+        // Execute via plan proposal (multi-task chain)
+        const proposalTasks = proposal.tasks.map((t) => ({
+          title: t.title || 'Task',
+          prompt: t.prompt || '',
+          recipient_agent_id: t.recipient || '',
+        }))
+        await executePlanProposal(conversation.threadId, {
+          tasks: proposalTasks,
+          reasoning_effort: conversation.reasoningEffort,
+        })
+      } else {
+        // Fallback to single-task execute
+        await executeFromPlanThread(conversation.threadId, {
+          recipient_agent_id: conversation.recipientAgentId || undefined,
+          reasoning_effort: conversation.reasoningEffort,
+        })
+      }
+
       setSidebarPlans((prev) => prev.filter((plan) => plan.id !== planThreadId))
       closeConversationDrawer()
       setActiveTab('feed')
@@ -2377,6 +2414,14 @@ export default function App() {
       const latestTurnStillRunning = latestTurn?.status === 'running'
       const planReady = hasCompletedPlanTurn && !latestTurnStillRunning
 
+      // Fetch plan proposal
+      let proposal = null
+      try {
+        proposal = await fetchPlanProposal(threadId)
+      } catch {
+        // Non-critical
+      }
+
       setConversation({
         open: true,
         mode: 'plan',
@@ -2390,7 +2435,8 @@ export default function App() {
         entries,
         loading: latestTurnStillRunning,
         error: '',
-        planReady,
+        planReady: proposal ? true : planReady,
+        planProposal: proposal,
       })
 
       setActiveTab('feed')
@@ -2506,6 +2552,13 @@ export default function App() {
           && status !== 'waiting_for_question_response'
           && status !== 'waiting_for_help_response'
 
+        let proposal = null
+        try {
+          proposal = await fetchPlanProposal(thread.id)
+        } catch {
+          // Non-critical
+        }
+
         setConversation({
           open: true,
           mode: 'plan',
@@ -2520,7 +2573,8 @@ export default function App() {
           entries,
           loading: latestTurnStillRunning,
           error: '',
-          planReady,
+          planReady: proposal ? true : planReady,
+          planProposal: proposal,
         })
         setActiveTab('feed')
         return
@@ -2824,6 +2878,13 @@ export default function App() {
                 }}
                 executeDisabled={!conversation.threadId || !conversation.planReady}
                 onStop={handleStopStream}
+                planProposal={conversation.planProposal}
+                onUpdatePlanProposal={(updated) => {
+                  setConversation((prev) => ({
+                    ...prev,
+                    planProposal: updated,
+                  }))
+                }}
               />
             ) : (
               <>

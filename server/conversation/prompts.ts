@@ -59,7 +59,7 @@ export function buildPrompt(
   }
 
   if (mode === "plan") {
-    const planRecipientCommand = `${cli} task plan-select-recipient --agent-id "<candidate_id>" --reason "<one sentence reason>"`;
+    const planProposeCommand = `${cli} task plan-propose --task '<JSON>' [--task '<JSON>' ...]`;
     const listAgentsCommand = `${cli} list-agents`;
     const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"] [--option "<choice>" --option "<choice>" ...]`;
     const dbQueryCommand = `${cli} db-query --sql "<SELECT statement>"`;
@@ -69,11 +69,11 @@ export function buildPrompt(
       return `${index + 1}. id=${candidate.id}; name=${candidate.name}${desc}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
     });
     const workspaceInstruction = options.workspaceIsEmpty
-      ? "Workspace appears empty. Skip exploratory probing and immediately produce the plan and recipient selection."
+      ? "Workspace appears empty. Skip exploratory probing and immediately produce the plan and proposal."
       : "Use tools for read-only inspection and exploratory context gathering before finalizing the plan.";
 
     return [
-      "You are planning work for an implementation agent.",
+      "You are planning work for implementation agents.",
       "Plan mode is planning-only.",
       workspaceInstruction,
       "The `context/` directory in the workspace may contain markdown knowledge files written by previous agents. Check it for relevant prior context before planning.",
@@ -85,23 +85,33 @@ export function buildPrompt(
       "If the request is unclear, underspecified, or you are uncertain about the right approach, ask the user a clarifying question:",
       askQuestionCommand,
       "Use --option flags when there are a small number of concrete choices (2-5). Omit --option for open-ended questions.",
-      "After asking a question, STOP immediately. Do not produce a plan. Do not select a recipient. Output only the question and nothing else. Wait for the user to respond.",
+      "After asking a question, STOP immediately. Do not produce a plan. Do not submit a proposal. Output only the question and nothing else. Wait for the user to respond.",
       "To inspect workspace state (tasks, events, threads, messages), run read-only SQL queries:",
       dbQueryCommand,
       "Key tables: tasks (id, title, status, assigned_to, plan), conversation_threads (id, mode, task_id), conversation_turns (id, thread_id, mode, status), conversation_messages (id, thread_id, role, content), conversation_events (id, thread_id, event_name, payload), agents (id, name, status, harness).",
       "",
       "## Step 2: Produce the plan (only when requirements are clear)",
       "When the request is unambiguous and you have enough information, return a concrete, decision-complete plan in plain language.",
-      "Your full response will be stored as the plan and passed to the implementation agent.",
+      "Your full response will be stored as the plan and passed to the implementation agent(s).",
       "If you need to inspect available agents, run:",
       listAgentsCommand,
-      "Available worker candidates (use one of these ids for `--agent-id`):",
+      "Available worker candidates (use one of these ids for `recipient`):",
       candidateLines.length > 0 ? candidateLines.join("\n") : "(none available)",
-      "Persist the selected implementation recipient by calling exactly one CLI command:",
-      planRecipientCommand,
+      "",
+      "## Step 3: Submit the plan proposal",
+      "After producing the plan, submit a structured proposal with tasks using this CLI command:",
+      planProposeCommand,
+      "Each --task flag takes a JSON object with:",
+      '- "title": short task name',
+      '- "prompt": the full implementation prompt for that task',
+      '- "recipient": agent id from the candidate list above',
+      "",
+      "For multi-step work, submit multiple --task flags. Tasks execute in sequence — each starts when the previous is ready for review.",
+      "For single tasks, submit one --task flag.",
+      "You MUST call this command exactly once, after writing the plan.",
+      "",
       "Rules:",
-      "- Use exactly one recipient selection command and choose a valid worker id.",
-      "- Recipient reason must be one sentence.",
+      "- Choose valid worker ids from the candidate list.",
       "- In the execution plan, direct task-specific deliverables (reports/docs/assets) to `outputs/$PRAGMA_TASK_ID/`, not `context/`.",
       "- Reserve `context/` only for enduring project knowledge that should outlive a single task.",
       "- Write the plan as your natural response with clear steps.",
