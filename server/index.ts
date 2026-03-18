@@ -114,8 +114,17 @@ import {
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
-import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "./connectorRegistry";
+import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL, OAUTH_REFRESH_API_KEY } from "./connectorRegistry";
 import { ensureConnectorBinary, getConnectorBinDir } from "./connectorBinaries";
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
 
 type StartServerOptions = {
   port: number;
@@ -4818,9 +4827,16 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     let response: Response;
 
     if (registryDef?.proxyProvider) {
+      if (!OAUTH_REFRESH_API_KEY) {
+        throw new Error("PRAGMA_OAUTH_REFRESH_API_KEY is not configured");
+      }
+      const refreshHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OAUTH_REFRESH_API_KEY}`,
+      };
       response = await fetch(`${OAUTH_PROXY_URL}/refresh/${registryDef.proxyProvider}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: refreshHeaders,
         body: JSON.stringify({ refresh_token: connector.refresh_token }),
       });
     } else {
@@ -5041,17 +5057,18 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
   });
 
-  // GET /connectors/proxy-callback — OAuth proxy callback
-  app.get("/connectors/proxy-callback", async (c) => {
-    const accessToken = c.req.query("access_token");
-    const refreshToken = c.req.query("refresh_token");
-    const expiresIn = c.req.query("expires_in");
-    const connectorId = c.req.query("connector_id");
-    const error = c.req.query("error");
+  // POST /connectors/proxy-callback — OAuth proxy callback (tokens sent via POST body)
+  app.post("/connectors/proxy-callback", async (c) => {
+    const body = await c.req.parseBody();
+    const accessToken = typeof body.access_token === "string" ? body.access_token : undefined;
+    const refreshToken = typeof body.refresh_token === "string" ? body.refresh_token : undefined;
+    const expiresIn = typeof body.expires_in === "string" ? body.expires_in : undefined;
+    const connectorId = typeof body.connector_id === "string" ? body.connector_id : undefined;
+    const error = typeof body.error === "string" ? body.error : undefined;
 
     if (error) {
       return c.html(
-        `<html><body><h2>Error</h2><p>${error}</p><button onclick="window.close()">Close</button></body></html>`,
+        `<html><body><h2>Error</h2><p>${escapeHtml(error)}</p><button onclick="window.close()">Close</button></body></html>`,
         400,
       );
     }
