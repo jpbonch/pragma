@@ -4833,6 +4833,99 @@ select { cursor: pointer; }
   color: #b24141;
 }
 
+/* Harness settings cards */
+.settings-harness-card {
+  border: 1px solid #ebe7df;
+  background: #fafaf8;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.settings-harness-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.settings-harness-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #37352f;
+}
+
+.settings-harness-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settings-harness-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.settings-harness-status-dot.available {
+  background: #2e7d32;
+}
+
+.settings-harness-status-dot.unavailable {
+  background: #91918E;
+}
+
+.settings-harness-command {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #91918E;
+  background: rgba(0,0,0,0.04);
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.settings-harness-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.settings-harness-model-pill {
+  font-size: 12px;
+  font-weight: 500;
+  color: #37352f;
+  background: #fff;
+  border: 1px solid #ebe7df;
+  border-radius: 6px;
+  padding: 3px 10px;
+}
+
+.settings-harness-detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: #37352f;
+  margin-bottom: 4px;
+}
+
+.settings-harness-detail-label {
+  font-weight: 600;
+  color: #6b6b5e;
+  flex-shrink: 0;
+}
+
+.settings-harness-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #91918E;
+}
+
 /* ─── Code View ─────────────────────────────────────── */
 .cv {
   flex: 1;

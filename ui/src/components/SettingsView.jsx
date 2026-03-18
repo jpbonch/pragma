@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Settings, FlaskConical, BarChart3 } from 'lucide-react'
+import { fetchAvailableClis } from '../api'
 
 const SETTINGS_TABS = [
   { id: 'general', icon: Settings, label: 'General' },
@@ -7,10 +8,20 @@ const SETTINGS_TABS = [
   { id: 'usage', icon: BarChart3, label: 'Usage' },
 ]
 
+const HARNESS_LABELS = {
+  claude_code: 'Claude Code',
+  codex: 'Codex',
+}
+
 export function SettingsView({ workspaceName, deleting, error, onDelete }) {
   const [activeSettingsTab, setActiveSettingsTab] = useState('general')
   const [feedback, setFeedback] = useState('')
   const [feedbackStatus, setFeedbackStatus] = useState(null) // 'sending' | 'sent' | 'error'
+  const [harnesses, setHarnesses] = useState([])
+
+  useEffect(() => {
+    fetchAvailableClis().then(setHarnesses).catch(() => {})
+  }, [])
 
   async function handleSubmitFeedback(e) {
     e.preventDefault()
@@ -100,6 +111,67 @@ export function SettingsView({ workspaceName, deleting, error, onDelete }) {
         {activeSettingsTab === 'harnesses' && (
           <div className="settings-card">
             <h2>Harnesses</h2>
+            {harnesses.map((h) => (
+              <div key={h.id} className="settings-harness-card">
+                <div className="settings-harness-header">
+                  <span className="settings-harness-name">
+                    {HARNESS_LABELS[h.id] || h.id}
+                  </span>
+                  <span className="settings-harness-status">
+                    <span
+                      className={`settings-harness-status-dot ${h.available ? 'available' : 'unavailable'}`}
+                    />
+                    {h.available ? 'Available' : 'Not installed'}
+                  </span>
+                  <span className="settings-harness-command">{h.command}</span>
+                </div>
+
+                {h.models && h.models.length > 0 && (
+                  <>
+                    <div className="settings-section-title">Models</div>
+                    <div className="settings-harness-models">
+                      {h.models.map((m) => (
+                        <span key={m} className="settings-harness-model-pill">{m}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {h.titleModelId && (
+                  <>
+                    <div className="settings-section-title" style={{ marginTop: 10 }}>Title generation</div>
+                    <div className="settings-harness-detail-row">
+                      <span className="settings-harness-path">{h.titleModelId}</span>
+                    </div>
+                  </>
+                )}
+
+                {h.globalSkillsDirs && h.globalSkillsDirs.length > 0 && (
+                  <>
+                    <div className="settings-section-title" style={{ marginTop: 10 }}>Global Skills Directories</div>
+                    {h.globalSkillsDirs.map((d, i) => (
+                      <div key={i} className="settings-harness-detail-row">
+                        <span className="settings-harness-detail-label">{d.label}</span>
+                        <span className="settings-harness-path">{d.dir}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {h.mcpConfigFiles && h.mcpConfigFiles.length > 0 && (
+                  <>
+                    <div className="settings-section-title" style={{ marginTop: 10 }}>MCP Configuration</div>
+                    {h.mcpConfigFiles.map((f, i) => (
+                      <div key={i} className="settings-harness-detail-row">
+                        <span className="settings-harness-path">{f.path}</span>
+                        <span className="settings-harness-detail-label">reads key</span>
+                        <span className="settings-harness-path">{f.key}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            ))}
           </div>
         )}
 

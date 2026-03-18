@@ -570,6 +570,9 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       command: def.command,
       available: false,
       models: Object.keys(def.models),
+      globalSkillsDirs: def.globalSkillsDirs ?? [],
+      mcpConfigFiles: def.mcpConfigFiles ?? [],
+      titleModelId: def.titleModelId ?? null,
     }));
 
     await Promise.all(
