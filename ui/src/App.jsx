@@ -761,6 +761,11 @@ export default function App() {
   const [inputBarText, setInputBarText] = useState('')
   const [followupForTaskId, setFollowupForTaskId] = useState('')
 
+  // Draft messages preserved across tab switches
+  const chatDraftsRef = useRef({})
+  const [newChatDraft, setNewChatDraft] = useState('')
+  const [activeChatDraft, setActiveChatDraft] = useState('')
+
   const [tasks, setTasks] = useState([])
   const [tasksLoading, setTasksLoading] = useState(false)
   const [tasksError, setTasksError] = useState('')
@@ -2266,6 +2271,11 @@ export default function App() {
       return
     }
 
+    // Save current active-chat draft before switching away
+    if (conversation.threadId && conversation.mode === 'chat') {
+      chatDraftsRef.current[conversation.threadId] = activeChatDraft
+    }
+
     setSelectedServiceId('')
     closeConversationDrawer()
     setActiveTab('new-chat')
@@ -2275,6 +2285,12 @@ export default function App() {
     if (!threadId) {
       return
     }
+
+    // Save current active-chat draft before switching to a different thread
+    if (conversation.threadId && conversation.mode === 'chat') {
+      chatDraftsRef.current[conversation.threadId] = activeChatDraft
+    }
+
     viewingChatIdRef.current = threadId
     setSelectedServiceId('')
     setUnreadChatIds((current) => {
@@ -2294,6 +2310,9 @@ export default function App() {
 
       const thread = data.thread
       const entries = buildEntriesFromThreadData(data, agentById)
+
+      // Restore draft for this thread
+      setActiveChatDraft(chatDraftsRef.current[thread.id] || '')
 
       setConversation({
         open: true,
@@ -2694,6 +2713,8 @@ export default function App() {
   }
 
   function handleNewChatSubmit(payload) {
+    setNewChatDraft('')
+    setActiveChatDraft('')
     setActiveTab('active-chat')
     void handleInputSubmit({
       ...payload,
@@ -2702,6 +2723,10 @@ export default function App() {
   }
 
   function handleInlineChatSubmit(payload) {
+    setActiveChatDraft('')
+    if (conversation.threadId) {
+      delete chatDraftsRef.current[conversation.threadId]
+    }
     void handleInputSubmit({
       ...payload,
       mode: 'chat',
@@ -2890,6 +2915,8 @@ export default function App() {
               onOpenOrchestratorConfig={handleOpenOrchestratorConfig}
               hideMode
               lockedMode="chat"
+              value={newChatDraft}
+              onValueChange={setNewChatDraft}
               onSubmit={(payload) => {
                 void handleNewChatSubmit(payload)
               }}
@@ -2909,6 +2936,8 @@ export default function App() {
               onSubmit={handleInlineChatSubmit}
               onStop={handleStopStream}
               onOpenOrchestratorConfig={handleOpenOrchestratorConfig}
+              value={activeChatDraft}
+              onValueChange={setActiveChatDraft}
               disabled={
                 workspacesLoading ||
                 agentsLoading ||

@@ -101,6 +101,8 @@ export function InlineChatView({
   onSubmit,
   onStop,
   onOpenOrchestratorConfig,
+  value,
+  onValueChange,
   disabled = false,
 }) {
   const bodyRef = useRef(null)
@@ -147,6 +149,8 @@ export function InlineChatView({
         hideMode
         lockedMode="chat"
         embedded
+        value={value}
+        onValueChange={onValueChange}
         onSubmit={onSubmit}
       />
     </div>
