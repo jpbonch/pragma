@@ -639,6 +639,7 @@ export function ConnectionsView() {
                       <span>New Skill</span>
                     </button>
                   </div>
+                  <p className="cn-section-desc">Saved prompts that teach your agents new abilities. Install a skill from the catalog or create your own to give agents specialized knowledge and behaviors.</p>
                   <div className="cn-list">
                     {installed.map((skill) => {
                       const isExpanded = expandedSkillId === skill.id
@@ -736,6 +737,7 @@ export function ConnectionsView() {
               <div className="cn-col">
                 <div className="cn-section">
                   <h2 className="cn-section-title">Connector Skills</h2>
+                  <p className="cn-section-desc">Connect your agents to external services like Google Workspace and Slack. When you authenticate, Pragma handles the connection locally on your machine — your credentials are never sent to or stored on Pragma's servers.</p>
                   <div className="cn-list">
                     {connectors.map((connector) => {
                       const statusInfo = CONNECTOR_STATUS_STYLES[connector.status] ||
