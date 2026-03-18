@@ -836,18 +836,6 @@ export function ConversationDrawer({
           </div>
         ) : (
           <div className="conv-footer">
-            {mode === 'plan' && (
-              <div className="conv-footer-row" style={{ justifyContent: 'flex-end' }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="conv-delete-plan-btn" onClick={onDeletePlan} disabled={loading}>
-                    Delete Plan
-                  </button>
-                  <button className="conv-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
-                    Execute →
-                  </button>
-                </div>
-              </div>
-            )}
             <div className={`conv-input-container${activeQuestionOptions ? ' conv-input-has-options' : ''}`}>
               {activeQuestionOptions && (
                 <div className="conv-input-options">
