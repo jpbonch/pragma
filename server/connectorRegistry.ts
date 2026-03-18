@@ -14,7 +14,7 @@ export interface ConnectorDef {
   getBinaryUrl(platform: string, arch: string): string;
 }
 
-export const OAUTH_PROXY_URL = process.env.PRAGMA_OAUTH_PROXY_URL || 'https://auth.pragma.dev';
+export const OAUTH_PROXY_URL = process.env.PRAGMA_OAUTH_PROXY_URL || 'https://pragma-production-f107.up.railway.app';
 
 export const CONNECTOR_REGISTRY: ConnectorDef[] = [
   {
