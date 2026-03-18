@@ -407,9 +407,12 @@ export function InputBar({
                         ) : (
                           <Bot size={16} strokeWidth={2} />
                         )}
-                        <div className="selector-option-label">Orchestrator</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="selector-option-label">Orchestrator</div>
+                          <div className="selector-option-desc">Automatically selects the best agent, or choose one below</div>
+                        </div>
                         {!selectedAgentId && (
-                          <Check size={14} style={{ marginLeft: 'auto', color: '#2383e2' }} />
+                          <Check size={14} style={{ marginLeft: 'auto', flexShrink: 0, color: '#2383e2' }} />
                         )}
                       </div>
                       {agents.map((agent) => (
