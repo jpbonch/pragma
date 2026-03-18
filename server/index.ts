@@ -2290,8 +2290,16 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
       emitTaskStatus(workspaceName, taskId, "queued", "execute_created");
 
       // Fire-and-forget: generate an AI title from the prompt
-      generateTitle(db, prompt, "").then((aiTitle) => {
-        updateTaskTitle(db, taskId, aiTitle);
+      generateTitle(db, prompt, "").then(async (aiTitle) => {
+        await updateTaskTitle(db, taskId, aiTitle);
+        const row = await db.query<{ status: TaskStatus }>(
+          `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
+          [taskId],
+        );
+        const currentStatus = row.rows[0]?.status;
+        if (currentStatus) {
+          emitTaskStatus(workspaceName, taskId, currentStatus, "title_generated");
+        }
       }).catch(() => {});
 
       await createThread(db, {
@@ -2385,8 +2393,16 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
 
       emitTaskStatus(workspaceName, newTaskId, "queued", "followup_created");
 
-      generateTitle(db, prompt, "").then((aiTitle) => {
-        updateTaskTitle(db, newTaskId, aiTitle);
+      generateTitle(db, prompt, "").then(async (aiTitle) => {
+        await updateTaskTitle(db, newTaskId, aiTitle);
+        const row = await db.query<{ status: TaskStatus }>(
+          `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
+          [newTaskId],
+        );
+        const currentStatus = row.rows[0]?.status;
+        if (currentStatus) {
+          emitTaskStatus(workspaceName, newTaskId, currentStatus, "title_generated");
+        }
       }).catch(() => {});
 
       await createThread(db, {
@@ -3264,8 +3280,16 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
         emitTaskStatus(workspaceName, planTaskId, "planning", "plan_created");
 
         // Fire-and-forget: generate an AI title from the prompt
-        generateTitle(db, body.message, "").then((aiTitle) => {
-          updateTaskTitle(db, planTaskId, aiTitle);
+        generateTitle(db, body.message, "").then(async (aiTitle) => {
+          await updateTaskTitle(db, planTaskId, aiTitle);
+          const row = await db.query<{ status: TaskStatus }>(
+            `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
+            [planTaskId],
+          );
+          const currentStatus = row.rows[0]?.status;
+          if (currentStatus) {
+            emitTaskStatus(workspaceName, planTaskId, currentStatus, "title_generated");
+          }
         }).catch(() => {});
 
         await setThreadTaskId(db, threadId, planTaskId);
@@ -3400,8 +3424,16 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
         emitTaskStatus(workspaceName, planTaskId, "planning", "plan_created");
 
         // Fire-and-forget: generate an AI title from the prompt
-        generateTitle(db, body.message, "").then((aiTitle) => {
-          updateTaskTitle(db, planTaskId, aiTitle);
+        generateTitle(db, body.message, "").then(async (aiTitle) => {
+          await updateTaskTitle(db, planTaskId, aiTitle);
+          const row = await db.query<{ status: TaskStatus }>(
+            `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
+            [planTaskId],
+          );
+          const currentStatus = row.rows[0]?.status;
+          if (currentStatus) {
+            emitTaskStatus(workspaceName, planTaskId, currentStatus, "title_generated");
+          }
         }).catch(() => {});
 
         await setThreadTaskId(db, threadId, planTaskId);
