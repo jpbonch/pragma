@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
+import { getConnectorBinDir } from "../connectorBinaries";
 import { getConversationAdapter } from "./adapters";
 import {
   checkpointTaskRepos,
@@ -546,6 +547,17 @@ WHERE id = $1
 
     const workerAdapter = getConversationAdapter(selectedWorker.harness);
     const workerSkills = await listAgentSkills(db, selectedWorker.id);
+    const workerConnectors = await listAgentConnectors(db, selectedWorker.id);
+
+    // Merge connectors into skills for prompt building
+    const allSkills = [
+      ...workerSkills,
+      ...workerConnectors.map((c) => ({
+        name: c.name,
+        description: c.description ? `[Connector] ${c.description}` : "[Connector]",
+      })),
+    ];
+
     const contextDir = join(taskWorkspaceDir, "context");
     const contextEntries = await readdir(contextDir, { withFileTypes: true }).catch(() => []);
     const contextLines: string[] = [];
@@ -571,9 +583,18 @@ WHERE id = $1
       pragmaCliCommand: options.pragmaCliCommand,
       preferredCodePath,
       taskWorkspaceDir,
-      skills: workerSkills,
+      skills: allSkills,
       contextIndex,
     });
+
+    // Build connector env vars (token injection + PATH extension)
+    const connectorEnv: Record<string, string> = {};
+    for (const c of workerConnectors) {
+      connectorEnv[c.env_var] = c.access_token;
+    }
+    if (workerConnectors.length > 0) {
+      connectorEnv.PATH = `${getConnectorBinDir()}:${process.env.PATH ?? ""}`;
+    }
 
     let workerText = "";
     const workerResult = await workerAdapter.sendTurn({
@@ -581,18 +602,21 @@ WHERE id = $1
       modelId: selectedWorker.model_id,
       sessionId: input.resumeWorkerSessionId ?? null,
       cwd: taskWorkspaceDir,
-      env: buildAgentRuntimeEnv({
-        apiUrl: options.apiUrl,
-        pragmaCliCommand: options.pragmaCliCommand,
-        codeDir: join(taskWorkspaceDir, "code"),
-        outputDir,
-        taskWorkspaceDir,
-        workspaceName: input.workspaceName,
-        taskId: input.taskId,
-        threadId: input.threadId,
-        turnId,
-        agentId: selectedWorker.id,
-      }),
+      env: {
+        ...buildAgentRuntimeEnv({
+          apiUrl: options.apiUrl,
+          pragmaCliCommand: options.pragmaCliCommand,
+          codeDir: join(taskWorkspaceDir, "code"),
+          outputDir,
+          taskWorkspaceDir,
+          workspaceName: input.workspaceName,
+          taskId: input.taskId,
+          threadId: input.threadId,
+          turnId,
+          agentId: selectedWorker.id,
+        }),
+        ...connectorEnv,
+      },
       mode: "execute",
       reasoningEffort,
       abortSignal: abortController.signal,
@@ -875,6 +899,135 @@ async function listAgentSkills(
   );
 
   return result.rows;
+}
+
+async function listAgentConnectors(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  agentId: string,
+): Promise<Array<{
+  name: string;
+  description: string | null;
+  env_var: string;
+  access_token: string;
+  binary_name: string;
+}>> {
+  const result = await db.query<{
+    id: string;
+    name: string;
+    description: string | null;
+    env_var: string;
+    access_token: string | null;
+    refresh_token: string | null;
+    token_expires_at: string | null;
+    oauth_token_url: string;
+    oauth_client_id: string | null;
+    oauth_client_secret: string | null;
+    binary_name: string;
+    auth_type: string;
+  }>(
+    `SELECT c.id, c.name, c.description, c.env_var, c.access_token,
+            c.refresh_token, c.token_expires_at, c.oauth_token_url,
+            c.oauth_client_id, c.oauth_client_secret, c.binary_name, c.auth_type
+     FROM connectors c
+     JOIN agent_connectors ac ON ac.connector_id = c.id
+     WHERE ac.agent_id = $1 AND c.status = 'connected'
+     ORDER BY c.name ASC`,
+    [agentId],
+  );
+
+  const rows: Array<{
+    name: string;
+    description: string | null;
+    env_var: string;
+    access_token: string;
+    binary_name: string;
+  }> = [];
+
+  for (const row of result.rows) {
+    let token: string;
+    try {
+      token = await refreshConnectorTokenForRunner(db, row);
+    } catch {
+      continue; // Skip connectors that fail to refresh
+    }
+    rows.push({
+      name: row.name,
+      description: row.description,
+      env_var: row.env_var,
+      access_token: token,
+      binary_name: row.binary_name,
+    });
+  }
+
+  return rows;
+}
+
+async function refreshConnectorTokenForRunner(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  connector: {
+    id: string;
+    access_token: string | null;
+    refresh_token: string | null;
+    token_expires_at: string | null;
+    oauth_token_url: string;
+    oauth_client_id: string | null;
+    oauth_client_secret: string | null;
+    auth_type: string;
+  },
+): Promise<string> {
+  if (connector.auth_type === "api_key") {
+    return connector.access_token!;
+  }
+
+  if (
+    connector.token_expires_at &&
+    new Date(connector.token_expires_at) > new Date()
+  ) {
+    return connector.access_token!;
+  }
+
+  if (!connector.refresh_token) {
+    throw new Error("No refresh token available");
+  }
+
+  const response = await fetch(connector.oauth_token_url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: connector.refresh_token,
+      client_id: connector.oauth_client_id!,
+      client_secret: connector.oauth_client_secret!,
+    }),
+  });
+
+  if (!response.ok) {
+    await db.query(
+      `UPDATE connectors SET status = 'disconnected', access_token = NULL,
+       refresh_token = NULL, token_expires_at = NULL WHERE id = $1`,
+      [connector.id],
+    );
+    throw new Error("Token refresh failed");
+  }
+
+  const data = (await response.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
+
+  await db.query(
+    `UPDATE connectors SET access_token = $1, refresh_token = COALESCE($2, refresh_token),
+     token_expires_at = $3 WHERE id = $4`,
+    [
+      data.access_token,
+      data.refresh_token ?? null,
+      new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString(),
+      connector.id,
+    ],
+  );
+
+  return data.access_token;
 }
 
 function resolvePreferredCodePath(gitState: TaskGitState): string | null {

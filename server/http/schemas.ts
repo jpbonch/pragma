@@ -324,6 +324,20 @@ export const assignAgentSkillSchema = z
   })
   .strict();
 
+export const configureConnectorSchema = z
+  .object({
+    oauth_client_id: z.string().optional(),
+    oauth_client_secret: z.string().optional(),
+    access_token: z.string().optional(),
+  })
+  .strict();
+
+export const assignAgentConnectorSchema = z
+  .object({
+    connector_id: nonEmptyString,
+  })
+  .strict();
+
 export const dbQuerySchema = z
   .object({
     sql: z.string().trim().min(1),

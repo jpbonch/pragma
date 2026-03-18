@@ -520,19 +520,39 @@ agentCommand
       const skill = listResult.skills.find(
         (s) => s.name.toLowerCase() === options.name.toLowerCase(),
       );
-      if (!skill) {
-        throw new Error(`Skill not found: ${options.name}`);
+      if (skill) {
+        const response = await fetch(
+          `${apiUrl.replace(/\/$/, "")}/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skill.id)}/content`,
+        );
+        if (!response.ok) {
+          throw new Error(`Failed to fetch skill content: HTTP ${response.status}`);
+        }
+        const content = await response.text();
+        console.log(content);
+        return;
       }
 
-      const response = await fetch(
-        `${apiUrl.replace(/\/$/, "")}/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skill.id)}/content`,
+      // Fall back to connectors
+      const connectorResult = await apiRequest<{
+        connectors: Array<{ id: string; name: string; description: string | null; status: string }>;
+      }>(apiUrl, `/agents/${encodeURIComponent(agentId)}/connectors`);
+
+      const connector = connectorResult.connectors.find(
+        (c) => c.name.toLowerCase() === options.name.toLowerCase(),
       );
-      if (!response.ok) {
-        throw new Error(`Failed to fetch skill content: HTTP ${response.status}`);
+      if (connector) {
+        const response = await fetch(
+          `${apiUrl.replace(/\/$/, "")}/agents/${encodeURIComponent(agentId)}/connectors/${encodeURIComponent(connector.id)}/content`,
+        );
+        if (!response.ok) {
+          throw new Error(`Failed to fetch connector content: HTTP ${response.status}`);
+        }
+        const content = await response.text();
+        console.log(content);
+        return;
       }
 
-      const content = await response.text();
-      console.log(content);
+      throw new Error(`Skill not found: ${options.name}`);
     },
   );
 

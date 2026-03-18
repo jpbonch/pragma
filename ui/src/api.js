@@ -865,4 +865,60 @@ export async function unassignAgentSkill(agentId, skillId) {
   )
 }
 
+// ── Connectors ─────────────────────────────────────────────────────
+
+export async function fetchConnectors() {
+  const data = asObject(await fetchJson('/connectors'), 'Invalid connectors response.')
+  if (!Array.isArray(data.connectors)) {
+    throw invalidResponse('`connectors` must be an array.')
+  }
+  return data.connectors
+}
+
+export async function configureConnector(id, config) {
+  return fetchJson(`/connectors/${encodeURIComponent(id)}/config`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+}
+
+export async function startConnectorAuth(id) {
+  return fetchJson(`/connectors/${encodeURIComponent(id)}/auth`)
+}
+
+export async function disconnectConnector(id) {
+  return fetchJson(`/connectors/${encodeURIComponent(id)}/auth`, { method: 'DELETE' })
+}
+
+export async function ensureConnectorBinary(id) {
+  return fetchJson(`/connectors/${encodeURIComponent(id)}/ensure-binary`, { method: 'POST' }, 120000)
+}
+
+export async function fetchAgentConnectors(agentId) {
+  const data = asObject(
+    await fetchJson(`/agents/${encodeURIComponent(agentId)}/connectors`),
+    'Invalid agent connectors response.',
+  )
+  if (!Array.isArray(data.connectors)) {
+    throw invalidResponse('`connectors` must be an array.')
+  }
+  return data.connectors
+}
+
+export async function assignAgentConnector(agentId, connectorId) {
+  return fetchJson(`/agents/${encodeURIComponent(agentId)}/connectors`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ connector_id: connectorId }),
+  })
+}
+
+export async function unassignAgentConnector(agentId, connectorId) {
+  return fetchJson(
+    `/agents/${encodeURIComponent(agentId)}/connectors/${encodeURIComponent(connectorId)}`,
+    { method: 'DELETE' },
+  )
+}
+
 export { API_URL }

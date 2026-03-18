@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Download, Trash2, Plus, X } from 'lucide-react'
+import { AlertCircle, Download, Trash2, Plus, X, Link, Unlink, Settings, Key } from 'lucide-react'
 import {
   fetchSkillRegistry,
   fetchInstalledSkills,
@@ -12,6 +12,14 @@ import {
   fetchAgentSkills,
   assignAgentSkill,
   unassignAgentSkill,
+  fetchConnectors,
+  configureConnector,
+  startConnectorAuth,
+  disconnectConnector,
+  ensureConnectorBinary,
+  fetchAgentConnectors,
+  assignAgentConnector,
+  unassignAgentConnector,
 } from '../api'
 
 const PROVIDER_LABELS = {
@@ -24,15 +32,18 @@ const HARNESS_LABELS = {
   codex: 'Codex',
 }
 
+const CONNECTOR_STATUS_STYLES = {
+  connected: { label: 'Connected', className: 'cn-badge--connected' },
+  disconnected: { label: 'Disconnected', className: 'cn-badge--disconnected' },
+  needs_config: { label: 'Not configured', className: 'cn-badge--needs-config' },
+}
+
 export function ConnectionsView() {
   const [registry, setRegistry] = useState([])
   const [installed, setInstalled] = useState([])
-  // Map of harness id -> global skills array
   const [harnessGlobalSkills, setHarnessGlobalSkills] = useState({})
-  // Map of harness id -> MCP servers array
   const [harnessMcpServers, setHarnessMcpServers] = useState({})
   const [agents, setAgents] = useState([])
-  // Map of skill_id -> [{ id, name, emoji }]
   const [skillAgents, setSkillAgents] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -40,16 +51,22 @@ export function ConnectionsView() {
   const [removing, setRemoving] = useState(null)
   const [actionError, setActionError] = useState('')
   const [assignBusy, setAssignBusy] = useState(false)
-  // Track which agent card has the skill-add dropdown open
   const [addingSkillToAgent, setAddingSkillToAgent] = useState(null)
-  // Create custom skill modal
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createForm, setCreateForm] = useState({ name: '', description: '', content: '' })
   const [creating, setCreating] = useState(false)
 
-  // Derive agent -> skills map from skillAgents
+  // Connector state
+  const [connectors, setConnectors] = useState([])
+  const [connectorAgents, setConnectorAgents] = useState({})
+  const [showConfigModal, setShowConfigModal] = useState(null)
+  const [configForm, setConfigForm] = useState({ oauth_client_id: '', oauth_client_secret: '', access_token: '' })
+  const [configuring, setConfiguring] = useState(false)
+  const [connecting, setConnecting] = useState(null)
+  const [addingConnectorToAgent, setAddingConnectorToAgent] = useState(null)
+
   const agentSkillsMap = useMemo(() => {
-    const map = {} // agent_id -> [{ id, name, description }]
+    const map = {}
     for (const agent of agents) {
       map[agent.id] = []
     }
@@ -65,8 +82,24 @@ export function ConnectionsView() {
     return map
   }, [agents, skillAgents, installed])
 
+  const agentConnectorsMap = useMemo(() => {
+    const map = {}
+    for (const agent of agents) {
+      map[agent.id] = []
+    }
+    for (const [connId, agentsList] of Object.entries(connectorAgents)) {
+      const conn = connectors.find((c) => c.id === connId)
+      if (!conn) continue
+      for (const agent of agentsList) {
+        if (map[agent.id]) {
+          map[agent.id].push({ id: conn.id, name: conn.name, description: conn.description })
+        }
+      }
+    }
+    return map
+  }, [agents, connectorAgents, connectors])
+
   async function loadAgentSkillMap(agentList, skills) {
-    // Build skill -> agents map by querying each agent's skills
     const map = {}
     for (const s of skills) {
       map[s.id] = []
@@ -88,20 +121,43 @@ export function ConnectionsView() {
     return map
   }
 
+  async function loadConnectorAgentMap(agentList, connectorList) {
+    const map = {}
+    for (const c of connectorList) {
+      map[c.id] = []
+    }
+    await Promise.all(
+      agentList.map(async (agent) => {
+        try {
+          const agentConns = await fetchAgentConnectors(agent.id)
+          for (const c of agentConns) {
+            if (map[c.id]) {
+              map[c.id].push({ id: agent.id, name: agent.name, emoji: agent.emoji })
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }),
+    )
+    return map
+  }
+
   async function loadData() {
     setLoading(true)
     setError('')
     try {
-      const [reg, inst, agentList] = await Promise.all([
+      const [reg, inst, agentList, connList] = await Promise.all([
         fetchSkillRegistry(),
         fetchInstalledSkills(),
         fetchAgents(),
+        fetchConnectors(),
       ])
       setRegistry(reg)
       setInstalled(inst)
       setAgents(agentList)
+      setConnectors(connList)
 
-      // Fetch global skills and MCP servers per unique harness
       const uniqueHarnesses = [...new Set(agentList.map((a) => a.harness).filter(Boolean))]
       const [harnessSkillsEntries, harnessMcpEntries] = await Promise.all([
         Promise.all(
@@ -120,8 +176,12 @@ export function ConnectionsView() {
       setHarnessGlobalSkills(Object.fromEntries(harnessSkillsEntries))
       setHarnessMcpServers(Object.fromEntries(harnessMcpEntries))
 
-      const map = await loadAgentSkillMap(agentList, inst)
-      setSkillAgents(map)
+      const [skillMap, connMap] = await Promise.all([
+        loadAgentSkillMap(agentList, inst),
+        loadConnectorAgentMap(agentList, connList),
+      ])
+      setSkillAgents(skillMap)
+      setConnectorAgents(connMap)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -135,19 +195,19 @@ export function ConnectionsView() {
     loadData()
   }, [])
 
-  // Close dropdowns on outside click
   useEffect(() => {
-    if (!addingSkillToAgent) return
+    if (!addingSkillToAgent && !addingConnectorToAgent) return
     function onPointerDown(e) {
-      if (e.target.closest('.cn-agent-add-btn') || e.target.closest('.cn-skill-add-btn')) return
-      const dropdown = e.target.closest('.cn-agent-dropdown') || e.target.closest('.cn-skill-dropdown')
+      if (e.target.closest('.cn-agent-add-btn') || e.target.closest('.cn-skill-add-btn') || e.target.closest('.cn-connector-add-btn')) return
+      const dropdown = e.target.closest('.cn-agent-dropdown') || e.target.closest('.cn-skill-dropdown') || e.target.closest('.cn-connector-dropdown')
       if (!dropdown) {
         setAddingSkillToAgent(null)
+        setAddingConnectorToAgent(null)
       }
     }
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [addingSkillToAgent])
+  }, [addingSkillToAgent, addingConnectorToAgent])
 
   const installedNames = new Set(installed.map((s) => s.name))
 
@@ -259,6 +319,117 @@ export function ConnectionsView() {
     }
   }
 
+  // ── Connector handlers ─────────────────────────────────────────────
+
+  function handleOpenConfig(connector) {
+    setConfigForm({ oauth_client_id: '', oauth_client_secret: '', access_token: '' })
+    setShowConfigModal(connector)
+  }
+
+  async function handleSaveConfig(e) {
+    e.preventDefault()
+    if (configuring) return
+    setConfiguring(true)
+    setActionError('')
+    try {
+      const connector = showConfigModal
+      if (connector.auth_type === 'api_key') {
+        await configureConnector(connector.id, { access_token: configForm.access_token })
+      } else {
+        await configureConnector(connector.id, {
+          oauth_client_id: configForm.oauth_client_id,
+          oauth_client_secret: configForm.oauth_client_secret,
+        })
+      }
+      const connList = await fetchConnectors()
+      setConnectors(connList)
+      setShowConfigModal(null)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setConfiguring(false)
+    }
+  }
+
+  async function handleConnect(connector) {
+    if (connecting) return
+    setConnecting(connector.id)
+    setActionError('')
+    try {
+      await ensureConnectorBinary(connector.id)
+      const { url } = await startConnectorAuth(connector.id)
+      window.open(url, '_blank')
+
+      const poll = setInterval(async () => {
+        try {
+          const connList = await fetchConnectors()
+          const updated = connList.find((c) => c.id === connector.id)
+          if (updated?.status === 'connected') {
+            clearInterval(poll)
+            setConnectors(connList)
+            setConnecting(null)
+          }
+        } catch {
+          // ignore polling errors
+        }
+      }, 2000)
+
+      setTimeout(() => {
+        clearInterval(poll)
+        setConnecting(null)
+      }, 300000)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+      setConnecting(null)
+    }
+  }
+
+  async function handleDisconnect(connector) {
+    setActionError('')
+    try {
+      await disconnectConnector(connector.id)
+      const connList = await fetchConnectors()
+      setConnectors(connList)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleAssignConnector(connectorId, agentId) {
+    setAssignBusy(true)
+    setActionError('')
+    try {
+      await assignAgentConnector(agentId, connectorId)
+      const agent = agents.find((a) => a.id === agentId)
+      setConnectorAgents((prev) => ({
+        ...prev,
+        [connectorId]: [
+          ...(prev[connectorId] || []),
+          { id: agent.id, name: agent.name, emoji: agent.emoji },
+        ],
+      }))
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAssignBusy(false)
+      setAddingConnectorToAgent(null)
+    }
+  }
+
+  async function handleUnassignConnector(connectorId, agentId) {
+    setActionError('')
+    try {
+      await unassignAgentConnector(agentId, connectorId)
+      setConnectorAgents((prev) => ({
+        ...prev,
+        [connectorId]: (prev[connectorId] || []).filter((a) => a.id !== agentId),
+      }))
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const connectedConnectors = connectors.filter((c) => c.status === 'connected')
   const catalogSkills = registry
 
   return (
@@ -306,6 +477,9 @@ export function ConnectionsView() {
                     const assignedSkills = agentSkillsMap[agent.id] || []
                     const assignedSkillIds = new Set(assignedSkills.map((s) => s.id))
                     const availableSkills = installed.filter((s) => !assignedSkillIds.has(s.id))
+                    const assignedConns = agentConnectorsMap[agent.id] || []
+                    const assignedConnIds = new Set(assignedConns.map((c) => c.id))
+                    const availableConns = connectedConnectors.filter((c) => !assignedConnIds.has(c.id))
                     const agentGlobalSkills = (agent.harness && harnessGlobalSkills[agent.harness]) || []
                     const agentMcpServers = (agent.harness && harnessMcpServers[agent.harness]) || []
                     const harnessLabel = HARNESS_LABELS[agent.harness] || agent.harness
@@ -340,11 +514,12 @@ export function ConnectionsView() {
                               <div className="cn-agent-add-wrap">
                                 <button
                                   className="cn-skill-add-btn cn-agent-add-btn"
-                                  onClick={() =>
+                                  onClick={() => {
                                     setAddingSkillToAgent(
                                       addingSkillToAgent === agent.id ? null : agent.id,
                                     )
-                                  }
+                                    setAddingConnectorToAgent(null)
+                                  }}
                                   disabled={assignBusy}
                                   title="Add skill"
                                 >
@@ -360,6 +535,59 @@ export function ConnectionsView() {
                                         disabled={assignBusy}
                                       >
                                         {skill.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Connectors assigned to agent */}
+                        <div className="cn-agent-card-skills">
+                          <div className="cn-agents-label">Connectors</div>
+                          <div className="cn-agents-list">
+                            {assignedConns.map((conn) => (
+                              <span key={conn.id} className="cn-agent-chip cn-agent-chip--connector">
+                                <span className="cn-agent-chip-name">{conn.name}</span>
+                                <button
+                                  className="cn-agent-chip-remove"
+                                  title={`Remove ${conn.name}`}
+                                  onClick={() => handleUnassignConnector(conn.id, agent.id)}
+                                >
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ))}
+                            {assignedConns.length === 0 && (
+                              <span className="cn-agents-none">No connectors assigned</span>
+                            )}
+                            {availableConns.length > 0 && (
+                              <div className="cn-agent-add-wrap">
+                                <button
+                                  className="cn-connector-add-btn cn-agent-add-btn"
+                                  onClick={() => {
+                                    setAddingConnectorToAgent(
+                                      addingConnectorToAgent === agent.id ? null : agent.id,
+                                    )
+                                    setAddingSkillToAgent(null)
+                                  }}
+                                  disabled={assignBusy}
+                                  title="Add connector"
+                                >
+                                  <Plus size={12} />
+                                </button>
+                                {addingConnectorToAgent === agent.id && (
+                                  <div className="cn-connector-dropdown cn-agent-dropdown">
+                                    {availableConns.map((conn) => (
+                                      <button
+                                        key={conn.id}
+                                        className="cn-agent-dropdown-item"
+                                        onClick={() => handleAssignConnector(conn.id, agent.id)}
+                                        disabled={assignBusy}
+                                      >
+                                        {conn.name}
                                       </button>
                                     ))}
                                   </div>
@@ -394,6 +622,84 @@ export function ConnectionsView() {
                             </div>
                           </div>
                         )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Connectors Section */}
+            {connectors.length > 0 && (
+              <div className="cn-section">
+                <h2 className="cn-section-title">Connectors</h2>
+                <div className="cn-grid">
+                  {connectors.map((connector) => {
+                    const statusInfo = CONNECTOR_STATUS_STYLES[connector.status] ||
+                      CONNECTOR_STATUS_STYLES.disconnected
+                    const isOAuth = connector.auth_type === 'oauth2'
+                    const needsConfig = isOAuth && (!connector.has_client_id || !connector.has_client_secret)
+                    const canConnect = isOAuth && connector.has_client_id && connector.has_client_secret && connector.status !== 'connected'
+                    const isConnected = connector.status === 'connected'
+
+                    return (
+                      <div key={connector.id} className={`cn-card ${isConnected ? 'cn-card--installed' : ''}`}>
+                        <div className="cn-card-header">
+                          <span className="cn-card-name">{connector.name}</span>
+                          <span className={`cn-badge ${statusInfo.className}`}>
+                            {statusInfo.label}
+                          </span>
+                        </div>
+                        {connector.description && (
+                          <p className="cn-card-desc">{connector.description}</p>
+                        )}
+                        <div className="cn-card-meta">
+                          <span className="cn-card-provider">{connector.provider}</span>
+                          <span className="cn-card-auth-type">{isOAuth ? 'OAuth2' : 'API Key'}</span>
+                        </div>
+                        <div className="cn-card-footer">
+                          {needsConfig && (
+                            <button
+                              className="cn-config-btn"
+                              onClick={() => handleOpenConfig(connector)}
+                            >
+                              <Settings size={13} />
+                              <span>Configure</span>
+                            </button>
+                          )}
+                          {!isOAuth && !isConnected && (
+                            <button
+                              className="cn-config-btn"
+                              onClick={() => handleOpenConfig(connector)}
+                            >
+                              <Key size={13} />
+                              <span>Set API Key</span>
+                            </button>
+                          )}
+                          {canConnect && (
+                            <button
+                              className="cn-connect-btn"
+                              onClick={() => handleConnect(connector)}
+                              disabled={connecting === connector.id}
+                            >
+                              {connecting === connector.id ? (
+                                <div className="cn-spinner-sm" />
+                              ) : (
+                                <Link size={13} />
+                              )}
+                              <span>{connecting === connector.id ? 'Connecting...' : 'Connect'}</span>
+                            </button>
+                          )}
+                          {isConnected && (
+                            <button
+                              className="cn-disconnect-btn"
+                              onClick={() => handleDisconnect(connector)}
+                            >
+                              <Unlink size={13} />
+                              <span>Disconnect</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )
                   })}
@@ -530,6 +836,78 @@ export function ConnectionsView() {
                 disabled={!createForm.name.trim() || !createForm.content.trim() || creating}
               >
                 {creating ? 'Creating...' : 'Create Skill'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Configure Connector Modal */}
+      {showConfigModal && (
+        <div className="modal-backdrop" onClick={() => setShowConfigModal(null)}>
+          <form
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleSaveConfig}
+          >
+            <h2>Configure {showConfigModal.name}</h2>
+            <p>{showConfigModal.description}</p>
+
+            {showConfigModal.auth_type === 'api_key' ? (
+              <>
+                <label className="modal-label">API Key / Integration Token</label>
+                <input
+                  className="modal-input"
+                  type="password"
+                  placeholder="Paste your integration token"
+                  value={configForm.access_token}
+                  onChange={(e) => setConfigForm({ ...configForm, access_token: e.target.value })}
+                  required
+                  autoFocus
+                />
+              </>
+            ) : (
+              <>
+                <label className="modal-label">Client ID</label>
+                <input
+                  className="modal-input"
+                  placeholder="e.g. xxx.apps.googleusercontent.com"
+                  value={configForm.oauth_client_id}
+                  onChange={(e) => setConfigForm({ ...configForm, oauth_client_id: e.target.value })}
+                  required
+                  autoFocus
+                />
+
+                <label className="modal-label">Client Secret</label>
+                <input
+                  className="modal-input"
+                  type="password"
+                  placeholder="e.g. GOCSPX-xxx"
+                  value={configForm.oauth_client_secret}
+                  onChange={(e) => setConfigForm({ ...configForm, oauth_client_secret: e.target.value })}
+                  required
+                />
+              </>
+            )}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-cancel"
+                onClick={() => setShowConfigModal(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="modal-create"
+                disabled={configuring || (
+                  showConfigModal.auth_type === 'api_key'
+                    ? !configForm.access_token.trim()
+                    : !configForm.oauth_client_id.trim() || !configForm.oauth_client_secret.trim()
+                )}
+              >
+                {configuring ? 'Saving...' : (showConfigModal.auth_type === 'api_key' ? 'Connect' : 'Save')}
               </button>
             </div>
           </form>

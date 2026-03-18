@@ -108,10 +108,14 @@ import {
   createSkillSchema,
   updateSkillSchema,
   assignAgentSkillSchema,
+  configureConnectorSchema,
+  assignAgentConnectorSchema,
   dbQuerySchema,
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
+import { CONNECTOR_REGISTRY } from "./connectorRegistry";
+import { ensureConnectorBinary, getConnectorBinDir } from "./connectorBinaries";
 
 type StartServerOptions = {
   port: number;
@@ -4724,6 +4728,534 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         throw new PragmaError("SKILL_NAME_EXISTS", 409, `Skill "${body.name}" is already installed.`);
       }
       throw new PragmaError("INSTALL_SKILL_FAILED", 400, message);
+    } finally {
+      await db.close();
+    }
+  });
+
+  // ── Connectors ──────────────────────────────────────────────────────
+
+  // In-memory OAuth state store (state string -> { connectorId, expiresAt })
+  const oauthStateStore = new Map<string, { connectorId: string; expiresAt: number }>();
+
+  async function seedConnectors(db: Awaited<ReturnType<typeof openDatabase>>): Promise<void> {
+    for (const def of CONNECTOR_REGISTRY) {
+      await db.query(
+        `INSERT INTO connectors (id, name, description, content, provider, binary_name,
+         env_var, auth_type, oauth_auth_url, oauth_token_url, scopes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (name) DO NOTHING`,
+        [
+          `conn_${randomUUID().slice(0, 12)}`,
+          def.name,
+          def.description,
+          def.content,
+          def.provider,
+          def.binaryName,
+          def.envVar,
+          def.authType,
+          def.oauthAuthUrl,
+          def.oauthTokenUrl,
+          def.scopes,
+        ],
+      );
+    }
+  }
+
+  async function refreshConnectorToken(
+    db: Awaited<ReturnType<typeof openDatabase>>,
+    connector: {
+      id: string;
+      access_token: string | null;
+      refresh_token: string | null;
+      token_expires_at: string | null;
+      oauth_token_url: string;
+      oauth_client_id: string | null;
+      oauth_client_secret: string | null;
+      auth_type: string;
+    },
+  ): Promise<string> {
+    // api_key connectors don't expire
+    if (connector.auth_type === "api_key") {
+      return connector.access_token!;
+    }
+
+    // If not expired, return current token
+    if (
+      connector.token_expires_at &&
+      new Date(connector.token_expires_at) > new Date()
+    ) {
+      return connector.access_token!;
+    }
+
+    if (!connector.refresh_token) {
+      throw new Error("No refresh token available — connector needs re-authorization");
+    }
+
+    // Refresh
+    const response = await fetch(connector.oauth_token_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: connector.refresh_token,
+        client_id: connector.oauth_client_id!,
+        client_secret: connector.oauth_client_secret!,
+      }),
+    });
+
+    if (!response.ok) {
+      await db.query(
+        `UPDATE connectors SET status = 'disconnected', access_token = NULL,
+         refresh_token = NULL, token_expires_at = NULL WHERE id = $1`,
+        [connector.id],
+      );
+      throw new Error("Token refresh failed — connector disconnected");
+    }
+
+    const data = (await response.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+
+    await db.query(
+      `UPDATE connectors SET access_token = $1, refresh_token = COALESCE($2, refresh_token),
+       token_expires_at = $3 WHERE id = $4`,
+      [
+        data.access_token,
+        data.refresh_token ?? null,
+        new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString(),
+        connector.id,
+      ],
+    );
+
+    return data.access_token;
+  }
+
+  // GET /connectors — list all connectors
+  app.get("/connectors", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const db = await openDatabase(workspaceName);
+
+    try {
+      await seedConnectors(db);
+
+      const result = await db.query<{
+        id: string;
+        name: string;
+        description: string | null;
+        provider: string;
+        status: string;
+        auth_type: string;
+        oauth_client_id: string | null;
+        oauth_client_secret: string | null;
+      }>(
+        `SELECT id, name, description, provider, status, auth_type,
+                oauth_client_id, oauth_client_secret
+         FROM connectors ORDER BY name ASC`,
+      );
+
+      const connectors = result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        provider: row.provider,
+        status: row.status,
+        auth_type: row.auth_type,
+        has_client_id: !!row.oauth_client_id,
+        has_client_secret: !!row.oauth_client_secret,
+      }));
+
+      return c.json({ connectors });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // PUT /connectors/:id/config — set client_id/secret or api_key
+  app.put("/connectors/:id/config", validateJson(configureConnectorSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const connectorId = c.req.param("id");
+    const body = c.req.valid("json");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const existing = await db.query<{
+        id: string;
+        auth_type: string;
+      }>(`SELECT id, auth_type FROM connectors WHERE id = $1 LIMIT 1`, [connectorId]);
+
+      if (existing.rows.length === 0) {
+        throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
+      }
+
+      const connector = existing.rows[0];
+
+      if (connector.auth_type === "api_key" && body.access_token) {
+        // For api_key connectors, setting the token directly connects
+        await db.query(
+          `UPDATE connectors SET access_token = $1, status = 'connected' WHERE id = $2`,
+          [body.access_token, connectorId],
+        );
+      } else {
+        // OAuth connectors — store client credentials
+        const sets: string[] = [];
+        const params: unknown[] = [connectorId];
+        let paramIndex = 2;
+
+        if (body.oauth_client_id !== undefined) {
+          sets.push(`oauth_client_id = $${paramIndex++}`);
+          params.push(body.oauth_client_id);
+        }
+        if (body.oauth_client_secret !== undefined) {
+          sets.push(`oauth_client_secret = $${paramIndex++}`);
+          params.push(body.oauth_client_secret);
+        }
+
+        if (sets.length > 0) {
+          // Set status to disconnected (ready to connect) if it was needs_config
+          sets.push(`status = 'disconnected'`);
+          await db.query(`UPDATE connectors SET ${sets.join(", ")} WHERE id = $1`, params);
+        }
+      }
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // GET /connectors/:id/auth — start OAuth flow
+  app.get("/connectors/:id/auth", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const connectorId = c.req.param("id");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query<{
+        id: string;
+        oauth_client_id: string | null;
+        oauth_client_secret: string | null;
+        oauth_auth_url: string;
+        scopes: string;
+        redirect_uri: string;
+        auth_type: string;
+      }>(
+        `SELECT id, oauth_client_id, oauth_client_secret, oauth_auth_url,
+                scopes, redirect_uri, auth_type
+         FROM connectors WHERE id = $1 LIMIT 1`,
+        [connectorId],
+      );
+
+      if (result.rows.length === 0) {
+        throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
+      }
+
+      const connector = result.rows[0];
+
+      if (connector.auth_type !== "oauth2") {
+        throw new PragmaError("INVALID_AUTH_TYPE", 400, "This connector does not use OAuth2");
+      }
+
+      if (!connector.oauth_client_id || !connector.oauth_client_secret) {
+        throw new PragmaError("CONNECTOR_NOT_CONFIGURED", 400, "Client ID and secret must be configured first");
+      }
+
+      const state = randomUUID();
+      oauthStateStore.set(state, {
+        connectorId: connector.id,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      });
+
+      // Clean up expired states
+      for (const [key, value] of oauthStateStore) {
+        if (value.expiresAt < Date.now()) {
+          oauthStateStore.delete(key);
+        }
+      }
+
+      const params = new URLSearchParams({
+        client_id: connector.oauth_client_id,
+        redirect_uri: connector.redirect_uri,
+        scope: connector.scopes,
+        state,
+        response_type: "code",
+        access_type: "offline",
+        prompt: "consent",
+      });
+
+      const url = `${connector.oauth_auth_url}?${params.toString()}`;
+
+      return c.json({ url });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // GET /connectors/callback — OAuth callback
+  app.get("/connectors/callback", async (c) => {
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+
+    if (!code || !state) {
+      return c.html("<html><body><h2>Error</h2><p>Missing code or state parameter.</p></body></html>", 400);
+    }
+
+    const stateEntry = oauthStateStore.get(state);
+    if (!stateEntry || stateEntry.expiresAt < Date.now()) {
+      oauthStateStore.delete(state);
+      return c.html("<html><body><h2>Error</h2><p>Invalid or expired state. Please try connecting again.</p></body></html>", 400);
+    }
+    oauthStateStore.delete(state);
+
+    const workspaceName = await requireActiveWorkspaceName();
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const result = await db.query<{
+        id: string;
+        oauth_client_id: string;
+        oauth_client_secret: string;
+        oauth_token_url: string;
+        redirect_uri: string;
+      }>(
+        `SELECT id, oauth_client_id, oauth_client_secret, oauth_token_url, redirect_uri
+         FROM connectors WHERE id = $1 LIMIT 1`,
+        [stateEntry.connectorId],
+      );
+
+      if (result.rows.length === 0) {
+        return c.html("<html><body><h2>Error</h2><p>Connector not found.</p></body></html>", 404);
+      }
+
+      const connector = result.rows[0];
+
+      // Exchange code for tokens
+      const tokenResponse = await fetch(connector.oauth_token_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: connector.oauth_client_id,
+          client_secret: connector.oauth_client_secret,
+          redirect_uri: connector.redirect_uri,
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        const errorBody = await tokenResponse.text().catch(() => "");
+        console.error(`OAuth token exchange failed: ${tokenResponse.status} ${errorBody}`);
+        return c.html("<html><body><h2>Error</h2><p>Token exchange failed. Please try again.</p></body></html>", 500);
+      }
+
+      const tokenData = (await tokenResponse.json()) as {
+        access_token: string;
+        refresh_token?: string;
+        expires_in?: number;
+      };
+
+      const expiresAt = new Date(
+        Date.now() + (tokenData.expires_in ?? 3600) * 1000,
+      ).toISOString();
+
+      await db.query(
+        `UPDATE connectors
+         SET access_token = $1, refresh_token = $2, token_expires_at = $3, status = 'connected'
+         WHERE id = $4`,
+        [
+          tokenData.access_token,
+          tokenData.refresh_token ?? null,
+          expiresAt,
+          connector.id,
+        ],
+      );
+
+      return c.html(
+        `<html><body><h2>Connected!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+
+  // DELETE /connectors/:id/auth — disconnect
+  app.delete("/connectors/:id/auth", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const connectorId = c.req.param("id");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      await db.query(
+        `UPDATE connectors
+         SET status = 'disconnected', access_token = NULL,
+             refresh_token = NULL, token_expires_at = NULL
+         WHERE id = $1`,
+        [connectorId],
+      );
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // POST /connectors/:id/ensure-binary — download binary on demand
+  app.post("/connectors/:id/ensure-binary", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const connectorId = c.req.param("id");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query<{ name: string }>(
+        `SELECT name FROM connectors WHERE id = $1 LIMIT 1`,
+        [connectorId],
+      );
+
+      if (result.rows.length === 0) {
+        throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
+      }
+
+      const def = CONNECTOR_REGISTRY.find((d) => d.name === result.rows[0].name);
+      if (!def) {
+        throw new PragmaError("CONNECTOR_DEF_NOT_FOUND", 404, "Connector definition not found in registry");
+      }
+
+      const platform = process.platform === "darwin" ? "darwin" : "linux";
+      const arch = process.arch === "arm64" ? "arm64" : "x64";
+      const downloadUrl = def.getBinaryUrl(platform, arch);
+      const binPath = await ensureConnectorBinary(def.binaryName, downloadUrl);
+
+      return c.json({ ok: true, path: binPath });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // ── Agent-Connector Assignments ──────────────────────────────────
+
+  // GET /agents/:id/connectors
+  app.get("/agents/:id/connectors", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const agentId = c.req.param("id");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const agent = await db.query<{ id: string }>(
+        `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
+        [agentId],
+      );
+      if (agent.rows.length === 0) {
+        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
+      }
+
+      const result = await db.query<{
+        id: string;
+        name: string;
+        description: string | null;
+        status: string;
+      }>(
+        `SELECT c.id, c.name, c.description, c.status
+         FROM connectors c
+         JOIN agent_connectors ac ON ac.connector_id = c.id
+         WHERE ac.agent_id = $1
+         ORDER BY c.name ASC`,
+        [agentId],
+      );
+
+      return c.json({ connectors: result.rows });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // POST /agents/:id/connectors — assign connector
+  app.post("/agents/:id/connectors", validateJson(assignAgentConnectorSchema), async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const agentId = c.req.param("id");
+    const body = c.req.valid("json");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const agent = await db.query<{ id: string }>(
+        `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
+        [agentId],
+      );
+      if (agent.rows.length === 0) {
+        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
+      }
+
+      const connector = await db.query<{ id: string }>(
+        `SELECT id FROM connectors WHERE id = $1 LIMIT 1`,
+        [body.connector_id],
+      );
+      if (connector.rows.length === 0) {
+        throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${body.connector_id}`);
+      }
+
+      await db.query(
+        `INSERT INTO agent_connectors (agent_id, connector_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [agentId, body.connector_id],
+      );
+
+      return c.json({ ok: true }, 201);
+    } finally {
+      await db.close();
+    }
+  });
+
+  // DELETE /agents/:id/connectors/:connId — unassign connector
+  app.delete("/agents/:id/connectors/:connId", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const agentId = c.req.param("id");
+    const connId = c.req.param("connId");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query(
+        `DELETE FROM agent_connectors WHERE agent_id = $1 AND connector_id = $2`,
+        [agentId, connId],
+      );
+      if ((result.affectedRows ?? 0) === 0) {
+        throw new PragmaError(
+          "AGENT_CONNECTOR_NOT_FOUND",
+          404,
+          `Connector assignment not found for agent ${agentId} and connector ${connId}`,
+        );
+      }
+
+      return c.json({ ok: true });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // GET /agents/:id/connectors/:connId/content — connector skill markdown
+  app.get("/agents/:id/connectors/:connId/content", async (c) => {
+    const workspaceName = await requireActiveWorkspaceName();
+    const agentId = c.req.param("id");
+    const connId = c.req.param("connId");
+
+    const db = await openDatabase(workspaceName);
+    try {
+      const result = await db.query<{ content: string }>(
+        `SELECT c.content
+         FROM connectors c
+         JOIN agent_connectors ac ON ac.connector_id = c.id
+         WHERE ac.agent_id = $1 AND c.id = $2
+         LIMIT 1`,
+        [agentId, connId],
+      );
+
+      if (result.rows.length === 0) {
+        throw new PragmaError(
+          "AGENT_CONNECTOR_NOT_FOUND",
+          404,
+          `Connector not found or not assigned to agent ${agentId}`,
+        );
+      }
+
+      return c.text(result.rows[0].content);
     } finally {
       await db.close();
     }

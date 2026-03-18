@@ -5731,6 +5731,9 @@ select { cursor: pointer; }
   padding: 2px 8px; border-radius: 10px; white-space: nowrap;
 }
 .cn-badge--installed { background: #ecfdf5; color: #059669; }
+.cn-badge--connected { background: #ecfdf5; color: #059669; }
+.cn-badge--disconnected { background: #fefce8; color: #ca8a04; }
+.cn-badge--needs-config { background: #f3f4f6; color: #6b7280; }
 .cn-badge--global { background: #eff6ff; color: #2563eb; }
 
 .cn-global-source {
@@ -5767,6 +5770,33 @@ select { cursor: pointer; }
 .cn-installed-label {
   display: flex; align-items: center; gap: 4px;
   font-size: 12px; color: #059669; font-weight: 500;
+}
+
+/* Connector buttons */
+.cn-config-btn, .cn-connect-btn, .cn-disconnect-btn {
+  display: flex; align-items: center; gap: 5px;
+  border: 1px solid #e8e7e4; border-radius: 8px; background: #fff;
+  font-size: 12px; font-weight: 500; padding: 4px 12px;
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+}
+.cn-config-btn { color: #6f6e69; }
+.cn-config-btn:hover { border-color: #2383e2; color: #2383e2; }
+.cn-connect-btn { background: #2383e2; color: #fff; border-color: #2383e2; font-weight: 600; }
+.cn-connect-btn:hover:not(:disabled) { background: #1b6ec2; }
+.cn-connect-btn:disabled { opacity: 0.7; cursor: default; }
+.cn-disconnect-btn { color: #6f6e69; }
+.cn-disconnect-btn:hover { border-color: #dc2626; color: #dc2626; }
+
+.cn-card-meta {
+  display: flex; gap: 8px; margin-bottom: 8px;
+}
+.cn-card-provider, .cn-card-auth-type {
+  font-size: 11px; color: #9b9a97; font-weight: 500;
+  padding: 1px 6px; border-radius: 4px; background: #f7f6f3;
+}
+
+.cn-agent-chip--connector {
+  background: #fef3c7 !important; border-color: #fcd34d !important;
 }
 
 /* Agent skill assignment */

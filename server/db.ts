@@ -518,6 +518,37 @@ CREATE TABLE IF NOT EXISTS agent_skills (
   PRIMARY KEY (agent_id, skill_id)
 );
 `);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS connectors (
+  id VARCHAR(64) PRIMARY KEY,
+  name VARCHAR(255) UNIQUE NOT NULL,
+  description TEXT,
+  content TEXT NOT NULL,
+  provider VARCHAR(64) NOT NULL,
+  binary_name VARCHAR(64) NOT NULL,
+  env_var VARCHAR(128) NOT NULL,
+  auth_type VARCHAR(32) NOT NULL DEFAULT 'oauth2',
+  oauth_client_id TEXT,
+  oauth_client_secret TEXT,
+  oauth_auth_url TEXT NOT NULL,
+  oauth_token_url TEXT NOT NULL,
+  scopes TEXT NOT NULL DEFAULT '',
+  redirect_uri TEXT NOT NULL DEFAULT 'http://127.0.0.1:3000/connectors/callback',
+  status VARCHAR(32) NOT NULL DEFAULT 'disconnected',
+  access_token TEXT,
+  refresh_token TEXT,
+  token_expires_at TIMESTAMPTZ
+);
+`);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS agent_connectors (
+  agent_id VARCHAR(64) REFERENCES agents(id) ON DELETE CASCADE,
+  connector_id VARCHAR(64) REFERENCES connectors(id) ON DELETE CASCADE,
+  PRIMARY KEY (agent_id, connector_id)
+);
+`);
 }
 
 async function ensureTaskStatusEnumType(db: PGlite): Promise<void> {
