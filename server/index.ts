@@ -114,7 +114,7 @@ import {
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
-import { CONNECTOR_REGISTRY } from "./connectorRegistry";
+import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "./connectorRegistry";
 import { ensureConnectorBinary, getConnectorBinDir } from "./connectorBinaries";
 
 type StartServerOptions = {
@@ -4786,6 +4786,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     db: Awaited<ReturnType<typeof openDatabase>>,
     connector: {
       id: string;
+      name: string;
       access_token: string | null;
       refresh_token: string | null;
       token_expires_at: string | null;
@@ -4812,17 +4813,28 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       throw new Error("No refresh token available — connector needs re-authorization");
     }
 
-    // Refresh
-    const response = await fetch(connector.oauth_token_url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: connector.refresh_token,
-        client_id: connector.oauth_client_id!,
-        client_secret: connector.oauth_client_secret!,
-      }),
-    });
+    // Check if this connector uses the OAuth proxy
+    const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
+    let response: Response;
+
+    if (registryDef?.proxyProvider) {
+      response = await fetch(`${OAUTH_PROXY_URL}/refresh/${registryDef.proxyProvider}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: connector.refresh_token }),
+      });
+    } else {
+      response = await fetch(connector.oauth_token_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: connector.refresh_token,
+          client_id: connector.oauth_client_id!,
+          client_secret: connector.oauth_client_secret!,
+        }),
+      });
+    }
 
     if (!response.ok) {
       await db.query(
@@ -4869,25 +4881,24 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         provider: string;
         status: string;
         auth_type: string;
-        oauth_client_id: string | null;
-        oauth_client_secret: string | null;
       }>(
-        `SELECT id, name, display_name, description, provider, status, auth_type,
-                oauth_client_id, oauth_client_secret
+        `SELECT id, name, display_name, description, provider, status, auth_type
          FROM connectors ORDER BY name ASC`,
       );
 
-      const connectors = result.rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        display_name: row.display_name,
-        description: row.description,
-        provider: row.provider,
-        status: row.status,
-        auth_type: row.auth_type,
-        has_client_id: !!row.oauth_client_id,
-        has_client_secret: !!row.oauth_client_secret,
-      }));
+      const connectors = result.rows.map((row) => {
+        const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === row.name);
+        return {
+          id: row.id,
+          name: row.name,
+          display_name: row.display_name,
+          description: row.description,
+          provider: row.provider,
+          status: row.status,
+          auth_type: row.auth_type,
+          has_proxy: !!registryDef?.proxyProvider,
+        };
+      });
 
       return c.json({ connectors });
     } finally {
@@ -4905,8 +4916,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     try {
       const existing = await db.query<{
         id: string;
+        name: string;
         auth_type: string;
-      }>(`SELECT id, auth_type FROM connectors WHERE id = $1 LIMIT 1`, [connectorId]);
+      }>(`SELECT id, name, auth_type FROM connectors WHERE id = $1 LIMIT 1`, [connectorId]);
 
       if (existing.rows.length === 0) {
         throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
@@ -4921,6 +4933,12 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
           [body.access_token, connectorId],
         );
       } else {
+        // Reject OAuth credential changes for proxy-managed connectors
+        const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
+        if (registryDef?.proxyProvider) {
+          throw new PragmaError("PROXY_MANAGED", 400, "OAuth credentials are managed by the proxy");
+        }
+
         // OAuth connectors — store client credentials
         const sets: string[] = [];
         const params: unknown[] = [connectorId];
@@ -4957,6 +4975,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     try {
       const result = await db.query<{
         id: string;
+        name: string;
         oauth_client_id: string | null;
         oauth_client_secret: string | null;
         oauth_auth_url: string;
@@ -4964,7 +4983,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         redirect_uri: string;
         auth_type: string;
       }>(
-        `SELECT id, oauth_client_id, oauth_client_secret, oauth_auth_url,
+        `SELECT id, name, oauth_client_id, oauth_client_secret, oauth_auth_url,
                 scopes, redirect_uri, auth_type
          FROM connectors WHERE id = $1 LIMIT 1`,
         [connectorId],
@@ -4978,6 +4997,13 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
       if (connector.auth_type !== "oauth2") {
         throw new PragmaError("INVALID_AUTH_TYPE", 400, "This connector does not use OAuth2");
+      }
+
+      // Check if this connector uses the OAuth proxy
+      const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
+      if (registryDef?.proxyProvider) {
+        const proxyUrl = `${OAUTH_PROXY_URL}/auth/${registryDef.proxyProvider}?connector_id=${connectorId}&port=${options.port}`;
+        return c.json({ url: proxyUrl });
       }
 
       if (!connector.oauth_client_id || !connector.oauth_client_secret) {
@@ -5010,6 +5036,63 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       const url = `${connector.oauth_auth_url}?${params.toString()}`;
 
       return c.json({ url });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // GET /connectors/proxy-callback — OAuth proxy callback
+  app.get("/connectors/proxy-callback", async (c) => {
+    const accessToken = c.req.query("access_token");
+    const refreshToken = c.req.query("refresh_token");
+    const expiresIn = c.req.query("expires_in");
+    const connectorId = c.req.query("connector_id");
+    const error = c.req.query("error");
+
+    if (error) {
+      return c.html(
+        `<html><body><h2>Error</h2><p>${error}</p><button onclick="window.close()">Close</button></body></html>`,
+        400,
+      );
+    }
+
+    if (!accessToken || !connectorId) {
+      return c.html(
+        "<html><body><h2>Error</h2><p>Missing required parameters.</p></body></html>",
+        400,
+      );
+    }
+
+    const workspaceName = await requireActiveWorkspaceName();
+    const db = await openDatabase(workspaceName);
+
+    try {
+      const result = await db.query<{ id: string }>(
+        `SELECT id FROM connectors WHERE id = $1 LIMIT 1`,
+        [connectorId],
+      );
+
+      if (result.rows.length === 0) {
+        return c.html(
+          "<html><body><h2>Error</h2><p>Connector not found.</p></body></html>",
+          404,
+        );
+      }
+
+      const tokenExpiresAt = expiresIn
+        ? new Date(Date.now() + Number(expiresIn) * 1000).toISOString()
+        : new Date(Date.now() + 3600 * 1000).toISOString();
+
+      await db.query(
+        `UPDATE connectors
+         SET access_token = $1, refresh_token = $2, token_expires_at = $3, status = 'connected'
+         WHERE id = $4`,
+        [accessToken, refreshToken ?? null, tokenExpiresAt, connectorId],
+      );
+
+      return c.html(
+        `<html><body><h2>Connected!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`,
+      );
     } finally {
       await db.close();
     }

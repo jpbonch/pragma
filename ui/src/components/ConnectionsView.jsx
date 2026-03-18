@@ -741,8 +741,9 @@ export function ConnectionsView() {
                       const statusInfo = CONNECTOR_STATUS_STYLES[connector.status] ||
                         CONNECTOR_STATUS_STYLES.disconnected
                       const isOAuth = connector.auth_type === 'oauth2'
-                      const needsConfig = isOAuth && (!connector.has_client_id || !connector.has_client_secret)
-                      const canConnect = isOAuth && connector.has_client_id && connector.has_client_secret && connector.status !== 'connected'
+                      const hasProxy = !!connector.has_proxy
+                      const needsConfig = isOAuth && !hasProxy && (!connector.has_client_id || !connector.has_client_secret)
+                      const canConnect = isOAuth && (hasProxy || (connector.has_client_id && connector.has_client_secret)) && connector.status !== 'connected'
                       const isConnected = connector.status === 'connected'
 
                       return (

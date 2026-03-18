@@ -3,6 +3,7 @@ import { appendFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
 import { getConnectorBinDir } from "../connectorBinaries";
+import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "../connectorRegistry";
 import { getConversationAdapter } from "./adapters";
 import {
   checkpointTaskRepos,
@@ -966,6 +967,7 @@ async function refreshConnectorTokenForRunner(
   db: Awaited<ReturnType<typeof openDatabase>>,
   connector: {
     id: string;
+    name: string;
     access_token: string | null;
     refresh_token: string | null;
     token_expires_at: string | null;
@@ -990,16 +992,28 @@ async function refreshConnectorTokenForRunner(
     throw new Error("No refresh token available");
   }
 
-  const response = await fetch(connector.oauth_token_url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: connector.refresh_token,
-      client_id: connector.oauth_client_id!,
-      client_secret: connector.oauth_client_secret!,
-    }),
-  });
+  // Check if this connector uses the OAuth proxy
+  const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
+  let response: Response;
+
+  if (registryDef?.proxyProvider) {
+    response = await fetch(`${OAUTH_PROXY_URL}/refresh/${registryDef.proxyProvider}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: connector.refresh_token }),
+    });
+  } else {
+    response = await fetch(connector.oauth_token_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: connector.refresh_token,
+        client_id: connector.oauth_client_id!,
+        client_secret: connector.oauth_client_secret!,
+      }),
+    });
+  }
 
   if (!response.ok) {
     await db.query(

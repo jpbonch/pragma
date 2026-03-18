@@ -10,8 +10,11 @@ export interface ConnectorDef {
   oauthAuthUrl: string;
   oauthTokenUrl: string;
   scopes: string;
+  proxyProvider?: string;
   getBinaryUrl(platform: string, arch: string): string;
 }
+
+export const OAUTH_PROXY_URL = process.env.PRAGMA_OAUTH_PROXY_URL || 'https://auth.pragma.dev';
 
 export const CONNECTOR_REGISTRY: ConnectorDef[] = [
   {
@@ -57,6 +60,7 @@ Run \`gws <service> --help\` to discover all available commands.
     oauthTokenUrl: "https://oauth2.googleapis.com/token",
     scopes:
       "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets",
+    proxyProvider: "google",
     getBinaryUrl: (platform: string, arch: string) => {
       const targets: Record<string, string> = {
         "darwin-arm64": "aarch64-apple-darwin",
@@ -102,6 +106,7 @@ Run \`agent-slack --help\` to see all commands.
     oauthAuthUrl: "https://slack.com/oauth/v2/authorize",
     oauthTokenUrl: "https://slack.com/api/oauth.v2.access",
     scopes: "chat:write channels:read channels:history groups:read im:read",
+    proxyProvider: "slack",
     getBinaryUrl: () => "npm:agent-slack",
   },
   {
