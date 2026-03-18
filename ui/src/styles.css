@@ -3615,7 +3615,7 @@ select { cursor: pointer; }
 /* ─── Agent Profile Modal ─────────────────────────── */
 .agent-profile-card {
   width: 100%;
-  max-width: 480px;
+  max-width: 640px;
   background: #fff;
   border-radius: 14px;
   padding: 0;
@@ -3628,7 +3628,7 @@ select { cursor: pointer; }
   animation: modalSlideIn 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
   display: flex;
   flex-direction: column;
-  max-height: min(640px, 85vh);
+  max-height: min(820px, 90vh);
 }
 
 @keyframes modalSlideIn {
@@ -3872,7 +3872,7 @@ select { cursor: pointer; }
   line-height: 1.6;
   resize: vertical;
   outline: none;
-  min-height: 100px;
+  min-height: 260px;
   transition: border-color 0.12s, box-shadow 0.12s;
   box-sizing: border-box;
 }
