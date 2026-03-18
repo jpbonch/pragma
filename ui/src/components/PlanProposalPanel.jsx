@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronUp, ChevronDown, Trash2, Plus, ArrowDown } from 'lucide-react'
+import { ChevronUp, ChevronDown, Trash2, Plus, ChevronRight } from 'lucide-react'
 
 export function PlanProposalPanel({
   proposal,
@@ -67,6 +67,7 @@ export function PlanProposalPanel({
             onRemove={() => removeTask(index)}
             onMoveUp={() => moveTask(index, -1)}
             onMoveDown={() => moveTask(index, 1)}
+            isLast={index === tasks.length - 1}
           />
         ))}
       </div>
@@ -76,7 +77,6 @@ export function PlanProposalPanel({
         disabled={disabled}
       >
         <Plus size={14} />
-        <span>Add Task</span>
       </button>
     </div>
   )
@@ -92,94 +92,85 @@ function PlanProposalTask({
   onRemove,
   onMoveUp,
   onMoveDown,
+  isLast,
 }) {
-  const [promptExpanded, setPromptExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   return (
-    <div className="plan-proposal-task">
-      {index > 0 && (
-        <div className="plan-proposal-connector">
-          <ArrowDown size={14} strokeWidth={2} />
-        </div>
-      )}
-      <div className="plan-proposal-task-card">
-        <div className="plan-proposal-task-header">
-          <span className="plan-proposal-task-number">{index + 1}</span>
+    <div className="plan-task-item">
+      <div className={`plan-task-chain-line-wrap${isLast ? '' : ' has-line'}`}>
+        <span className="plan-task-chain-number">{index + 1}</span>
+      </div>
+      <div className="plan-task-content">
+        <div className="plan-task-row" onClick={() => setExpanded((v) => !v)}>
+          <ChevronRight
+            size={12}
+            className={`plan-task-expand-icon${expanded ? ' expanded' : ''}`}
+          />
           <input
-            className="plan-proposal-task-title-input"
+            className="plan-task-title-input"
             type="text"
             value={task.title || ''}
             onChange={(e) => onUpdate('title', e.target.value)}
+            onClick={(e) => e.stopPropagation()}
             placeholder="Task title..."
             disabled={disabled}
           />
-          <div className="plan-proposal-task-actions">
-            <button
-              className="plan-proposal-task-action-btn"
-              onClick={onMoveUp}
-              disabled={disabled || index === 0}
-              title="Move up"
+          <div className="plan-task-right">
+            <select
+              className="plan-task-recipient-select"
+              value={task.recipient || ''}
+              onChange={(e) => onUpdate('recipient', e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              disabled={disabled}
             >
-              <ChevronUp size={14} />
-            </button>
-            <button
-              className="plan-proposal-task-action-btn"
-              onClick={onMoveDown}
-              disabled={disabled || index === total - 1}
-              title="Move down"
-            >
-              <ChevronDown size={14} />
-            </button>
-            <button
-              className="plan-proposal-task-action-btn plan-proposal-task-delete-btn"
-              onClick={onRemove}
-              disabled={disabled || total <= 1}
-              title="Remove task"
-            >
-              <Trash2 size={14} />
-            </button>
+              <option value="">Assign...</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name || agent.id}
+                </option>
+              ))}
+            </select>
+            <div className="plan-task-actions">
+              <button
+                className="plan-task-action-btn"
+                onClick={(e) => { e.stopPropagation(); onMoveUp() }}
+                disabled={disabled || index === 0}
+                title="Move up"
+              >
+                <ChevronUp size={13} />
+              </button>
+              <button
+                className="plan-task-action-btn"
+                onClick={(e) => { e.stopPropagation(); onMoveDown() }}
+                disabled={disabled || index === total - 1}
+                title="Move down"
+              >
+                <ChevronDown size={13} />
+              </button>
+              <button
+                className="plan-task-action-btn plan-task-delete-btn"
+                onClick={(e) => { e.stopPropagation(); onRemove() }}
+                disabled={disabled || total <= 1}
+                title="Remove task"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
           </div>
         </div>
-
-        <div className="plan-proposal-task-field">
-          <label className="plan-proposal-task-label">Recipient</label>
-          <select
-            className="plan-proposal-task-select"
-            value={task.recipient || ''}
-            onChange={(e) => onUpdate('recipient', e.target.value)}
-            disabled={disabled}
-          >
-            <option value="">Select agent...</option>
-            {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name || agent.id}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="plan-proposal-task-field">
-          <button
-            className="plan-proposal-prompt-toggle"
-            onClick={() => setPromptExpanded((v) => !v)}
-          >
-            <span className="plan-proposal-task-label">Prompt</span>
-            <ChevronDown
-              size={12}
-              className={`plan-proposal-prompt-chevron${promptExpanded ? ' expanded' : ''}`}
-            />
-          </button>
-          {promptExpanded && (
+        {expanded && (
+          <div className="plan-task-prompt-section">
             <textarea
-              className="plan-proposal-task-textarea"
+              className="plan-task-prompt-textarea"
               value={task.prompt || ''}
               onChange={(e) => onUpdate('prompt', e.target.value)}
               placeholder="Implementation instructions..."
               disabled={disabled}
-              rows={6}
+              rows={4}
             />
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )
