@@ -5,7 +5,7 @@ export interface ConnectorDef {
   provider: string;
   binaryName: string;
   envVar: string;
-  authType: "oauth2" | "api_key";
+  authType: "oauth2";
   oauthAuthUrl: string;
   oauthTokenUrl: string;
   scopes: string;
@@ -131,9 +131,9 @@ Run \`notion --help\` to see all commands.
     provider: "notion",
     binaryName: "notion",
     envVar: "NOTION_TOKEN",
-    authType: "api_key",
-    oauthAuthUrl: "",
-    oauthTokenUrl: "",
+    authType: "oauth2",
+    oauthAuthUrl: "https://api.notion.com/v1/oauth/authorize",
+    oauthTokenUrl: "https://api.notion.com/v1/oauth/token",
     scopes: "",
     getBinaryUrl: (platform: string, arch: string) => {
       const targets: Record<string, string> = {
