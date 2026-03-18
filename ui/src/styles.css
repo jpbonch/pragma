@@ -1402,7 +1402,7 @@ select { cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  padding: 14px;
   flex-shrink: 0;
   position: relative;
   z-index: 1;
@@ -1569,14 +1569,14 @@ select { cursor: pointer; }
 .conv-body {
   flex: 1;
   min-height: 0;
-  padding: 0 24px 12px;
+  padding: 0 14px 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .conv-body-split {
-  padding: 0 24px 12px;
+  padding: 0 14px 12px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 46%);
   gap: 16px;
@@ -1977,7 +1977,7 @@ select { cursor: pointer; }
 
 /* Footer */
 .conv-footer {
-  padding: 12px 24px 16px;
+  padding: 12px 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -6259,7 +6259,7 @@ select { cursor: pointer; }
 
 @media (max-width: 700px) {
   .conv-header {
-    padding: 10px 14px;
+    padding: 10px;
   }
 
   .conv-header-agent-name {
@@ -6279,15 +6279,15 @@ select { cursor: pointer; }
   }
 
   .conv-body {
-    padding: 0 14px 12px;
+    padding: 0 10px 10px;
   }
 
   .conv-body-split {
-    padding: 0 14px 12px;
+    padding: 0 10px 10px;
   }
 
   .conv-footer {
-    padding: 10px 14px 14px;
+    padding: 10px 10px 12px;
   }
 
   .output-file-grid {
