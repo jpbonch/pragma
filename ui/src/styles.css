@@ -2721,6 +2721,7 @@ select { cursor: pointer; }
   display: flex;
   gap: 2px;
   border-bottom: 1px solid #f0efec;
+  padding-top: 6px;
   padding-bottom: 6px;
 }
 
