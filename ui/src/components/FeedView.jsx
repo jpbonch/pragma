@@ -383,6 +383,7 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
   const [hovered, setHovered] = useState(false)
   const agent = task.assigned_to && agentById ? agentById[task.assigned_to] : null
   const elapsed = getElapsedShort(task.created_at)
+  const isPlan = task._isPlan
 
   return (
     <div
@@ -391,7 +392,7 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
       onMouseLeave={() => setHovered(false)}
     >
       <FollowupChainNumber chainIndex={chainIndex} chainLength={chainLength} isLast={isLast} />
-      <div className="task-row" onClick={() => onClick?.(task)}>
+      <div className="task-row" onClick={() => isPlan ? onClick?.(task._planId) : onClick?.(task)}>
         <div className="task-dot">
           <div className="task-dot-inner" style={{ background: color }} />
           {status === 'running' && (
@@ -399,10 +400,10 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
           )}
         </div>
         <span className="task-title active">
-          {normalizeTaskTitle(task.title)}
+          {isPlan ? (task.title || 'New plan') : normalizeTaskTitle(task.title)}
         </span>
         <div className="task-meta-right">
-          {hovered && onAddFollowup && (
+          {hovered && onAddFollowup && !isPlan && (
             <FollowupButton
               task={task}
               onClickAdd={(id) => setFollowupForTaskId?.((c) => c === id ? '' : id)}
@@ -480,26 +481,6 @@ function NeedsYouPlanCard({ plan, onClick }) {
   )
 }
 
-function PlanRow({ plan, isActive, onClick }) {
-  const isPlanning = plan.latest_turn_status === 'running'
-  return (
-    <div
-      className={`plan-row ${isActive ? 'active' : ''}`}
-      onClick={() => onClick?.(plan.id)}
-    >
-      <div className="plan-row-dot">
-        <div className={`plan-row-dot-inner${isPlanning ? ' planning' : ''}`} />
-      </div>
-      <span className="plan-row-title">{plan.plan_title || 'New plan'}</span>
-      {isPlanning ? (
-        <span className="plan-row-preview" style={{ color: '#9B6DD7' }}>Planning...</span>
-      ) : plan.plan_preview ? (
-        <span className="plan-row-preview">{plan.plan_preview}</span>
-      ) : null}
-    </div>
-  )
-}
-
 export function FeedView({
   tasks,
   loading,
@@ -507,8 +488,6 @@ export function FeedView({
   recipientAgents = [],
   agentById = {},
   plans = [],
-  plansLoading = false,
-  activePlanThreadId = '',
   onOpenPlan,
   onOpenTaskConversation,
   onPickTaskRecipient,
@@ -593,7 +572,22 @@ export function FeedView({
   }, [tasks])
 
   const orderedNeedsYou = useMemo(() => orderWithFollowupChains(needsYou), [needsYou])
-  const orderedActive = useMemo(() => orderWithFollowupChains(active), [active])
+
+  // Convert remaining plans to task-like objects so they render with ActiveTaskRow
+  const planTasks = useMemo(() => {
+    return remainingPlans.map((plan) => ({
+      id: `plan-${plan.id}`,
+      title: plan.plan_title || 'New plan',
+      status: plan.latest_turn_status === 'running' ? 'running' : 'planning',
+      created_at: plan.created_at,
+      assigned_to: null,
+      _isPlan: true,
+      _planId: plan.id,
+    }))
+  }, [remainingPlans])
+
+  const allActive = useMemo(() => [...active, ...planTasks], [active, planTasks])
+  const orderedActive = useMemo(() => orderWithFollowupChains(allActive), [allActive])
 
   return (
     <section className="feed">
@@ -668,32 +662,7 @@ export function FeedView({
           )}
 
           <SectionLabel
-            count={remainingPlans.length}
-            collapsible
-            collapsed={collapsedSections.planning}
-            onToggleCollapse={() => toggleSection('planning')}
-          >Planning</SectionLabel>
-          {!collapsedSections.planning && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {plansLoading ? (
-                <SkeletonRows count={2} />
-              ) : remainingPlans.length > 0 ? (
-                remainingPlans.map((plan) => (
-                  <PlanRow
-                    key={plan.id}
-                    plan={plan}
-                    isActive={activePlanThreadId === plan.id}
-                    onClick={onOpenPlan}
-                  />
-                ))
-              ) : (
-                <div className="muted">No plans in progress</div>
-              )}
-            </div>
-          )}
-
-          <SectionLabel
-            count={active.length}
+            count={allActive.length}
             collapsible
             collapsed={collapsedSections.inProgress}
             onToggleCollapse={() => toggleSection('inProgress')}
@@ -714,7 +683,7 @@ export function FeedView({
                   >
                     <ActiveTaskRow
                       task={task}
-                      onClick={onOpenTaskConversation}
+                      onClick={task._isPlan ? onOpenPlan : onOpenTaskConversation}
                       followupForTaskId={followupForTaskId}
                       setFollowupForTaskId={setFollowupForTaskId}
                       onAddFollowup={onAddFollowup}

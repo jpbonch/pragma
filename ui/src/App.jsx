@@ -2833,8 +2833,6 @@ export default function App() {
                   recipientAgents={recipientAgents}
                   agentById={agentById}
                   plans={sidebarPlans}
-                  plansLoading={sidebarPlansLoading}
-                  activePlanThreadId={activePlanThreadId}
                   onOpenPlan={(threadId) => {
                     void handleOpenPlan(threadId)
                   }}
