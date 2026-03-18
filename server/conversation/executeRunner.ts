@@ -61,6 +61,9 @@ type ThreadUpdatedInput = {
   source: string;
 };
 
+// Active AbortControllers keyed by taskId, so we can cancel in-progress executions
+const ACTIVE_TASK_ABORTS = new Map<string, AbortController>();
+
 export class ExecuteRunner {
   private readonly apiUrl: string;
   private readonly pragmaCliCommand: string;
@@ -90,6 +93,18 @@ export class ExecuteRunner {
       console.error(`Execute task failed: ${message}`);
     });
   }
+
+  /**
+   * Abort an in-progress task execution. Returns true if a task was found and aborted.
+   */
+  abort(taskId: string): boolean {
+    const controller = ACTIVE_TASK_ABORTS.get(taskId);
+    if (controller) {
+      controller.abort();
+      return true;
+    }
+    return false;
+  }
 }
 
 async function runExecuteTask(
@@ -101,6 +116,9 @@ async function runExecuteTask(
     onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
   },
 ): Promise<void> {
+  const abortController = new AbortController();
+  ACTIVE_TASK_ABORTS.set(input.taskId, abortController);
+
   const db = await openDatabase(input.workspaceName);
   const paths = getWorkspacePaths(input.workspaceName);
 
@@ -359,7 +377,9 @@ WHERE id = $1
         }),
         mode: "execute",
         reasoningEffort,
+        abortSignal: abortController.signal,
         onEvent: async (event) => {
+          if (abortController.signal.aborted) return;
           await appendJsonLine(logFile, {
             phase: "orchestrator",
             ...event,
@@ -570,7 +590,9 @@ WHERE id = $1
       }),
       mode: "execute",
       reasoningEffort,
+      abortSignal: abortController.signal,
       onEvent: async (event) => {
+        if (abortController.signal.aborted) return;
         await appendJsonLine(logFile, {
           phase: "worker",
           ...event,
@@ -749,6 +771,7 @@ WHERE id = $1
 
     await appendJsonLine(logFile, { type: "error", message });
   } finally {
+    ACTIVE_TASK_ABORTS.delete(input.taskId);
     await db.close();
   }
 }
@@ -867,7 +890,14 @@ function isWaitingForHumanResponseStatus(status: TaskStatus | null): boolean {
 }
 
 async function appendJsonLine(filePath: string, payload: unknown): Promise<void> {
-  await appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf8");
+  try {
+    await appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf8");
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
+      return; // Worktree was deleted; silently skip
+    }
+    throw err;
+  }
 }
 
 function appendText(current: string, next: string): string {

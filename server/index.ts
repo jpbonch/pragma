@@ -1720,6 +1720,7 @@ WHERE id = $1
           [taskId, nextStatus, mergedOutputDir],
         );
         emitTaskStatus(workspaceName, taskId, nextStatus, "review_mark_completed");
+        executeRunner.abort(taskId);
         await deleteTaskWorktree({ workspacePaths, taskId });
 
         return c.json({
@@ -1757,6 +1758,7 @@ WHERE id = $1
             [chainId, mergedOutputDir],
           );
           emitTaskStatus(workspaceName, chainId, "completed", "review_mark_chain_completed");
+          executeRunner.abort(chainId);
           await deleteTaskWorktree({ workspacePaths, taskId: chainId });
         }
 
@@ -1798,6 +1800,7 @@ WHERE id = $1
               [chainId, mergedOutputDir],
             );
             emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action");
+            executeRunner.abort(chainId);
             await deleteTaskWorktree({ workspacePaths, taskId: chainId });
           }
           return c.json({
@@ -1846,6 +1849,7 @@ WHERE id = $1
 
           // Delete worktrees for all chain tasks
           for (const chainId of chainTaskIds) {
+            executeRunner.abort(chainId);
             await deleteTaskWorktree({ workspacePaths, taskId: chainId });
           }
 
@@ -1964,6 +1968,7 @@ WHERE id = $1
           [taskId, nextStatus, mergedOutputDir],
         );
         emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+        executeRunner.abort(taskId);
         await deleteTaskWorktree({ workspacePaths, taskId });
         return c.json({ ok: true, status: nextStatus, merge_state: "no_changes", conflicts: [] });
       }
@@ -1991,6 +1996,7 @@ WHERE id = $1
         );
         emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
         await saveDiffSnapshot({ workspacePaths, taskId, gitState });
+        executeRunner.abort(taskId);
         await deleteTaskWorktree({ workspacePaths, taskId });
 
         if (pushAfterMerge) {
@@ -2154,6 +2160,7 @@ WHERE id = $1
       );
       emitTaskStatus(workspaceName, taskId, "cancelled", "task_deleted");
 
+      executeRunner.abort(taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
 
       return c.json({ ok: true, status: "cancelled" });
@@ -3146,6 +3153,7 @@ WHERE id = $1
           );
           emitTaskStatus(workspaceName, thread.task_id, "cancelled", "plan_deleted");
 
+          executeRunner.abort(thread.task_id);
           const workspacePaths = getWorkspacePaths(workspaceName);
           await deleteTaskWorktree({ workspacePaths, taskId: thread.task_id });
         }
