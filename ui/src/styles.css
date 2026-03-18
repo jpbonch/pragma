@@ -5598,7 +5598,7 @@ select { cursor: pointer; }
 
 /* ─── Connections / Skills View ──────────────────────── */
 .cn { display: flex; flex-direction: column; height: 100%; }
-.cn-header { flex-shrink: 0; padding: 20px 24px 0; }
+.cn-header { flex-shrink: 0; padding: 16px 24px 0; }
 .cn-header-inner { display: flex; align-items: baseline; gap: 10px; }
 .cn-title { font-size: 20px; font-weight: 700; color: #37352f; margin: 0; }
 .cn-subtitle { font-size: 13px; color: #9b9a97; font-weight: 400; }
@@ -5637,7 +5637,7 @@ select { cursor: pointer; }
 .cn-empty-title { font-size: 15px; font-weight: 600; color: #6f6e69; margin: 4px 0 0; }
 .cn-empty-desc { font-size: 13px; color: #9b9a97; margin: 0; }
 
-.cn-section { margin-bottom: 24px; }
+.cn-section { margin-bottom: 20px; }
 .cn-section-header {
   display: flex;
   align-items: center;
@@ -5645,16 +5645,16 @@ select { cursor: pointer; }
   margin-bottom: 4px;
 }
 .cn-section-header .cn-section-title { margin-bottom: 0; }
-.cn-section-title { font-size: 15px; font-weight: 700; color: #37352f; margin: 0 0 4px; }
+.cn-section-title { font-size: 13px; font-weight: 700; color: #37352f; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.03em; }
 .cn-create-skill-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border: 1.5px solid #ECEBE8;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #fff;
-  padding: 5px 12px;
-  font-size: 13px;
+  padding: 3px 10px;
+  font-size: 12px;
   font-weight: 600;
   font-family: inherit;
   color: #37352f;
@@ -5670,62 +5670,238 @@ select { cursor: pointer; }
   font-family: 'SF Mono', 'Menlo', monospace;
 }
 
-.cn-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
+/* Compact list layout */
+.cn-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e8e7e4;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
-.cn-card {
-  border: 1px solid #e8e7e4; border-radius: 12px; background: #fff;
-  padding: 14px 16px; display: flex; flex-direction: column;
-  transition: border-color 0.15s;
-}
-.cn-card:hover { border-color: #d4d3d0; }
-.cn-card--installed { background: #f9fafb; }
-
-.cn-add-skill-card {
+.cn-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1.5px dashed #d4d3d0;
-  background: none;
-  color: #9b9a97;
-  cursor: pointer;
-  font-family: inherit;
-  min-height: 100px;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: #fff;
+  transition: background 0.1s;
+  min-height: 38px;
 }
-.cn-add-skill-card:hover {
-  border-color: #2383e2;
-  color: #2383e2;
-  background: #f0f7ff;
+.cn-row:not(:last-child) {
+  border-bottom: 1px solid #f0efec;
 }
-.cn-add-skill-label {
-  font-size: 13px;
-  font-weight: 600;
-}
+.cn-row:hover { background: #fafaf9; }
+.cn-row--clickable { cursor: pointer; }
+.cn-row--installed { background: #f9fafb; }
+.cn-row--installed:hover { background: #f4f5f6; }
+.cn-row--connected { background: #f9fafb; }
 
-/* Agent cards at top of skills page */
-.cn-agent-card {
+/* Skill expand/collapse block */
+.cn-skill-block { background: #fff; }
+.cn-skill-block:not(:last-child) { border-bottom: 1px solid #f0efec; }
+.cn-skill-block .cn-row { border-bottom: none; }
+.cn-skill-block--expanded { background: #f9fafb; }
+.cn-skill-block--expanded .cn-row { background: transparent; }
+.cn-skill-block--expanded .cn-row:hover { background: transparent; }
+
+.cn-skill-chevron {
+  color: #9b9a97;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.cn-skill-chevron--open { transform: rotate(90deg); }
+
+.cn-skill-detail {
+  padding: 0 14px 12px 40px;
+}
+.cn-skill-detail-desc {
+  font-size: 12.5px;
+  color: #55534e;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.cn-skill-detail-content {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #37352f;
   background: #fff;
   border: 1px solid #e8e7e4;
-}
-.cn-agent-card-identity {
-  display: flex; align-items: center; gap: 8px;
-}
-.cn-agent-card-emoji {
-  font-size: 20px; line-height: 1;
-}
-.cn-agent-card-skills {
-  margin-top: 8px; padding-top: 8px;
-  border-top: 1px solid #e8e7e4;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+  font-family: 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', monospace;
 }
 
-.cn-card-header {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; margin-bottom: 6px;
+.cn-row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
+.cn-row-name {
+  font-size: 13px; font-weight: 600; color: #37352f;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.cn-row-desc {
+  font-size: 12px; color: #9b9a97;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.cn-row-meta {
+  font-size: 11px; color: #9b9a97; font-weight: 500;
+  padding: 1px 6px; border-radius: 4px; background: #f7f6f3;
+  white-space: nowrap; flex-shrink: 0;
+}
+.cn-row-actions {
+  display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0;
+}
+.cn-row-chips {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  flex: 1; min-width: 0;
+}
+
+/* Agent block: groups the main row + runtime sub-row */
+.cn-agent-block {
+  background: #fff;
+  transition: background 0.1s;
+}
+.cn-agent-block:not(:last-child) {
+  border-bottom: 1px solid #f0efec;
+}
+.cn-agent-block:hover { background: #fafaf9; }
+.cn-agent-block .cn-row { border-bottom: none; }
+.cn-agent-block .cn-row:hover { background: transparent; }
+
+/* Agent rows */
+.cn-agent-row .cn-row-left { flex: 0 0 auto; min-width: 120px; }
+.cn-agent-card-emoji {
+  font-size: 16px; line-height: 1;
+}
+
+/* Runtime sub-row (harness skills + MCP servers) */
+.cn-runtime-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 8px;
+  padding-left: 46px;
+}
+.cn-runtime-label {
+  font-size: 10px; font-weight: 600; color: #9b9a97;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  white-space: nowrap; flex-shrink: 0;
+}
+
+/* Dropdown group label */
+.cn-dropdown-group-label {
+  font-size: 10px; font-weight: 700; color: #9b9a97;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 6px 12px 2px;
+}
+
+/* Two-column layout */
+.cn-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.cn-col { min-width: 0; }
+.cn-col .cn-section { margin-bottom: 0; }
+
+/* Connector rows */
+.cn-conn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fff;
+  transition: background 0.1s;
+}
+.cn-conn-row:not(:last-child) {
+  border-bottom: 1px solid #f0efec;
+}
+.cn-conn-row:hover { background: #fafaf9; }
+.cn-conn-row--connected { background: #f9fafb; }
+.cn-conn-row--connected:hover { background: #f4f5f6; }
+
+.cn-conn-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.cn-conn-logo-wrap {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cn-conn-logo {
+  width: 22px;
+  height: 22px;
+}
+.cn-conn-logo-fallback {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #f0f0ee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #6f6e69;
+}
+.cn-conn-details {
+  min-width: 0;
+  flex: 1;
+}
+.cn-conn-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cn-conn-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #37352f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cn-conn-desc {
+  display: block;
+  font-size: 11px;
+  color: #9b9a97;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
+/* Empty state in list */
+.cn-list-empty {
+  padding: 20px 14px;
+  text-align: center;
+  font-size: 13px;
+  color: #9b9a97;
+}
+
+/* Legacy card styles (unused but kept) */
 .cn-card-name {
   font-size: 14px; font-weight: 700; color: #37352f;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -5755,18 +5931,18 @@ select { cursor: pointer; }
 .cn-card-footer { display: flex; align-items: center; gap: 8px; margin-top: auto; }
 
 .cn-install-btn {
-  display: flex; align-items: center; gap: 5px;
-  border: none; border-radius: 8px; background: #2383e2; color: #fff;
-  font-size: 12px; font-weight: 600; padding: 5px 14px;
+  display: flex; align-items: center; gap: 4px;
+  border: none; border-radius: 6px; background: #2383e2; color: #fff;
+  font-size: 12px; font-weight: 600; padding: 4px 10px;
   cursor: pointer; transition: background 0.15s; font-family: inherit;
 }
 .cn-install-btn:hover:not(:disabled) { background: #1b6ec2; }
 .cn-install-btn:disabled { opacity: 0.7; cursor: default; }
 
 .cn-remove-btn {
-  display: flex; align-items: center; gap: 5px;
-  border: 1px solid #e8e7e4; border-radius: 8px; background: #fff;
-  color: #6f6e69; font-size: 12px; font-weight: 500; padding: 4px 12px;
+  display: flex; align-items: center; gap: 4px;
+  border: 1px solid #e8e7e4; border-radius: 6px; background: #fff;
+  color: #6f6e69; font-size: 12px; font-weight: 500; padding: 3px 10px;
   cursor: pointer; transition: all 0.15s; font-family: inherit;
 }
 .cn-remove-btn:hover:not(:disabled) { border-color: #dc2626; color: #dc2626; }
@@ -5779,9 +5955,9 @@ select { cursor: pointer; }
 
 /* Connector buttons */
 .cn-config-btn, .cn-connect-btn, .cn-disconnect-btn {
-  display: flex; align-items: center; gap: 5px;
-  border: 1px solid #e8e7e4; border-radius: 8px; background: #fff;
-  font-size: 12px; font-weight: 500; padding: 4px 12px;
+  display: flex; align-items: center; gap: 4px;
+  border: 1px solid #e8e7e4; border-radius: 6px; background: #fff;
+  font-size: 12px; font-weight: 500; padding: 3px 10px;
   cursor: pointer; transition: all 0.15s; font-family: inherit;
 }
 .cn-config-btn { color: #6f6e69; }

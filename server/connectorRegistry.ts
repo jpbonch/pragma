@@ -1,5 +1,6 @@
 export interface ConnectorDef {
   name: string;
+  displayName: string;
   description: string;
   content: string;
   provider: string;
@@ -15,6 +16,7 @@ export interface ConnectorDef {
 export const CONNECTOR_REGISTRY: ConnectorDef[] = [
   {
     name: "google-workspace",
+    displayName: "Google Workspace",
     description: "Google Calendar, Gmail, Drive, Sheets, Docs via gws CLI",
     content: `# Google Workspace
 
@@ -69,6 +71,7 @@ Run \`gws <service> --help\` to discover all available commands.
   },
   {
     name: "slack",
+    displayName: "Slack",
     description: "Send messages, read channels, manage Slack workspace",
     content: `# Slack
 
@@ -103,6 +106,7 @@ Run \`agent-slack --help\` to see all commands.
   },
   {
     name: "notion",
+    displayName: "Notion",
     description: "Search, read, and create Notion pages and databases",
     content: `# Notion
 

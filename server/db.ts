@@ -523,6 +523,7 @@ CREATE TABLE IF NOT EXISTS agent_skills (
 CREATE TABLE IF NOT EXISTS connectors (
   id VARCHAR(64) PRIMARY KEY,
   name VARCHAR(255) UNIQUE NOT NULL,
+  display_name VARCHAR(255),
   description TEXT,
   content TEXT NOT NULL,
   provider VARCHAR(64) NOT NULL,

@@ -4740,15 +4740,18 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   const oauthStateStore = new Map<string, { connectorId: string; expiresAt: number }>();
 
   async function seedConnectors(db: Awaited<ReturnType<typeof openDatabase>>): Promise<void> {
+    // Ensure display_name column exists for older databases
+    await db.exec(`ALTER TABLE connectors ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)`);
     for (const def of CONNECTOR_REGISTRY) {
       await db.query(
-        `INSERT INTO connectors (id, name, description, content, provider, binary_name,
+        `INSERT INTO connectors (id, name, display_name, description, content, provider, binary_name,
          env_var, auth_type, oauth_auth_url, oauth_token_url, scopes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         ON CONFLICT (name) DO NOTHING`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (name) DO UPDATE SET display_name = EXCLUDED.display_name`,
         [
           `conn_${randomUUID().slice(0, 12)}`,
           def.name,
+          def.displayName,
           def.description,
           def.content,
           def.provider,
@@ -4845,6 +4848,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       const result = await db.query<{
         id: string;
         name: string;
+        display_name: string | null;
         description: string | null;
         provider: string;
         status: string;
@@ -4852,7 +4856,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         oauth_client_id: string | null;
         oauth_client_secret: string | null;
       }>(
-        `SELECT id, name, description, provider, status, auth_type,
+        `SELECT id, name, display_name, description, provider, status, auth_type,
                 oauth_client_id, oauth_client_secret
          FROM connectors ORDER BY name ASC`,
       );
@@ -4860,6 +4864,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       const connectors = result.rows.map((row) => ({
         id: row.id,
         name: row.name,
+        display_name: row.display_name,
         description: row.description,
         provider: row.provider,
         status: row.status,
@@ -5273,7 +5278,8 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         id: string;
         name: string;
         description: string | null;
-      }>(`SELECT id, name, description FROM skills ORDER BY name ASC`);
+        content: string;
+      }>(`SELECT id, name, description, content FROM skills ORDER BY name ASC`);
 
       return c.json({ skills: result.rows });
     } finally {
