@@ -395,7 +395,7 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
       <div className="task-row" onClick={() => isPlan ? onClick?.(task._planId) : onClick?.(task)}>
         <div className="task-dot">
           <div className="task-dot-inner" style={{ background: color }} />
-          {status === 'running' && (
+          {(status === 'running' || status === 'planning') && (
             <div className="task-dot-pulse" style={{ border: `1.5px solid ${color}` }} />
           )}
         </div>
