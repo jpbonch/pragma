@@ -3444,13 +3444,26 @@ WHERE id = $1
         } else {
           // Subsequent tasks: create as followups
           await db.query(
-            `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan, predecessor_task_id) VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3, $4)`,
-            [newTaskId, taskTitle, taskSpec.prompt, previousTaskId],
+            `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan, predecessor_task_id) VALUES ($1, $2, 'queued', $3, NULL, NULL, $4, $5)`,
+            [newTaskId, taskTitle, recipient.id, taskSpec.prompt, previousTaskId],
           );
           await db.query(
             `UPDATE tasks SET followup_task_id = $2 WHERE id = $1`,
             [previousTaskId!, newTaskId],
           );
+
+          const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
+          await createThread(db, {
+            id: execThreadId,
+            mode: "execute",
+            harness: recipient.harness,
+            modelLabel: recipient.model_label,
+            modelId: recipient.model_id,
+            sourceThreadId: threadId,
+            taskId: newTaskId,
+          });
+          await setThreadTaskId(db, execThreadId, newTaskId);
+
           emitTaskStatus(workspaceName, newTaskId, "queued", "proposal_followup_created");
           taskIds.push(newTaskId);
           previousTaskId = newTaskId;
