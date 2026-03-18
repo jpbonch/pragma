@@ -130,5 +130,8 @@ registerAdapter({
     "GPT-5": "gpt-5",
     "GPT-5.3-Codex": "gpt-5.3-codex",
   },
+  globalSkillsDirs: [
+    { dir: ".agents/skills", label: "Codex" },
+  ],
   createAdapter: () => codexAdapter,
 });

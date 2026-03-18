@@ -5778,6 +5778,10 @@ select { cursor: pointer; }
   border-radius: 50%; transition: color 0.15s;
 }
 .cn-agent-chip-remove:hover { color: #dc2626; }
+.cn-agent-chip--global {
+  background: #eff6ff; border-color: #bfdbfe; color: #1e40af;
+  padding: 2px 8px;
+}
 
 .cn-agent-add-wrap { position: relative; }
 .cn-agent-add-btn {

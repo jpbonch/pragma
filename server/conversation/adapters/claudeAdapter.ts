@@ -123,5 +123,9 @@ registerAdapter({
     "Haiku 4.5": "haiku",
   },
   titleModelId: "haiku",
+  globalSkillsDirs: [
+    { dir: ".claude/skills", label: "Claude Code" },
+    { dir: ".agents/skills", label: "Agents" },
+  ],
   createAdapter: () => claudeAdapter,
 });

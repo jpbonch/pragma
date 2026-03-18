@@ -18,10 +18,16 @@ const PROVIDER_LABELS = {
   openai: 'OpenAI',
 }
 
+const HARNESS_LABELS = {
+  claude_code: 'Claude Code',
+  codex: 'Codex',
+}
+
 export function ConnectionsView() {
   const [registry, setRegistry] = useState([])
   const [installed, setInstalled] = useState([])
-  const [globalSkills, setGlobalSkills] = useState([])
+  // Map of harness id -> global skills array
+  const [harnessGlobalSkills, setHarnessGlobalSkills] = useState({})
   const [agents, setAgents] = useState([])
   // Map of skill_id -> [{ id, name, emoji }]
   const [skillAgents, setSkillAgents] = useState({})
@@ -83,16 +89,24 @@ export function ConnectionsView() {
     setLoading(true)
     setError('')
     try {
-      const [reg, inst, global, agentList] = await Promise.all([
+      const [reg, inst, agentList] = await Promise.all([
         fetchSkillRegistry(),
         fetchInstalledSkills(),
-        fetchGlobalSkills().catch(() => []),
         fetchAgents(),
       ])
       setRegistry(reg)
       setInstalled(inst)
-      setGlobalSkills(global)
       setAgents(agentList)
+
+      // Fetch global skills per unique harness
+      const uniqueHarnesses = [...new Set(agentList.map((a) => a.harness).filter(Boolean))]
+      const harnessSkillsEntries = await Promise.all(
+        uniqueHarnesses.map(async (harness) => {
+          const skills = await fetchGlobalSkills(harness).catch(() => [])
+          return [harness, skills]
+        }),
+      )
+      setHarnessGlobalSkills(Object.fromEntries(harnessSkillsEntries))
 
       const map = await loadAgentSkillMap(agentList, inst)
       setSkillAgents(map)
@@ -241,7 +255,7 @@ export function ConnectionsView() {
         <div className="cn-header-inner">
           <h1 className="cn-title">Skills</h1>
           <span className="cn-subtitle">
-            {installed.length} installed{globalSkills.length > 0 ? ` · ${globalSkills.length} global` : ''}
+            {installed.length} installed
           </span>
         </div>
       </div>
@@ -280,6 +294,8 @@ export function ConnectionsView() {
                     const assignedSkills = agentSkillsMap[agent.id] || []
                     const assignedSkillIds = new Set(assignedSkills.map((s) => s.id))
                     const availableSkills = installed.filter((s) => !assignedSkillIds.has(s.id))
+                    const agentGlobalSkills = (agent.harness && harnessGlobalSkills[agent.harness]) || []
+                    const harnessLabel = HARNESS_LABELS[agent.harness] || agent.harness
                     return (
                       <div key={agent.id} className="cn-card cn-agent-card">
                         <div className="cn-card-header">
@@ -339,6 +355,19 @@ export function ConnectionsView() {
                             )}
                           </div>
                         </div>
+
+                        {agentGlobalSkills.length > 0 && (
+                          <div className="cn-agent-card-skills">
+                            <div className="cn-agents-label">{harnessLabel} Skills</div>
+                            <div className="cn-agents-list">
+                              {agentGlobalSkills.map((skill) => (
+                                <span key={`global-${skill.name}`} className="cn-agent-chip cn-agent-chip--global">
+                                  <span className="cn-agent-chip-name">{skill.name}</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -391,29 +420,6 @@ export function ConnectionsView() {
               )}
             </div>
 
-            {globalSkills.length > 0 && (
-              <div className="cn-section">
-                <h2 className="cn-section-title">Global Skills</h2>
-                <p className="cn-section-source">~/.agents/skills · ~/.claude/skills</p>
-                <div className="cn-grid">
-                  {globalSkills.map((skill) => (
-                    <div key={`global-${skill.name}`} className="cn-card cn-card--installed">
-                      <div className="cn-card-header">
-                        <span className="cn-card-name">{skill.name}</span>
-                        <span className="cn-badge cn-badge--global">Global</span>
-                      </div>
-                      {skill.description && (
-                        <p className="cn-card-desc">{skill.description}</p>
-                      )}
-                      <div className="cn-card-footer">
-                        <span className="cn-global-source">{skill.source}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {catalogSkills.length > 0 && (
               <div className="cn-section">
                 <h2 className="cn-section-title">Skill Catalog</h2>
@@ -457,7 +463,7 @@ export function ConnectionsView() {
               </div>
             )}
 
-            {registry.length === 0 && installed.length === 0 && globalSkills.length === 0 && (
+            {registry.length === 0 && installed.length === 0 && (
               <div className="cn-empty">
                 <Download size={40} strokeWidth={1.5} />
                 <p className="cn-empty-title">No skills available</p>

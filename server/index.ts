@@ -40,7 +40,7 @@ import {
   syncTaskOutputsBackToWorkspace,
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
-import { allAdapterDefinitions } from "./conversation/adapterRegistry";
+import { allAdapterDefinitions, getAdapterDefinition } from "./conversation/adapterRegistry";
 import { resolvePragmaCliCommand } from "./conversation/pragmaCli";
 import {
   closeThread,
@@ -4617,21 +4617,39 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   }
 
   app.get("/skills/global", async (c) => {
+    const harness = c.req.query("harness");
     const home = homedir();
-    const [agentsSkills, claudeSkills] = await Promise.all([
-      scanGlobalSkillsDir(join(home, ".agents", "skills"), "~/.agents"),
-      scanGlobalSkillsDir(join(home, ".claude", "skills"), "~/.claude"),
-    ]);
-    // Deduplicate by name (prefer ~/.agents over ~/.claude since claude often symlinks to agents)
+
+    // If a harness is specified, use its globalSkillsDirs; otherwise fall back to legacy dirs
+    let dirs: { dir: string; label: string }[];
+    if (harness) {
+      try {
+        const def = getAdapterDefinition(harness);
+        dirs = def.globalSkillsDirs ?? [];
+      } catch {
+        dirs = [];
+      }
+    } else {
+      dirs = [
+        { dir: ".claude/skills", label: "Claude Code" },
+        { dir: ".agents/skills", label: "Agents" },
+      ];
+    }
+
+    const allSkills = await Promise.all(
+      dirs.map((d) => scanGlobalSkillsDir(join(home, d.dir), `~/${d.dir}`)),
+    );
+
+    // Deduplicate by name (first dir wins)
     const seen = new Set<string>();
     const skills: { name: string; description: string; source: string; path: string }[] = [];
-    for (const s of agentsSkills) {
-      seen.add(s.name.toLowerCase());
-      skills.push(s);
-    }
-    for (const s of claudeSkills) {
-      if (!seen.has(s.name.toLowerCase())) {
-        skills.push(s);
+    for (const batch of allSkills) {
+      for (const s of batch) {
+        const key = s.name.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          skills.push(s);
+        }
       }
     }
     skills.sort((a, b) => a.name.localeCompare(b.name));

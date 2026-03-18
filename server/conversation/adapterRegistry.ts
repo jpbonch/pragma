@@ -13,6 +13,12 @@ export interface AdapterDefinition {
   /** Optional: model ID override for cheap title generation */
   titleModelId?: string;
 
+  /**
+   * Directories (relative to $HOME) where this harness stores global skills.
+   * Each entry is a { dir, label } pair, e.g. { dir: ".claude/skills", label: "Claude Code" }.
+   */
+  globalSkillsDirs?: { dir: string; label: string }[];
+
   /** Build the ConversationAdapter that handles sendTurn for this harness */
   createAdapter(): ConversationAdapter;
 }
