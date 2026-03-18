@@ -114,7 +114,7 @@ import {
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
-import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL, OAUTH_REFRESH_API_KEY } from "./connectorRegistry";
+import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "./connectorRegistry";
 import { ensureConnectorBinary, getConnectorBinDir } from "./connectorBinaries";
 
 function escapeHtml(str: string): string {
@@ -4822,16 +4822,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     let response: Response;
 
     if (registryDef?.proxyProvider) {
-      if (!OAUTH_REFRESH_API_KEY) {
-        throw new Error("PRAGMA_OAUTH_REFRESH_API_KEY is not configured");
-      }
-      const refreshHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OAUTH_REFRESH_API_KEY}`,
-      };
       response = await fetch(`${OAUTH_PROXY_URL}/refresh/${registryDef.proxyProvider}`, {
         method: "POST",
-        headers: refreshHeaders,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: connector.refresh_token }),
       });
     } else {

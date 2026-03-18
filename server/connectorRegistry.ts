@@ -15,7 +15,6 @@ export interface ConnectorDef {
 }
 
 export const OAUTH_PROXY_URL = process.env.PRAGMA_OAUTH_PROXY_URL || 'https://pragma-production-f107.up.railway.app';
-export const OAUTH_REFRESH_API_KEY = process.env.PRAGMA_OAUTH_REFRESH_API_KEY || '';
 
 export const CONNECTOR_REGISTRY: ConnectorDef[] = [
   {

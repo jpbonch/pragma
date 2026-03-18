@@ -11,9 +11,6 @@ const app = new Hono();
 // HMAC key for signing OAuth state tokens. Auto-generated per process if not set.
 const STATE_SECRET = process.env.STATE_SECRET || randomBytes(32).toString('hex');
 
-// Shared API key for the /refresh endpoint.
-const REFRESH_API_KEY = process.env.REFRESH_API_KEY;
-
 // --- CORS ---
 
 app.use(
@@ -250,17 +247,6 @@ function buildAutoPostForm(action: string, fields: Record<string, string>): stri
 
 // POST /refresh/:provider
 app.post('/refresh/:provider', async (c) => {
-  if (!REFRESH_API_KEY) {
-    return c.json({ error: 'Server misconfigured: REFRESH_API_KEY not set' }, 500);
-  }
-  const authHeader = c.req.header('Authorization') || '';
-  const expected = `Bearer ${REFRESH_API_KEY}`;
-  const authBuf = Buffer.from(authHeader);
-  const expectedBuf = Buffer.from(expected);
-  if (authBuf.length !== expectedBuf.length || !timingSafeEqual(authBuf, expectedBuf)) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
   const providerName = c.req.param('provider');
   const provider = PROVIDERS[providerName];
   if (!provider) {
