@@ -4656,6 +4656,43 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     return c.json({ skills });
   });
 
+  // ── MCP Servers (from harness config files like ~/.claude.json) ─────
+
+  app.get("/skills/mcp-servers", async (c) => {
+    const harness = c.req.query("harness");
+    const home = homedir();
+
+    let configFiles: { path: string; key: string }[] = [];
+    if (harness) {
+      try {
+        const def = getAdapterDefinition(harness);
+        configFiles = def.mcpConfigFiles ?? [];
+      } catch {
+        configFiles = [];
+      }
+    }
+
+    const servers: { name: string; source: string }[] = [];
+    for (const cfg of configFiles) {
+      const filePath = join(home, cfg.path);
+      try {
+        const raw = await readFile(filePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        const serverMap = parsed[cfg.key];
+        if (serverMap && typeof serverMap === "object" && !Array.isArray(serverMap)) {
+          for (const serverName of Object.keys(serverMap)) {
+            servers.push({ name: serverName, source: `~/${cfg.path}` });
+          }
+        }
+      } catch {
+        // File missing or invalid JSON — skip silently
+      }
+    }
+
+    servers.sort((a, b) => a.name.localeCompare(b.name));
+    return c.json({ servers });
+  });
+
   app.post("/skills/registry/install", validateJson(
     z.object({
       name: z.string().trim().min(1),

@@ -19,6 +19,13 @@ export interface AdapterDefinition {
    */
   globalSkillsDirs?: { dir: string; label: string }[];
 
+  /**
+   * JSON config files (relative to $HOME) that may contain MCP server definitions.
+   * Each entry specifies the file path and the JSON key that holds the server map.
+   * E.g. { path: ".claude.json", key: "mcpServers" } for Claude Code.
+   */
+  mcpConfigFiles?: { path: string; key: string }[];
+
   /** Build the ConversationAdapter that handles sendTurn for this harness */
   createAdapter(): ConversationAdapter;
 }

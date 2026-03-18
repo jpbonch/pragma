@@ -5804,6 +5804,10 @@ select { cursor: pointer; }
   background: #eff6ff; border-color: #bfdbfe; color: #1e40af;
   padding: 2px 8px;
 }
+.cn-agent-chip--mcp {
+  background: #f0fdf4; border-color: #bbf7d0; color: #166534;
+  padding: 2px 8px;
+}
 
 .cn-agent-add-wrap { position: relative; }
 .cn-agent-add-btn {

@@ -4,6 +4,7 @@ import {
   fetchSkillRegistry,
   fetchInstalledSkills,
   fetchGlobalSkills,
+  fetchMcpServers,
   installRegistrySkill,
   createCustomSkill,
   deleteSkill,
@@ -28,6 +29,8 @@ export function ConnectionsView() {
   const [installed, setInstalled] = useState([])
   // Map of harness id -> global skills array
   const [harnessGlobalSkills, setHarnessGlobalSkills] = useState({})
+  // Map of harness id -> MCP servers array
+  const [harnessMcpServers, setHarnessMcpServers] = useState({})
   const [agents, setAgents] = useState([])
   // Map of skill_id -> [{ id, name, emoji }]
   const [skillAgents, setSkillAgents] = useState({})
@@ -98,15 +101,24 @@ export function ConnectionsView() {
       setInstalled(inst)
       setAgents(agentList)
 
-      // Fetch global skills per unique harness
+      // Fetch global skills and MCP servers per unique harness
       const uniqueHarnesses = [...new Set(agentList.map((a) => a.harness).filter(Boolean))]
-      const harnessSkillsEntries = await Promise.all(
-        uniqueHarnesses.map(async (harness) => {
-          const skills = await fetchGlobalSkills(harness).catch(() => [])
-          return [harness, skills]
-        }),
-      )
+      const [harnessSkillsEntries, harnessMcpEntries] = await Promise.all([
+        Promise.all(
+          uniqueHarnesses.map(async (harness) => {
+            const skills = await fetchGlobalSkills(harness).catch(() => [])
+            return [harness, skills]
+          }),
+        ),
+        Promise.all(
+          uniqueHarnesses.map(async (harness) => {
+            const servers = await fetchMcpServers(harness).catch(() => [])
+            return [harness, servers]
+          }),
+        ),
+      ])
       setHarnessGlobalSkills(Object.fromEntries(harnessSkillsEntries))
+      setHarnessMcpServers(Object.fromEntries(harnessMcpEntries))
 
       const map = await loadAgentSkillMap(agentList, inst)
       setSkillAgents(map)
@@ -295,6 +307,7 @@ export function ConnectionsView() {
                     const assignedSkillIds = new Set(assignedSkills.map((s) => s.id))
                     const availableSkills = installed.filter((s) => !assignedSkillIds.has(s.id))
                     const agentGlobalSkills = (agent.harness && harnessGlobalSkills[agent.harness]) || []
+                    const agentMcpServers = (agent.harness && harnessMcpServers[agent.harness]) || []
                     const harnessLabel = HARNESS_LABELS[agent.harness] || agent.harness
                     return (
                       <div key={agent.id} className="cn-card cn-agent-card">
@@ -363,6 +376,19 @@ export function ConnectionsView() {
                               {agentGlobalSkills.map((skill) => (
                                 <span key={`global-${skill.name}`} className="cn-agent-chip cn-agent-chip--global">
                                   <span className="cn-agent-chip-name">{skill.name}</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {agentMcpServers.length > 0 && (
+                          <div className="cn-agent-card-skills">
+                            <div className="cn-agents-label">{harnessLabel} MCP Servers</div>
+                            <div className="cn-agents-list">
+                              {agentMcpServers.map((server) => (
+                                <span key={`mcp-${server.name}`} className="cn-agent-chip cn-agent-chip--mcp">
+                                  <span className="cn-agent-chip-name">{server.name}</span>
                                 </span>
                               ))}
                             </div>

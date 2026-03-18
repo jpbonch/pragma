@@ -127,5 +127,6 @@ registerAdapter({
     { dir: ".claude/skills", label: "Claude Code" },
     { dir: ".agents/skills", label: "Agents" },
   ],
+  mcpConfigFiles: [{ path: ".claude.json", key: "mcpServers" }],
   createAdapter: () => claudeAdapter,
 });

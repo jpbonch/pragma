@@ -800,6 +800,15 @@ export async function fetchGlobalSkills(harness) {
   return data.skills
 }
 
+export async function fetchMcpServers(harness) {
+  const url = harness ? `/skills/mcp-servers?harness=${encodeURIComponent(harness)}` : '/skills/mcp-servers'
+  const data = asObject(await fetchJson(url), 'Invalid MCP servers response.')
+  if (!Array.isArray(data.servers)) {
+    throw invalidResponse('`servers` must be an array.')
+  }
+  return data.servers
+}
+
 export async function fetchInstalledSkills() {
   const data = asObject(await fetchJson('/skills'), 'Invalid skills response.')
   if (!Array.isArray(data.skills)) {
