@@ -118,6 +118,14 @@ export function InputBar({
   }, [preferredMode, lockedMode, isModeLocked])
 
   useEffect(() => {
+    const el = textareaRef.current
+    if (el && input) {
+      el.style.height = 'auto'
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+    }
+  }, [input])
+
+  useEffect(() => {
     if (followupTask) {
       textareaRef.current?.focus()
     }

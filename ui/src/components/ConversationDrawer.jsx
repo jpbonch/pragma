@@ -156,6 +156,14 @@ export function ConversationDrawer({
       : '🤖'
 
   useEffect(() => {
+    const el = textareaRef.current
+    if (el && prompt) {
+      el.style.height = 'auto'
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+    }
+  }, [prompt, open])
+
+  useEffect(() => {
     if (!bodyRef.current || !isNearBottomRef.current) {
       return
     }
