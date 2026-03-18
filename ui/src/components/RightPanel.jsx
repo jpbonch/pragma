@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, ChevronDown, X, Trash2 } from 'lucide-react'
 import data from '@emoji-mart/data'
 import Picker from '@emoji-mart/react'
 import { iconForAgent } from '../lib/agentIcon'
@@ -121,7 +121,9 @@ function WaitlistModal({ open, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="waitlist-modal-card" onClick={(e) => e.stopPropagation()}>
-        <button className="agent-profile-close" onClick={onClose}>×</button>
+        <button className="agent-profile-close" onClick={onClose}>
+          <X size={16} strokeWidth={2} />
+        </button>
         {submitted ? (
           <div className="waitlist-modal-body">
             <div className="waitlist-modal-icon">🎉</div>
@@ -129,7 +131,7 @@ function WaitlistModal({ open, onClose }) {
             <p className="waitlist-modal-text">
               We'll notify you when multiplayer is ready.
             </p>
-            <div className="agent-profile-actions">
+            <div className="waitlist-modal-actions">
               <button className="agent-profile-save" onClick={onClose}>Done</button>
             </div>
           </div>
@@ -149,7 +151,7 @@ function WaitlistModal({ open, onClose }) {
               autoFocus
             />
             {error && <div className="error" style={{ padding: 0, fontSize: 13 }}>{error}</div>}
-            <div className="agent-profile-actions">
+            <div className="waitlist-modal-actions">
               <button type="button" className="agent-profile-cancel" onClick={onClose} disabled={submitting}>
                 Cancel
               </button>
@@ -183,42 +185,48 @@ function HumanProfileModal({ open, human, onClose, onSave }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="agent-profile-card" onClick={(e) => e.stopPropagation()}>
-        <button className="agent-profile-close" onClick={onClose}>×</button>
+        <button className="agent-profile-close" onClick={onClose}>
+          <X size={16} strokeWidth={2} />
+        </button>
 
         <div className="agent-profile-header">
           <div className="agent-profile-avatar-wrap">
-            <EmojiAvatar emoji={emoji} size={72} onClick={() => setPickerOpen(true)} />
+            <EmojiAvatar emoji={emoji} size={56} onClick={() => setPickerOpen(true)} />
             <EmojiPickerPopover
               open={pickerOpen}
               onClose={() => setPickerOpen(false)}
               onSelect={setEmoji}
             />
           </div>
-          <div className="agent-profile-name-input" style={{ cursor: 'default', pointerEvents: 'none' }}>
-            {displayName}
+          <div className="agent-profile-identity">
+            <div className="agent-profile-name-input" style={{ cursor: 'default', pointerEvents: 'none' }}>
+              {displayName}
+            </div>
+            <div className="agent-profile-subtitle">{role}</div>
           </div>
-          <div className="agent-profile-subtitle">{role}</div>
         </div>
 
         <div className="agent-profile-actions">
-          <button className="agent-profile-cancel" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button
-            className="agent-profile-save"
-            onClick={async () => {
-              setSaving(true)
-              try {
-                await onSave(human.id, emoji)
-                onClose()
-              } finally {
-                setSaving(false)
-              }
-            }}
-            disabled={saving}
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
+          <div className="agent-profile-actions-right">
+            <button className="agent-profile-cancel" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button
+              className="agent-profile-save"
+              onClick={async () => {
+                setSaving(true)
+                try {
+                  await onSave(human.id, emoji)
+                  onClose()
+                } finally {
+                  setSaving(false)
+                }
+              }}
+              disabled={saving}
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -343,81 +351,98 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
 
   if (!open) return null
 
+  const isCreating = title === 'Add agent'
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="agent-profile-card" onClick={(e) => e.stopPropagation()}>
         {/* Close button */}
-        <button className="agent-profile-close" onClick={onClose}>×</button>
+        <button className="agent-profile-close" onClick={onClose}>
+          <X size={16} strokeWidth={2} />
+        </button>
 
-        {/* Avatar + Name - profile style */}
+        {/* Identity section — avatar, name, description */}
         <div className="agent-profile-header">
           <div className="agent-profile-avatar-wrap">
-            <EmojiAvatar emoji={emoji} size={72} onClick={() => setPickerOpen(true)} />
+            <EmojiAvatar emoji={emoji} size={56} onClick={() => setPickerOpen(true)} />
             <EmojiPickerPopover
               open={pickerOpen}
               onClose={() => setPickerOpen(false)}
               onSelect={setEmoji}
             />
           </div>
-          <input
-            className="agent-profile-name-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Agent name"
-          />
-          <input
-            className="agent-profile-description-input"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Short description of this agent"
-          />
-          {subtitle && <div className="agent-profile-subtitle">{subtitle}</div>}
+          <div className="agent-profile-identity">
+            <input
+              className="agent-profile-name-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Agent name"
+              autoFocus={isCreating}
+            />
+            <input
+              className="agent-profile-description-input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Add a description..."
+            />
+          </div>
         </div>
 
-        {/* Settings section */}
-        <div className="agent-profile-fields">
-          <div className="agent-profile-field-row">
-            <div className="agent-profile-field">
-              <span className="agent-profile-field-label">Runtime</span>
-              <select
-                className="agent-profile-select"
-                value={harness}
-                onChange={(e) => setHarness(e.target.value)}
-              >
-                {harnesses.map((item) => (
-                  <option key={item.id} value={item.id}>{item.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="agent-profile-field">
-              <span className="agent-profile-field-label">Model</span>
-              <select
-                className="agent-profile-select"
-                value={modelLabel}
-                onChange={(e) => setModelLabel(e.target.value)}
-              >
-                {(modelsByHarness[harness] || []).map((item) => (
-                  <option key={item} value={item}>{item}</option>
-                ))}
-              </select>
+        {/* Scrollable body */}
+        <div className="agent-profile-body">
+          {/* Configuration section */}
+          <div className="agent-profile-section">
+            <div className="agent-profile-section-title">Configuration</div>
+            <div className="agent-profile-field-row">
+              <div className="agent-profile-field">
+                <span className="agent-profile-field-label">Runtime</span>
+                <div className="agent-profile-select-wrap">
+                  <select
+                    className="agent-profile-select"
+                    value={harness}
+                    onChange={(e) => setHarness(e.target.value)}
+                  >
+                    {harnesses.map((item) => (
+                      <option key={item.id} value={item.id}>{item.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="agent-profile-select-icon" />
+                </div>
+              </div>
+              <div className="agent-profile-field">
+                <span className="agent-profile-field-label">Model</span>
+                <div className="agent-profile-select-wrap">
+                  <select
+                    className="agent-profile-select"
+                    value={modelLabel}
+                    onChange={(e) => setModelLabel(e.target.value)}
+                  >
+                    {(modelsByHarness[harness] || []).map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="agent-profile-select-icon" />
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="agent-profile-field">
-            <span className="agent-profile-field-label">Instructions</span>
+          {/* Instructions section */}
+          <div className="agent-profile-section">
+            <div className="agent-profile-section-title">Instructions</div>
             <textarea
               className="agent-profile-textarea"
               value={agentFile}
               onChange={(e) => setAgentFile(e.target.value)}
-              rows={4}
-              placeholder="Define this agent's behavior..."
+              rows={5}
+              placeholder="Define this agent's behavior, personality, and capabilities..."
             />
           </div>
 
           {/* Skills section - only for existing agents */}
           {agent?.id && (
-            <div className="agent-profile-field">
-              <span className="agent-profile-field-label">Skills</span>
+            <div className="agent-profile-section">
+              <div className="agent-profile-section-title">Skills</div>
               <div className="apm-skills-list">
                 {agentSkills.map((skill) => (
                   <span key={skill.id} className="apm-skill-chip">
@@ -427,7 +452,7 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
                       title={`Remove ${skill.name}`}
                       onClick={() => handleRemoveSkill(skill.id)}
                     >
-                      ×
+                      <X size={11} strokeWidth={2.5} />
                     </button>
                   </span>
                 ))}
@@ -470,13 +495,13 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
           )}
         </div>
 
-        {error && <div className="error" style={{ padding: '0 0 4px' }}>Error: {error}</div>}
+        {error && <div className="agent-profile-error">{error}</div>}
 
-        {/* Actions */}
+        {/* Footer actions */}
         <div className="agent-profile-actions">
           {onDelete && (
             <button
-              className="agent-profile-delete"
+              className={`agent-profile-delete${confirmDelete ? ' agent-profile-delete--confirm' : ''}`}
               onClick={async () => {
                 if (!confirmDelete) {
                   setConfirmDelete(true)
@@ -491,32 +516,25 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
                 }
               }}
               disabled={loading || deleting}
-              style={{
-                marginRight: 'auto',
-                background: 'none',
-                border: 'none',
-                color: confirmDelete ? '#dc3545' : '#888',
-                cursor: 'pointer',
-                fontSize: 13,
-                padding: '6px 10px',
-                borderRadius: 6,
-              }}
             >
-              {deleting ? 'Deleting...' : confirmDelete ? 'Confirm delete' : 'Delete'}
+              <Trash2 size={13} strokeWidth={2} />
+              {deleting ? 'Deleting...' : confirmDelete ? 'Confirm' : 'Delete'}
             </button>
           )}
-          <button className="agent-profile-cancel" onClick={onClose} disabled={loading || deleting}>
-            Cancel
-          </button>
-          <button
-            className="agent-profile-save"
-            onClick={() =>
-              onSubmit({ name, description, emoji, agent_file: agentFile, harness, model_label: modelLabel })
-            }
-            disabled={loading || deleting}
-          >
-            {loading ? 'Saving...' : title === 'Add agent' ? 'Create' : 'Save'}
-          </button>
+          <div className="agent-profile-actions-right">
+            <button className="agent-profile-cancel" onClick={onClose} disabled={loading || deleting}>
+              Cancel
+            </button>
+            <button
+              className="agent-profile-save"
+              onClick={() =>
+                onSubmit({ name, description, emoji, agent_file: agentFile, harness, model_label: modelLabel })
+              }
+              disabled={loading || deleting}
+            >
+              {loading ? 'Saving...' : isCreating ? 'Create agent' : 'Save changes'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -561,7 +579,9 @@ function AgentTemplatePicker({ open, onClose, onSelectTemplate }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="template-picker-card" onClick={(e) => e.stopPropagation()}>
-        <button className="agent-profile-close" onClick={onClose}>×</button>
+        <button className="agent-profile-close" onClick={onClose}>
+          <X size={16} strokeWidth={2} />
+        </button>
         <div className="template-picker-header">
           <h3 className="template-picker-title">Browse agent templates</h3>
           <div className="template-picker-search-wrap">
@@ -612,7 +632,9 @@ function AddAgentChooser({ open, onClose, onCreateFromScratch, onBrowseTemplates
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="agent-chooser-card" onClick={(e) => e.stopPropagation()}>
-        <button className="agent-profile-close" onClick={onClose}>×</button>
+        <button className="agent-profile-close" onClick={onClose}>
+          <X size={16} strokeWidth={2} />
+        </button>
         <h3 className="agent-chooser-title">Add an agent</h3>
         <div className="agent-chooser-options">
           <button className="agent-chooser-option" onClick={onCreateFromScratch}>

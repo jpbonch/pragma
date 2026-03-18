@@ -3463,69 +3463,88 @@ select { cursor: pointer; }
 .waitlist-modal-input:focus {
   border-color: #2383e2;
 }
+.waitlist-modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding-top: 4px;
+}
 
-/* ─── Agent Profile Modal ──────────────────────────── */
+/* ─── Agent Profile Modal ─────────────────────────── */
 .agent-profile-card {
   width: 100%;
-  max-width: 440px;
+  max-width: 480px;
   background: #fff;
-  border-radius: 16px;
+  border-radius: 14px;
   padding: 0;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.16);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 24px 48px rgba(0, 0, 0, 0.08);
   overflow: hidden;
   position: relative;
-  animation: fadeIn 0.15s ease;
+  animation: modalSlideIn 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  max-height: min(640px, 85vh);
+}
+
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .agent-profile-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 14px;
+  right: 14px;
   width: 28px;
   height: 28px;
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: #B0AFA8;
-  font-size: 18px;
+  color: #C4C3BF;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
-  transition: background 0.1s, color 0.1s;
+  z-index: 2;
+  transition: background 0.12s, color 0.12s;
 }
 .agent-profile-close:hover {
-  background: #f3f2ef;
+  background: #F3F2EF;
   color: #6F6E69;
 }
 
+/* ─── Header: avatar + identity ───────────────────── */
 .agent-profile-header {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 32px 28px 20px;
-  gap: 12px;
+  padding: 24px 24px 0;
+  gap: 16px;
 }
 
 .agent-profile-avatar-wrap {
   position: relative;
+  flex-shrink: 0;
 }
 
 .agent-profile-avatar {
-  border-radius: 20px;
-  background: #F7F7F5;
+  border-radius: 16px;
+  background: #F5F5F3;
+  border: 1.5px solid #ECEBE8;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
   cursor: pointer;
   position: relative;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .agent-profile-avatar:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  transform: scale(1.06);
+  border-color: #D3D1CC;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
 .agent-profile-avatar-edit {
@@ -3533,15 +3552,17 @@ select { cursor: pointer; }
   bottom: 0;
   left: 0;
   right: 0;
-  background: rgba(0,0,0,0.45);
+  background: rgba(0, 0, 0, 0.5);
   color: #fff;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   text-align: center;
   padding: 3px 0;
-  border-radius: 0 0 20px 20px;
+  border-radius: 0 0 16px 16px;
   opacity: 0;
   transition: opacity 0.12s;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 .agent-profile-avatar:hover .agent-profile-avatar-edit {
   opacity: 1;
@@ -3555,7 +3576,9 @@ select { cursor: pointer; }
   z-index: 300;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.16);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 8px 32px rgba(0, 0, 0, 0.14);
   animation: emojiPickerFadeIn 0.12s ease;
 }
 
@@ -3564,17 +3587,27 @@ select { cursor: pointer; }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+/* ─── Identity fields ─────────────────────────────── */
+.agent-profile-identity {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 28px;
+}
+
 .agent-profile-name-input {
   border: none;
   background: transparent;
-  text-align: center;
-  font-size: 20px;
+  text-align: left;
+  font-size: 18px;
   font-weight: 700;
   color: #37352F;
   font-family: inherit;
   outline: none;
   width: 100%;
-  max-width: 280px;
+  line-height: 1.3;
 }
 .agent-profile-name-input::placeholder {
   color: #D3D1CC;
@@ -3583,55 +3616,78 @@ select { cursor: pointer; }
 .agent-profile-description-input {
   border: none;
   background: transparent;
-  text-align: center;
+  text-align: left;
   font-size: 13px;
-  color: #787774;
+  color: #91918E;
   font-family: inherit;
   outline: none;
   width: 100%;
-  max-width: 320px;
+  line-height: 1.4;
 }
 .agent-profile-description-input::placeholder {
   color: #D3D1CC;
 }
 
 .agent-profile-subtitle {
-  font-size: 12px;
+  font-size: 11px;
   color: #B0AFA8;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: -0.01em;
 }
 
-.agent-profile-fields {
-  padding: 0 28px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.agent-profile-field-row {
-  display: flex;
-  gap: 12px;
-}
-.agent-profile-field-row > .agent-profile-field {
+/* ─── Scrollable body ─────────────────────────────── */
+.agent-profile-body {
+  overflow-y: auto;
   flex: 1;
+  padding: 4px 0;
+}
+
+/* ─── Sections ────────────────────────────────────── */
+.agent-profile-section {
+  padding: 16px 24px;
+}
+.agent-profile-section + .agent-profile-section {
+  border-top: 1px solid #F0EFEC;
+}
+
+.agent-profile-section-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #91918E;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+/* ─── Field layout ────────────────────────────────── */
+.agent-profile-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
 .agent-profile-field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 
 .agent-profile-field-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #B0AFA8;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6F6E69;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ─── Select with custom chevron ──────────────────── */
+.agent-profile-select-wrap {
+  position: relative;
 }
 
 .agent-profile-select {
-  padding: 8px 10px;
+  width: 100%;
+  padding: 8px 28px 8px 10px;
   border-radius: 8px;
   border: 1.5px solid #ECEBE8;
   background: #FAFAF8;
@@ -3639,71 +3695,145 @@ select { cursor: pointer; }
   color: #37352F;
   font-family: inherit;
   outline: none;
-  appearance: auto;
-  transition: border-color 0.12s;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.agent-profile-select:hover {
+  border-color: #D3D1CC;
 }
 .agent-profile-select:focus {
   border-color: #B0AFA8;
+  box-shadow: 0 0 0 3px rgba(55, 53, 47, 0.06);
 }
 
+.agent-profile-select-icon {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #B0AFA8;
+  pointer-events: none;
+}
+
+/* ─── Textarea ────────────────────────────────────── */
 .agent-profile-textarea {
+  width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
   border: 1.5px solid #ECEBE8;
   background: #FAFAF8;
   font-size: 13px;
   color: #37352F;
-  font-family: inherit;
-  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
   resize: vertical;
   outline: none;
-  min-height: 80px;
-  transition: border-color 0.12s;
+  min-height: 100px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  box-sizing: border-box;
+}
+.agent-profile-textarea:hover {
+  border-color: #D3D1CC;
 }
 .agent-profile-textarea:focus {
   border-color: #B0AFA8;
+  box-shadow: 0 0 0 3px rgba(55, 53, 47, 0.06);
 }
 
+/* ─── Error message ───────────────────────────────── */
+.agent-profile-error {
+  padding: 8px 24px;
+  font-size: 12.5px;
+  color: #dc3545;
+  font-weight: 500;
+}
+
+/* ─── Footer actions ──────────────────────────────── */
 .agent-profile-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
-  padding: 14px 28px 20px;
+  padding: 16px 24px;
   border-top: 1px solid #F0EFEC;
+  background: #FCFCFB;
+  flex-shrink: 0;
+}
+
+.agent-profile-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .agent-profile-cancel {
-  padding: 8px 16px;
+  padding: 7px 14px;
   border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: #9B9A97;
+  border: 1.5px solid #ECEBE8;
+  background: #fff;
+  color: #6F6E69;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  transition: color 0.1s;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
 }
 .agent-profile-cancel:hover {
-  color: #6F6E69;
+  border-color: #D3D1CC;
+  background: #F7F7F5;
+  color: #37352F;
 }
 
 .agent-profile-save {
-  padding: 8px 20px;
+  padding: 7px 18px;
   border-radius: 8px;
-  border: none;
+  border: 1.5px solid transparent;
   background: #37352F;
   color: #fff;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.12s;
+  transition: background 0.12s, box-shadow 0.12s;
 }
-.agent-profile-save:hover {
-  background: #1a1917;
+.agent-profile-save:hover:not(:disabled) {
+  background: #222;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 .agent-profile-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ─── Delete button ───────────────────────────────── */
+.agent-profile-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: none;
+  background: none;
+  color: #B0AFA8;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.12s, background 0.12s;
+}
+.agent-profile-delete:hover:not(:disabled) {
+  color: #dc3545;
+  background: rgba(220, 53, 69, 0.06);
+}
+.agent-profile-delete--confirm {
+  color: #dc3545;
+  background: rgba(220, 53, 69, 0.06);
+  font-weight: 600;
+}
+.agent-profile-delete:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -3713,17 +3843,20 @@ select { cursor: pointer; }
   width: 100%;
   max-width: 380px;
   background: #fff;
-  border-radius: 16px;
-  padding: 28px 24px 20px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.16);
+  border-radius: 14px;
+  padding: 28px 24px 22px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 24px 48px rgba(0, 0, 0, 0.08);
   position: relative;
-  animation: fadeIn 0.15s ease;
+  animation: modalSlideIn 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 .agent-chooser-title {
   font-size: 15px;
   font-weight: 700;
   color: #37352F;
-  margin: 0 0 16px;
+  margin: 0 0 18px;
   text-align: center;
 }
 .agent-chooser-options {
@@ -3734,22 +3867,30 @@ select { cursor: pointer; }
 .agent-chooser-option {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 14px;
+  padding: 14px 16px;
   border-radius: 10px;
   border: 1.5px solid #ECEBE8;
-  background: #FAFAF8;
+  background: #fff;
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.12s, background 0.12s;
+  transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
 }
 .agent-chooser-option:hover {
-  border-color: #B0AFA8;
-  background: #F7F7F5;
+  border-color: #D3D1CC;
+  background: #FAFAF8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 .agent-chooser-option-icon {
-  font-size: 22px;
+  font-size: 24px;
   flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #F5F5F3;
 }
 .agent-chooser-option-label {
   font-size: 13px;
@@ -3757,9 +3898,10 @@ select { cursor: pointer; }
   color: #37352F;
 }
 .agent-chooser-option-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: #91918E;
   margin-top: 2px;
+  line-height: 1.4;
 }
 
 /* ─── Template Picker ──────────────────────────────── */
@@ -3768,10 +3910,13 @@ select { cursor: pointer; }
   max-width: 520px;
   max-height: 80vh;
   background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.16);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 24px 48px rgba(0, 0, 0, 0.08);
   position: relative;
-  animation: fadeIn 0.15s ease;
+  animation: modalSlideIn 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3807,11 +3952,12 @@ select { cursor: pointer; }
   font-size: 13px;
   color: #37352F;
   outline: none;
-  transition: border-color 0.12s;
+  transition: border-color 0.12s, box-shadow 0.12s;
   box-sizing: border-box;
 }
 .template-picker-search:focus {
   border-color: #B0AFA8;
+  box-shadow: 0 0 0 3px rgba(55, 53, 47, 0.06);
 }
 .template-picker-body {
   overflow-y: auto;
@@ -3819,33 +3965,38 @@ select { cursor: pointer; }
   flex: 1;
 }
 .template-picker-group {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .template-picker-category {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #C4C3BF;
-  padding: 8px 0 6px;
+  letter-spacing: 0.06em;
+  color: #91918E;
+  padding: 12px 0 6px;
 }
 .template-picker-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 12px;
+  padding: 10px 10px;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.1s;
 }
 .template-picker-item:hover {
-  background: rgba(0,0,0,0.03);
+  background: #F5F5F3;
 }
 .template-picker-emoji {
-  font-size: 22px;
+  font-size: 20px;
   flex-shrink: 0;
-  width: 32px;
-  text-align: center;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #F5F5F3;
 }
 .template-picker-info {
   flex: 1;
@@ -3857,12 +4008,13 @@ select { cursor: pointer; }
   color: #37352F;
 }
 .template-picker-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: #91918E;
-  margin-top: 1px;
+  margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
 /* ─── Context View ──────────────────────────────────── */
@@ -5131,12 +5283,19 @@ select { cursor: pointer; }
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 200;
   padding: 16px;
+  animation: backdropFadeIn 0.15s ease;
+}
+@keyframes backdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .modal-card {
@@ -5508,50 +5667,114 @@ select { cursor: pointer; }
 
 /* Agent profile modal – skills section */
 .apm-skills-list {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 .apm-skills-none {
-  font-size: 12px; color: #b4b3af; font-style: italic;
+  font-size: 12.5px;
+  color: #B0AFA8;
+  font-style: normal;
 }
 .apm-skill-chip {
-  display: inline-flex; align-items: center; gap: 3px;
-  background: #f0f0ee; border: 1px solid #e0dfdc;
-  border-radius: 12px; padding: 2px 6px 2px 8px;
-  font-size: 12px; color: #37352f; line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #F5F5F3;
+  border: 1px solid #ECEBE8;
+  border-radius: 6px;
+  padding: 4px 6px 4px 8px;
+  font-size: 12px;
+  color: #37352F;
+  line-height: 1;
+  transition: border-color 0.12s;
 }
-.apm-skill-chip-name { font-weight: 500; }
+.apm-skill-chip:hover {
+  border-color: #D3D1CC;
+}
+.apm-skill-chip-name {
+  font-weight: 500;
+}
 .apm-skill-chip-remove {
-  display: inline-flex; align-items: center; justify-content: center;
-  background: none; border: none; cursor: pointer;
-  color: #9b9a97; padding: 0; margin-left: 2px;
-  font-size: 14px; line-height: 1;
-  border-radius: 50%; transition: color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #C4C3BF;
+  padding: 1px;
+  margin-left: 1px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
 }
-.apm-skill-chip-remove:hover { color: #dc2626; }
+.apm-skill-chip-remove:hover {
+  color: #dc3545;
+  background: rgba(220, 53, 69, 0.08);
+}
 .apm-skill-add-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
-  border: 1px dashed #c8c7c3; background: none;
-  color: #9b9a97; cursor: pointer; transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1.5px dashed #D3D1CC;
+  background: none;
+  color: #B0AFA8;
+  cursor: pointer;
+  transition: all 0.12s;
 }
 .apm-skill-add-btn:hover:not(:disabled) {
-  border-color: #2383e2; color: #2383e2; background: #f0f7ff;
+  border-color: #37352F;
+  color: #37352F;
+  background: #F5F5F3;
 }
-.apm-skill-add-btn:disabled { opacity: 0.6; cursor: default; }
+.apm-skill-add-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .apm-skill-dropdown {
-  position: absolute; top: 100%; left: 0; margin-top: 4px;
-  background: #fff; border: 1px solid #e0dfdc;
-  border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  min-width: 180px; z-index: 30; overflow: hidden;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ECEBE8;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.08);
+  min-width: 190px;
+  z-index: 30;
+  overflow: hidden;
+  padding: 4px;
 }
 .apm-skill-dropdown-item {
-  display: flex; align-items: center; gap: 6px;
-  width: 100%; padding: 7px 12px; border: none; background: none;
-  font-size: 13px; color: #37352f; cursor: pointer;
-  text-align: left; font-family: inherit; transition: background 0.1s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  font-size: 13px;
+  color: #37352F;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  border-radius: 6px;
+  transition: background 0.1s;
 }
-.apm-skill-dropdown-item:hover:not(:disabled) { background: #f5f5f4; }
-.apm-skill-dropdown-item:disabled { opacity: 0.6; cursor: default; }
+.apm-skill-dropdown-item:hover:not(:disabled) {
+  background: #F5F5F3;
+}
+.apm-skill-dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 @media (max-width: 980px) {
   .right-panel {
