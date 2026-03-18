@@ -1054,7 +1054,7 @@ export default function App() {
             return prev
           }
           const nextLoading = prev.taskId
-            ? prev.loading
+            ? isTaskActivelyRunning(prev.taskStatus)
             : turnsRunning
           return {
             ...prev,
@@ -2115,13 +2115,14 @@ export default function App() {
       (mode === 'chat' || mode === 'plan') &&
       conversation.open &&
       conversation.taskId &&
-      isWaitingForHumanResponse(conversationStatus)
+      (isWaitingForHumanResponse(conversationStatus) || conversationStatus === 'completed')
     ) {
       try {
         await respondToTask(conversation.taskId, finalMessage)
         setConversation((prev) => ({
           ...prev,
           taskStatus: prev.mode === 'plan' ? 'planning' : 'queued',
+          loading: true,
           entries: [
             ...prev.entries,
             { id: nextEntryId('user'), type: 'user', content: finalMessage },
@@ -2130,7 +2131,7 @@ export default function App() {
               type: 'status',
               content: prev.mode === 'plan'
                 ? 'Response sent. Continuing plan.'
-                : 'Response sent. Task re-queued with the same worker.',
+                : 'Follow-up sent. Resuming worker.',
             },
           ],
         }))

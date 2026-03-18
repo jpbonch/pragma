@@ -650,12 +650,12 @@ export function ConversationDrawer({
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder={
                       isCompletedTask
-                        ? 'Task is completed.'
+                        ? 'Send a follow-up message...'
                         : activeQuestionOptions
                           ? 'Or type a custom response...'
                           : 'Continue this conversation...'
                     }
-                    disabled={loading || isCompletedTask}
+                    disabled={loading}
                     rows={1}
                     onInput={(e) => {
                       e.target.style.height = 'auto'
@@ -697,7 +697,7 @@ export function ConversationDrawer({
                       className="attach-btn"
                       title="Attach files"
                       aria-label="Attach files"
-                      disabled={loading || isCompletedTask}
+                      disabled={loading}
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <Plus size={14} />
@@ -716,7 +716,7 @@ export function ConversationDrawer({
                           className="send-btn"
                           style={{ background: '#2383e2' }}
                           onClick={submitPrompt}
-                          disabled={isCompletedTask || (!prompt.trim() && attachments.length === 0)}
+                          disabled={!prompt.trim() && attachments.length === 0}
                           aria-label="Send"
                         >
                           <ArrowUp size={18} strokeWidth={2.6} />
