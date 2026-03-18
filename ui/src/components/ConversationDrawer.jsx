@@ -79,8 +79,6 @@ export function ConversationDrawer({
   onDeletePlan,
   executeDisabled,
   recipientAgents = [],
-  selectedRecipientAgentId = '',
-  onSelectRecipientAgentId,
   onPromptSubmit,
   taskId,
   taskStatus,
@@ -735,26 +733,7 @@ export function ConversationDrawer({
         ) : (
           <div className="conv-footer">
             {mode === 'plan' && (
-              <div className="conv-footer-row">
-                {!showProposalPanel && (
-                  <div className="conv-recipient-picker">
-                    <label className="conv-recipient-label">Recipient</label>
-                    <select
-                      className="conv-recipient-select"
-                      value={selectedRecipientAgentId}
-                      onChange={(e) => onSelectRecipientAgentId?.(e.target.value)}
-                      disabled={loading}
-                    >
-                      <option value="">Auto-select</option>
-                      {recipientAgents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name || agent.id}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {showProposalPanel && <div />}
+              <div className="conv-footer-row" style={{ justifyContent: 'flex-end' }}>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="conv-delete-plan-btn" onClick={onDeletePlan} disabled={loading}>
                     Delete Plan

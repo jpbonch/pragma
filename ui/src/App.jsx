@@ -2862,13 +2862,6 @@ export default function App() {
                 onServiceStarted={handleRuntimeServiceStarted}
                 onClose={closeConversationDrawer}
                 recipientAgents={recipientAgents}
-                selectedRecipientAgentId={conversation.recipientAgentId}
-                onSelectRecipientAgentId={(recipientAgentId) => {
-                  setConversation((prev) => ({
-                    ...prev,
-                    recipientAgentId,
-                  }))
-                }}
                 onPromptSubmit={handleDrawerPromptSubmit}
                 onExecute={() => {
                   void handleExecuteFromPlan()
