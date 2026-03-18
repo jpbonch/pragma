@@ -233,8 +233,7 @@ export function ConnectionsView() {
     }
   }
 
-  const anthropicSkills = registry.filter((s) => s.provider === 'anthropic')
-  const openaiSkills = registry.filter((s) => s.provider === 'openai')
+  const catalogSkills = registry
 
   return (
     <section className="cn">
@@ -415,59 +414,14 @@ export function ConnectionsView() {
               </div>
             )}
 
-            {anthropicSkills.length > 0 && (
+            {catalogSkills.length > 0 && (
               <div className="cn-section">
-                <h2 className="cn-section-title">Anthropic Skills</h2>
-                <p className="cn-section-source">anthropics/skills</p>
+                <h2 className="cn-section-title">Skill Catalog</h2>
                 <div className="cn-grid">
-                  {anthropicSkills.map((skill) => {
+                  {catalogSkills.map((skill) => {
                     const isInstalled = installedNames.has(skill.name)
                     return (
-                      <div key={`anthropic-${skill.name}`} className={`cn-card ${isInstalled ? 'cn-card--installed' : ''}`}>
-                        <div className="cn-card-header">
-                          <span className="cn-card-name">{skill.name}</span>
-                          {isInstalled && <span className="cn-badge cn-badge--installed">Installed</span>}
-                        </div>
-                        {skill.description && (
-                          <p className="cn-card-desc">{skill.description}</p>
-                        )}
-                        <div className="cn-card-footer">
-                          {isInstalled ? (
-                            <span className="cn-installed-label">
-                              <Check size={13} />
-                              Installed
-                            </span>
-                          ) : (
-                            <button
-                              className="cn-install-btn"
-                              onClick={() => handleInstall(skill)}
-                              disabled={installing === skill.name}
-                            >
-                              {installing === skill.name ? (
-                                <div className="cn-spinner-sm" />
-                              ) : (
-                                <Download size={13} />
-                              )}
-                              <span>{installing === skill.name ? 'Installing...' : 'Install'}</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {openaiSkills.length > 0 && (
-              <div className="cn-section">
-                <h2 className="cn-section-title">OpenAI Skills</h2>
-                <p className="cn-section-source">openai/skills</p>
-                <div className="cn-grid">
-                  {openaiSkills.map((skill) => {
-                    const isInstalled = installedNames.has(skill.name)
-                    return (
-                      <div key={`openai-${skill.name}`} className={`cn-card ${isInstalled ? 'cn-card--installed' : ''}`}>
+                      <div key={`catalog-${skill.provider}-${skill.name}`} className={`cn-card ${isInstalled ? 'cn-card--installed' : ''}`}>
                         <div className="cn-card-header">
                           <span className="cn-card-name">{skill.name}</span>
                           {isInstalled && <span className="cn-badge cn-badge--installed">Installed</span>}
