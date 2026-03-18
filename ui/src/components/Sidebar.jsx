@@ -103,7 +103,7 @@ export function Sidebar({
                   }
                 }}
               >
-                <span style={{ fontSize: 14 }}>📁</span>
+                <span className="workspace-logo">{ws.name.charAt(0).toUpperCase()}</span>
                 <span className="ws-label">{ws.name}</span>
                 {ws.active && <Check size={12} style={{ marginLeft: 'auto', color: '#2383e2' }} />}
               </div>
