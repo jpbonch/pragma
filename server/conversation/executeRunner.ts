@@ -155,7 +155,7 @@ LIMIT 1
   const isResume = !!input.resumeWorkerSessionId;
   const task = (isResume && input.followUpMessage ? input.followUpMessage : input.prompt).trim();
   const reasoningEffort = input.reasoningEffort;
-  const shouldSkipOrchestrator = input.skipOrchestratorSelection === true || isResume;
+  const shouldSkipOrchestrator = input.skipOrchestratorSelection === true || isResume || !!input.requestedRecipientAgentId;
   const notifyTaskStatus = async (status: TaskStatus, source: string): Promise<void> => {
     await options.onTaskStatusChanged?.({
       workspaceName: input.workspaceName,
@@ -291,7 +291,7 @@ WHERE id = $1
       }
       selectedWorker = requestedWorker;
       selectionStatus = "auto_selected";
-      selectionReason = "Recipient selected during plan mode.";
+      selectionReason = "Recipient manually selected.";
       await appendJsonLine(logFile, {
         type: "recipient_selected_from_plan",
         selected_agent_id: selectedWorker.id,
