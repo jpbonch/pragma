@@ -5,11 +5,16 @@ import { DEFAULT_AGENT_ID, getWorkspacePaths, openDatabase } from "../db";
 import { getConversationAdapter } from "./adapters";
 import {
   checkpointTaskRepos,
+  deleteTaskWorktree,
+  getTaskMainOutputDir,
+  mergeApprovedTask,
   parseTaskGitState,
   prepareTaskWorkspace,
+  saveDiffSnapshot,
   serializeTaskGitState,
 } from "./gitWorkflow";
 import type { TaskGitState } from "./gitWorkflow";
+import { runCommand } from "../process/runCommand";
 import { buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
 import {
   closeThread,
@@ -675,7 +680,10 @@ LIMIT 1
     );
 
     const currentStatus = statusResult.rows[0]?.status ?? null;
-    if (!isWaitingForHumanResponseStatus(currentStatus)) {
+    if (currentStatus === "merging") {
+      // Auto-merge: the user already approved, agent just resolved conflicts
+      await autoMergeAfterConflictResolution(db, input, paths, gitState, workerResult.sessionId, notifyTaskStatus, options);
+    } else if (!isWaitingForHumanResponseStatus(currentStatus)) {
       await db.query(
         `
 UPDATE tasks
@@ -883,6 +891,98 @@ function resolvePreferredCodePath(gitState: TaskGitState): string | null {
   }
 
   return null;
+}
+
+async function autoMergeAfterConflictResolution(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  input: EnqueueExecuteInput,
+  paths: ReturnType<typeof getWorkspacePaths>,
+  gitState: TaskGitState,
+  sessionId: string,
+  notifyTaskStatus: (status: TaskStatus, source: string) => Promise<void>,
+  options: {
+    apiUrl: string;
+    pragmaCliCommand: string;
+    onTaskStatusChanged?: (input: TaskStatusChangedInput) => void | Promise<void>;
+    onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
+  },
+): Promise<void> {
+  const taskResult = await db.query<{
+    push_after_merge: boolean;
+    predecessor_task_id: string | null;
+    title: string;
+  }>(
+    `SELECT push_after_merge, predecessor_task_id, title FROM tasks WHERE id = $1 LIMIT 1`,
+    [input.taskId],
+  );
+  const task = taskResult.rows[0];
+  if (!task) {
+    return;
+  }
+
+  const mergeResult = await mergeApprovedTask({
+    workspacePaths: paths,
+    taskId: input.taskId,
+    taskTitle: task.title,
+    gitState,
+  });
+
+  if (mergeResult.conflicts.length === 0) {
+    // Merge succeeded — collect chain tasks if any
+    const chainTaskIds: string[] = [input.taskId];
+    let currentPredecessorId = task.predecessor_task_id;
+    while (currentPredecessorId) {
+      chainTaskIds.push(currentPredecessorId);
+      const predResult = await db.query<{ predecessor_task_id: string | null }>(
+        `SELECT predecessor_task_id FROM tasks WHERE id = $1 LIMIT 1`,
+        [currentPredecessorId],
+      );
+      currentPredecessorId = predResult.rows[0]?.predecessor_task_id ?? null;
+    }
+
+    for (const chainId of chainTaskIds) {
+      const mergedOutputDir = getTaskMainOutputDir(paths, chainId);
+      await db.query(
+        `UPDATE tasks SET status = 'completed', output_dir = $2, session_id = $3, completed_at = CURRENT_TIMESTAMP, push_after_merge = FALSE WHERE id = $1`,
+        [chainId, mergedOutputDir, chainId === input.taskId ? sessionId : undefined],
+      );
+      await options.onTaskStatusChanged?.({
+        workspaceName: input.workspaceName,
+        taskId: chainId,
+        threadId: input.threadId,
+        status: "completed",
+        source: "auto_merge",
+      });
+    }
+
+    await saveDiffSnapshot({ workspacePaths: paths, taskId: input.taskId, gitState });
+
+    for (const chainId of chainTaskIds) {
+      ACTIVE_TASK_ABORTS.delete(chainId);
+      await deleteTaskWorktree({ workspacePaths: paths, taskId: chainId });
+    }
+
+    if (task.push_after_merge) {
+      for (const repo of gitState.repos) {
+        const repoPath = repo.relative_path === "."
+          ? paths.workspaceDir
+          : join(paths.workspaceDir, repo.relative_path);
+        await runCommand({
+          command: "git",
+          args: ["push", "origin", repo.base_branch],
+          cwd: repoPath,
+          env: process.env,
+        });
+      }
+    }
+  } else {
+    // Still conflicts after agent tried — fall back to needs_fix
+    await db.query(
+      `UPDATE tasks SET status = 'needs_fix', push_after_merge = FALSE WHERE id = $1`,
+      [input.taskId],
+    );
+    await notifyTaskStatus("needs_fix", "auto_merge_conflict");
+  }
 }
 
 function isWaitingForHumanResponseStatus(status: TaskStatus | null): boolean {

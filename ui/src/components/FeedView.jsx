@@ -45,6 +45,7 @@ const STATUS_COLORS = {
   orchestrating: '#5A6B8A',
   running: '#4B83D6',
   queued: '#7C6DD7',
+  merging: '#4B83D6',
   needs_fix: '#D9534F',
   completed: '#2FA67E',
   failed: '#EB5757',
@@ -61,6 +62,7 @@ const STATUS_LABELS = {
   orchestrating: 'Orchestrating',
   running: 'Running',
   queued: 'Queued',
+  merging: 'Merging',
   needs_fix: 'Needs Fix',
   completed: 'Completed',
   failed: 'Failed',
@@ -99,7 +101,7 @@ function isNeedsYou(status) {
 }
 
 function isActive(status) {
-  return status === 'running' || status === 'queued' || status === 'planning'
+  return status === 'running' || status === 'queued' || status === 'planning' || status === 'merging'
 }
 
 function isDone(status) {
@@ -395,7 +397,7 @@ function ActiveTaskRow({ task, onClick, followupForTaskId, setFollowupForTaskId,
       <div className="task-row" onClick={() => isPlan ? onClick?.(task._planId) : onClick?.(task)}>
         <div className="task-dot">
           <div className="task-dot-inner" style={{ background: color }} />
-          {(status === 'running' || status === 'planning') && (
+          {(status === 'running' || status === 'planning' || status === 'merging') && (
             <div className="task-dot-pulse" style={{ border: `1.5px solid ${color}` }} />
           )}
         </div>

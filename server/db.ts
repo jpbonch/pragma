@@ -490,6 +490,11 @@ ADD COLUMN IF NOT EXISTS predecessor_task_id VARCHAR(64)
 `);
 
   await db.exec(`
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS push_after_merge BOOLEAN NOT NULL DEFAULT FALSE
+`);
+
+  await db.exec(`
 CREATE TABLE IF NOT EXISTS humans (
   id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR(64),
   emoji VARCHAR(32) NOT NULL,
@@ -547,6 +552,7 @@ CREATE TYPE task_status AS ENUM (
 
   await db.exec(`ALTER TYPE task_status ADD VALUE IF NOT EXISTS 'planning'`);
   await db.exec(`ALTER TYPE task_status ADD VALUE IF NOT EXISTS 'planned'`);
+  await db.exec(`ALTER TYPE task_status ADD VALUE IF NOT EXISTS 'merging'`);
 }
 
 async function ensureDefaultAgents(db: PGlite, orchestratorHarness?: string): Promise<void> {

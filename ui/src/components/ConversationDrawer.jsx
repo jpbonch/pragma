@@ -14,6 +14,7 @@ const HEADER_STATUS_LABELS = {
   orchestrating: 'Executing',
   running: 'Executing',
   queued: 'Queued',
+  merging: 'Merging',
   needs_fix: 'Needs Fix',
   completed: 'Completed',
   failed: 'Failed',

@@ -13,6 +13,7 @@ export const TASK_STATUS_VALUES = [
   "waiting_for_question_response",
   "waiting_for_help_response",
   "pending_review",
+  "merging",
   "needs_fix",
   "completed",
   "failed",

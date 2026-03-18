@@ -1924,10 +1924,10 @@ WHERE id = $1
         const retryCount = Number.isInteger(task.merge_retry_count) ? (task.merge_retry_count as number) : 0;
         if (retryCount < 1) {
           await db.query(
-            `UPDATE tasks SET status = 'queued', merge_retry_count = COALESCE(merge_retry_count, 0) + 1 WHERE id = $1`,
-            [taskId],
+            `UPDATE tasks SET status = 'merging', merge_retry_count = COALESCE(merge_retry_count, 0) + 1, push_after_merge = $2 WHERE id = $1`,
+            [taskId, pushAfterMerge],
           );
-          emitTaskStatus(workspaceName, taskId, "queued", "review_chain_conflict_retry");
+          emitTaskStatus(workspaceName, taskId, "merging", "review_chain_conflict_retry");
 
           const thread = await getThreadByTaskId(db, taskId);
           const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
@@ -1974,7 +1974,7 @@ WHERE id = $1
 
             return c.json({
               ok: true,
-              status: "queued",
+              status: "merging",
               merge_state: "conflict_retry_enqueued",
               conflicts: mergeResult.conflicts,
             });
@@ -2070,13 +2070,14 @@ WHERE id = $1
         await db.query(
           `
 UPDATE tasks
-SET status = 'queued',
-    merge_retry_count = COALESCE(merge_retry_count, 0) + 1
+SET status = 'merging',
+    merge_retry_count = COALESCE(merge_retry_count, 0) + 1,
+    push_after_merge = $2
 WHERE id = $1
 `,
-          [taskId],
+          [taskId, pushAfterMerge],
         );
-        emitTaskStatus(workspaceName, taskId, "queued", "review_conflict_retry");
+        emitTaskStatus(workspaceName, taskId, "merging", "review_conflict_retry");
 
         const thread = await getThreadByTaskId(db, taskId);
         const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
@@ -2123,7 +2124,7 @@ WHERE id = $1
 
           return c.json({
             ok: true,
-            status: "queued",
+            status: "merging",
             merge_state: "conflict_retry_enqueued",
             conflicts: mergeResult.conflicts,
           });
@@ -2132,7 +2133,8 @@ WHERE id = $1
         await db.query(
           `
 UPDATE tasks
-SET status = 'needs_fix'
+SET status = 'needs_fix',
+    push_after_merge = FALSE
 WHERE id = $1
 `,
           [taskId],

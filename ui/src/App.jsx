@@ -2773,6 +2773,10 @@ export default function App() {
       closeConversationDrawer()
       return
     }
+    if (isApprove && mergeState === 'conflict_retry_enqueued' && nextStatus === 'merging') {
+      closeConversationDrawer()
+      return
+    }
 
     const isMarkCompleted = action === 'mark_completed' || action === 'mark_chain_completed'
     if (isMarkCompleted && nextStatus === 'completed') {
