@@ -573,21 +573,7 @@ export function FeedView({
 
   const orderedNeedsYou = useMemo(() => orderWithFollowupChains(needsYou), [needsYou])
 
-  // Convert remaining plans to task-like objects so they render with ActiveTaskRow
-  const planTasks = useMemo(() => {
-    return remainingPlans.map((plan) => ({
-      id: `plan-${plan.id}`,
-      title: plan.plan_title || 'New plan',
-      status: plan.latest_turn_status === 'running' ? 'running' : 'planning',
-      created_at: plan.created_at,
-      assigned_to: null,
-      _isPlan: true,
-      _planId: plan.id,
-    }))
-  }, [remainingPlans])
-
-  const allActive = useMemo(() => [...active, ...planTasks], [active, planTasks])
-  const orderedActive = useMemo(() => orderWithFollowupChains(allActive), [allActive])
+  const orderedActive = useMemo(() => orderWithFollowupChains(active), [active])
 
   return (
     <section className="feed">
@@ -601,7 +587,7 @@ export function FeedView({
       {!loading && !error && (
         <>
           <SectionLabel
-            count={needsYou.length + readyPlans.length}
+            count={needsYou.length}
             badge
             collapsible
             collapsed={collapsedSections.needsYou}
@@ -610,22 +596,6 @@ export function FeedView({
           {!collapsedSections.needsYou && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <AnimatePresence mode="popLayout">
-                {readyPlans.map((plan) => (
-                  <motion.div
-                    key={plan.id}
-                    layout
-                    initial={taskInitial}
-                    animate={taskAnimate}
-                    exit={taskExit}
-                    transition={taskTransition}
-                    layoutTransition={layoutTransition}
-                  >
-                    <NeedsYouPlanCard
-                      plan={plan}
-                      onClick={onOpenPlan}
-                    />
-                  </motion.div>
-                ))}
                 {orderedNeedsYou.map(({ task, chainIndex, chainLength, isFollowup, isLast }) => (
                   <motion.div
                     key={task.id}
@@ -655,14 +625,74 @@ export function FeedView({
                   </motion.div>
                 ))}
               </AnimatePresence>
-              {needsYou.length + readyPlans.length === 0 && (
+              {needsYou.length === 0 && (
                 <div className="muted">You're all caught up</div>
               )}
             </div>
           )}
 
           <SectionLabel
-            count={allActive.length}
+            count={plans.length}
+            collapsible
+            collapsed={collapsedSections.planning}
+            onToggleCollapse={() => toggleSection('planning')}
+          >Planning</SectionLabel>
+          {!collapsedSections.planning && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <AnimatePresence mode="popLayout">
+                {readyPlans.map((plan) => (
+                  <motion.div
+                    key={plan.id}
+                    layout
+                    initial={taskInitial}
+                    animate={taskAnimate}
+                    exit={taskExit}
+                    transition={taskTransition}
+                    layoutTransition={layoutTransition}
+                  >
+                    <NeedsYouPlanCard
+                      plan={plan}
+                      onClick={onOpenPlan}
+                    />
+                  </motion.div>
+                ))}
+                {remainingPlans.map((plan) => (
+                  <motion.div
+                    key={`plan-remaining-${plan.id}`}
+                    layout
+                    initial={taskInitial}
+                    animate={taskAnimate}
+                    exit={taskExit}
+                    transition={taskTransition}
+                    layoutTransition={layoutTransition}
+                  >
+                    <ActiveTaskRow
+                      task={{
+                        id: `plan-${plan.id}`,
+                        title: plan.plan_title || 'New plan',
+                        status: plan.latest_turn_status === 'running' ? 'running' : 'planning',
+                        created_at: plan.created_at,
+                        assigned_to: null,
+                        _isPlan: true,
+                        _planId: plan.id,
+                      }}
+                      onClick={onOpenPlan}
+                      chainIndex={0}
+                      chainLength={1}
+                      isLast={true}
+                      agentById={agentById}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+              {plans.length === 0 && (
+                <div className="muted">No plans in progress</div>
+              )}
+            </div>
+          )}
+
+          <SectionLabel
+            count={active.length}
             collapsible
             collapsed={collapsedSections.inProgress}
             onToggleCollapse={() => toggleSection('inProgress')}
@@ -683,7 +713,7 @@ export function FeedView({
                   >
                     <ActiveTaskRow
                       task={task}
-                      onClick={task._isPlan ? onOpenPlan : onOpenTaskConversation}
+                      onClick={onOpenTaskConversation}
                       followupForTaskId={followupForTaskId}
                       setFollowupForTaskId={setFollowupForTaskId}
                       onAddFollowup={onAddFollowup}
@@ -695,7 +725,7 @@ export function FeedView({
                   </motion.div>
                 ))}
               </AnimatePresence>
-              {orderedActive.length === 0 && (
+              {active.length === 0 && (
                 <div className="muted">No active tasks</div>
               )}
             </div>
