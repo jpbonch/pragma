@@ -30,8 +30,6 @@ export function ConnectionsView() {
   const [installing, setInstalling] = useState(null)
   const [removing, setRemoving] = useState(null)
   const [actionError, setActionError] = useState('')
-  // Track which skill card has the agent-assign dropdown open
-  const [assigningSkill, setAssigningSkill] = useState(null)
   const [assignBusy, setAssignBusy] = useState(false)
   // Track which agent card has the skill-add dropdown open
   const [addingSkillToAgent, setAddingSkillToAgent] = useState(null)
@@ -113,18 +111,17 @@ export function ConnectionsView() {
 
   // Close dropdowns on outside click
   useEffect(() => {
-    if (!assigningSkill && !addingSkillToAgent) return
+    if (!addingSkillToAgent) return
     function onPointerDown(e) {
       if (e.target.closest('.cn-agent-add-btn') || e.target.closest('.cn-skill-add-btn')) return
       const dropdown = e.target.closest('.cn-agent-dropdown') || e.target.closest('.cn-skill-dropdown')
       if (!dropdown) {
-        setAssigningSkill(null)
         setAddingSkillToAgent(null)
       }
     }
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [assigningSkill, addingSkillToAgent])
+  }, [addingSkillToAgent])
 
   const installedNames = new Set(installed.map((s) => s.name))
 
@@ -191,7 +188,6 @@ export function ConnectionsView() {
       setActionError(err instanceof Error ? err.message : String(err))
     } finally {
       setAssignBusy(false)
-      setAssigningSkill(null)
       setAddingSkillToAgent(null)
     }
   }
@@ -366,8 +362,6 @@ export function ConnectionsView() {
                 <div className="cn-grid">
                   {installed.map((skill) => {
                     const assigned = skillAgents[skill.id] || []
-                    const assignedIds = new Set(assigned.map((a) => a.id))
-                    const available = agents.filter((a) => !assignedIds.has(a.id))
                     return (
                       <div key={skill.id} className="cn-card cn-card--installed">
                         <div className="cn-card-header">
@@ -385,49 +379,10 @@ export function ConnectionsView() {
                               <span key={agent.id} className="cn-agent-chip">
                                 <span className="cn-agent-chip-emoji">{agent.emoji || '🤖'}</span>
                                 <span className="cn-agent-chip-name">{agent.name}</span>
-                                <button
-                                  className="cn-agent-chip-remove"
-                                  title={`Remove ${agent.name}`}
-                                  onClick={() => handleUnassignSkill(skill.id, agent.id)}
-                                >
-                                  <X size={11} />
-                                </button>
                               </span>
                             ))}
                             {assigned.length === 0 && (
                               <span className="cn-agents-none">No agents assigned</span>
-                            )}
-                            {available.length > 0 && (
-                              <div className="cn-agent-add-wrap">
-                                <button
-                                  className="cn-agent-add-btn"
-                                  onClick={() =>
-                                    setAssigningSkill(
-                                      assigningSkill === skill.id ? null : skill.id,
-                                    )
-                                  }
-                                  disabled={assignBusy}
-                                >
-                                  <Plus size={12} />
-                                </button>
-                                {assigningSkill === skill.id && (
-                                  <div className="cn-agent-dropdown">
-                                    {available.map((agent) => (
-                                      <button
-                                        key={agent.id}
-                                        className="cn-agent-dropdown-item"
-                                        onClick={() => handleAssignSkill(skill.id, agent.id)}
-                                        disabled={assignBusy}
-                                      >
-                                        <span className="cn-agent-chip-emoji">
-                                          {agent.emoji || '🤖'}
-                                        </span>
-                                        {agent.name}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
                             )}
                           </div>
                         </div>
