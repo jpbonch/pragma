@@ -156,16 +156,12 @@ function groupConsecutiveToolEntries(entries) {
       i++
     }
     const run = entries.slice(runStart, i)
-    if (run.length === 1) {
-      result.push(run[0])
-    } else {
-      result.push({
-        id: nextEntryId('tool_group'),
-        type: 'tool_group',
-        tools: run,
-        summary: buildToolGroupSummary(run),
-      })
-    }
+    result.push({
+      id: nextEntryId('tool_group'),
+      type: 'tool_group',
+      tools: run,
+      summary: buildToolGroupSummary(run),
+    })
   }
   return result
 }
@@ -187,7 +183,14 @@ function appendToolEntryStreaming(entries, toolEntry) {
     }
     return [...entries.slice(0, -1), group]
   }
-  return [...entries, toolEntry]
+  // Wrap single tool in a group immediately so it shows summary like "Ran 1 command"
+  const singleGroup = {
+    id: nextEntryId('tool_group'),
+    type: 'tool_group',
+    tools: [toolEntry],
+    summary: buildToolGroupSummary([toolEntry]),
+  }
+  return [...entries, singleGroup]
 }
 
 function appendAssistantDelta(entries, delta, assistantIdentity) {
