@@ -600,7 +600,7 @@ WHERE id = $1
       connectorEnv[c.env_var] = c.access_token;
     }
     if (workerConnectors.length > 0) {
-      connectorEnv.PATH = `${getConnectorBinDir()}:${process.env.PATH ?? ""}`;
+      connectorEnv.PATH = `${getConnectorBinDir(input.workspaceName)}:${process.env.PATH ?? ""}`;
     }
 
     let workerText = "";

@@ -184,6 +184,7 @@ export function getWorkspacePaths(name: string): {
   outputsDir: string;
   uploadsDir: string;
   worktreesDir: string;
+  binDir: string;
 } {
   const rootDir = join(PRAGMA_DIR, name);
   const workspaceDir = join(rootDir, "workspace");
@@ -199,6 +200,7 @@ export function getWorkspacePaths(name: string): {
     outputsDir: join(workspaceDir, "outputs"),
     uploadsDir: join(workspaceDir, "uploads"),
     worktreesDir: join(rootDir, "worktrees"),
+    binDir: join(workspaceDir, "bin"),
   };
 }
 

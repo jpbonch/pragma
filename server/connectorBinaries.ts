@@ -1,17 +1,17 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { access, mkdir, chmod, readdir, rename, unlink } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
-
-const BIN_DIR = join(homedir(), ".pragma", "bin");
+import { getWorkspacePaths } from "./db";
 
 export async function ensureConnectorBinary(
   binaryName: string,
   downloadUrl: string,
+  workspaceName: string,
 ): Promise<string> {
-  const binPath = join(BIN_DIR, binaryName);
+  const binDir = getWorkspacePaths(workspaceName).binDir;
+  const binPath = join(binDir, binaryName);
 
   try {
     await access(binPath);
@@ -20,18 +20,18 @@ export async function ensureConnectorBinary(
     // need to download
   }
 
-  await mkdir(BIN_DIR, { recursive: true });
+  await mkdir(binDir, { recursive: true });
 
   if (downloadUrl.startsWith("npm:")) {
     const pkg = downloadUrl.slice(4);
-    const modulesDir = join(BIN_DIR, "node_modules");
-    execSync(`npm install --prefix "${BIN_DIR}" ${pkg}`, { stdio: "pipe" });
+    const modulesDir = join(binDir, "node_modules");
+    execSync(`npm install --prefix "${binDir}" ${pkg}`, { stdio: "pipe" });
     // Try to find the binary in the installed package
     const pkgBinDir = join(modulesDir, ".bin");
     const pkgBinPath = join(pkgBinDir, binaryName);
     try {
       await access(pkgBinPath);
-      // Symlink or copy to BIN_DIR
+      // Symlink or copy to binDir
       const { symlinkSync } = await import("node:fs");
       try {
         symlinkSync(pkgBinPath, binPath);
@@ -50,8 +50,8 @@ export async function ensureConnectorBinary(
     throw new Error(`Download failed: ${response.status} ${response.statusText}`);
   }
 
-  const tmpFile = join(BIN_DIR, `_download_${binaryName}.tar.gz`);
-  const tmpExtractDir = join(BIN_DIR, `_extract_${binaryName}`);
+  const tmpFile = join(binDir, `_download_${binaryName}.tar.gz`);
+  const tmpExtractDir = join(binDir, `_extract_${binaryName}`);
 
   try {
     // Write response to temp file
@@ -98,6 +98,6 @@ async function findBinaryInDir(dir: string, name: string): Promise<string | null
   return null;
 }
 
-export function getConnectorBinDir(): string {
-  return BIN_DIR;
+export function getConnectorBinDir(workspaceName: string): string {
+  return getWorkspacePaths(workspaceName).binDir;
 }

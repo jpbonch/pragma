@@ -115,7 +115,7 @@ import {
 import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
 import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "./connectorRegistry";
-import { ensureConnectorBinary, getConnectorBinDir } from "./connectorBinaries";
+import { ensureConnectorBinary } from "./connectorBinaries";
 
 function escapeHtml(str: string): string {
   return str
@@ -5235,7 +5235,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       const platform = process.platform === "darwin" ? "darwin" : "linux";
       const arch = process.arch === "arm64" ? "arm64" : "x64";
       const downloadUrl = def.getBinaryUrl(platform, arch);
-      const binPath = await ensureConnectorBinary(def.binaryName, downloadUrl);
+      const binPath = await ensureConnectorBinary(def.binaryName, downloadUrl, workspaceName);
 
       return c.json({ ok: true, path: binPath });
     } finally {
