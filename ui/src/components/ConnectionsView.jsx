@@ -361,7 +361,6 @@ export function ConnectionsView() {
               {installed.length > 0 && (
                 <div className="cn-grid">
                   {installed.map((skill) => {
-                    const assigned = skillAgents[skill.id] || []
                     return (
                       <div key={skill.id} className="cn-card cn-card--installed">
                         <div className="cn-card-header">
@@ -371,21 +370,6 @@ export function ConnectionsView() {
                         {skill.description && (
                           <p className="cn-card-desc">{skill.description}</p>
                         )}
-
-                        <div className="cn-agents-section">
-                          <div className="cn-agents-label">Agents</div>
-                          <div className="cn-agents-list">
-                            {assigned.map((agent) => (
-                              <span key={agent.id} className="cn-agent-chip">
-                                <span className="cn-agent-chip-emoji">{agent.emoji || '🤖'}</span>
-                                <span className="cn-agent-chip-name">{agent.name}</span>
-                              </span>
-                            ))}
-                            {assigned.length === 0 && (
-                              <span className="cn-agents-none">No agents assigned</span>
-                            )}
-                          </div>
-                        </div>
 
                         <div className="cn-card-footer">
                           <button
