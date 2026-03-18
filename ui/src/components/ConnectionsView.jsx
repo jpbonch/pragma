@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Check, Download, Trash2, Plus, X } from 'lucide-react'
+import { AlertCircle, Download, Trash2, Plus, X } from 'lucide-react'
 import {
   fetchSkillRegistry,
   fetchInstalledSkills,
@@ -376,98 +376,77 @@ export function ConnectionsView() {
             )}
 
             <div className="cn-section">
-              <div className="cn-section-header">
-                <h2 className="cn-section-title">Installed</h2>
-                <button
-                  className="cn-create-skill-btn"
-                  onClick={() => setShowCreateModal(true)}
-                >
-                  <Plus size={14} />
-                  <span>New Skill</span>
-                </button>
-              </div>
-              {installed.length > 0 && (
-                <div className="cn-grid">
-                  {installed.map((skill) => {
-                    return (
-                      <div key={skill.id} className="cn-card cn-card--installed">
-                        <div className="cn-card-header">
-                          <span className="cn-card-name">{skill.name}</span>
-                          <span className="cn-badge cn-badge--installed">Installed</span>
-                        </div>
-                        {skill.description && (
-                          <p className="cn-card-desc">{skill.description}</p>
-                        )}
-
-                        <div className="cn-card-footer">
-                          <button
-                            className="cn-remove-btn"
-                            onClick={() => handleRemove(skill)}
-                            disabled={removing === skill.id}
-                          >
-                            {removing === skill.id ? (
-                              <div className="cn-spinner-sm" />
-                            ) : (
-                              <Trash2 size={13} />
-                            )}
-                            <span>{removing === skill.id ? 'Removing...' : 'Remove'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
-            {catalogSkills.length > 0 && (
-              <div className="cn-section">
                 <h2 className="cn-section-title">Skill Catalog</h2>
                 <div className="cn-grid">
-                  {catalogSkills.map((skill) => {
-                    const isInstalled = installedNames.has(skill.name)
-                    return (
-                      <div key={`catalog-${skill.provider}-${skill.name}`} className={`cn-card ${isInstalled ? 'cn-card--installed' : ''}`}>
-                        <div className="cn-card-header">
-                          <span className="cn-card-name">{skill.name}</span>
-                          {isInstalled && <span className="cn-badge cn-badge--installed">Installed</span>}
-                        </div>
-                        {skill.description && (
-                          <p className="cn-card-desc">{skill.description}</p>
-                        )}
-                        <div className="cn-card-footer">
-                          {isInstalled ? (
-                            <span className="cn-installed-label">
-                              <Check size={13} />
-                              Installed
-                            </span>
-                          ) : (
-                            <button
-                              className="cn-install-btn"
-                              onClick={() => handleInstall(skill)}
-                              disabled={installing === skill.name}
-                            >
-                              {installing === skill.name ? (
-                                <div className="cn-spinner-sm" />
-                              ) : (
-                                <Download size={13} />
-                              )}
-                              <span>{installing === skill.name ? 'Installing...' : 'Install'}</span>
-                            </button>
-                          )}
-                        </div>
+                  {/* Add Skill card — always first */}
+                  <button
+                    className="cn-card cn-add-skill-card"
+                    onClick={() => setShowCreateModal(true)}
+                  >
+                    <Plus size={28} strokeWidth={1.5} />
+                    <span className="cn-add-skill-label">New Skill</span>
+                  </button>
+
+                  {/* Installed skills first */}
+                  {installed.map((skill) => (
+                    <div key={skill.id} className="cn-card cn-card--installed">
+                      <div className="cn-card-header">
+                        <span className="cn-card-name">{skill.name}</span>
+                        <span className="cn-badge cn-badge--installed">Installed</span>
                       </div>
-                    )
-                  })}
+                      {skill.description && (
+                        <p className="cn-card-desc">{skill.description}</p>
+                      )}
+                      <div className="cn-card-footer">
+                        <button
+                          className="cn-remove-btn"
+                          onClick={() => handleRemove(skill)}
+                          disabled={removing === skill.id}
+                        >
+                          {removing === skill.id ? (
+                            <div className="cn-spinner-sm" />
+                          ) : (
+                            <Trash2 size={13} />
+                          )}
+                          <span>{removing === skill.id ? 'Removing...' : 'Remove'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Uninstalled catalog skills */}
+                  {catalogSkills.filter((s) => !installedNames.has(s.name)).map((skill) => (
+                    <div key={`catalog-${skill.provider}-${skill.name}`} className="cn-card">
+                      <div className="cn-card-header">
+                        <span className="cn-card-name">{skill.name}</span>
+                      </div>
+                      {skill.description && (
+                        <p className="cn-card-desc">{skill.description}</p>
+                      )}
+                      <div className="cn-card-footer">
+                        <button
+                          className="cn-install-btn"
+                          onClick={() => handleInstall(skill)}
+                          disabled={installing === skill.name}
+                        >
+                          {installing === skill.name ? (
+                            <div className="cn-spinner-sm" />
+                          ) : (
+                            <Download size={13} />
+                          )}
+                          <span>{installing === skill.name ? 'Installing...' : 'Install'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            )}
 
             {registry.length === 0 && installed.length === 0 && (
               <div className="cn-empty">
                 <Download size={40} strokeWidth={1.5} />
                 <p className="cn-empty-title">No skills available</p>
-                <p className="cn-empty-desc">Could not fetch skills from the registries.</p>
+                <p className="cn-empty-desc">Create a custom skill or check your registry configuration.</p>
               </div>
             )}
           </>

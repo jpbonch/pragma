@@ -5679,6 +5679,28 @@ select { cursor: pointer; }
 .cn-card:hover { border-color: #d4d3d0; }
 .cn-card--installed { background: #f9fafb; }
 
+.cn-add-skill-card {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1.5px dashed #d4d3d0;
+  background: none;
+  color: #9b9a97;
+  cursor: pointer;
+  font-family: inherit;
+  min-height: 100px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.cn-add-skill-card:hover {
+  border-color: #2383e2;
+  color: #2383e2;
+  background: #f0f7ff;
+}
+.cn-add-skill-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* Agent cards at top of skills page */
 .cn-agent-card {
   background: #fff;
