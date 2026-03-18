@@ -934,7 +934,7 @@ export function RightPanel({
         onSubmit={(updates) => {
           void handleSubmitEdit(updates)
         }}
-        onDelete={editingAgent ? async () => {
+        onDelete={editingAgent && editingAgent.name?.toLowerCase() !== 'orchestrator' ? async () => {
           await onDeleteAgent(editingAgent.id)
           setEditingAgent(null)
         } : undefined}
