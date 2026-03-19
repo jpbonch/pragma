@@ -45,7 +45,7 @@ const STATUS_COLORS = {
   orchestrating: '#5A6B8A',
   running: '#4B83D6',
   queued: '#7C6DD7',
-  merging: '#4B83D6',
+  merging: '#E8913A',
   needs_fix: '#D9534F',
   completed: '#2FA67E',
   failed: '#EB5757',

@@ -226,10 +226,18 @@ LIMIT 1
   }
 
   if (shouldSkipOrchestrator) {
+    // Check current status to avoid overwriting 'merging' with 'running'
+    const currentStatusResult = await db.query<{ status: TaskStatus }>(
+      `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
+      [input.taskId],
+    );
+    const currentTaskStatus = currentStatusResult.rows[0]?.status;
+    const preserveMerging = currentTaskStatus === "merging";
+
     await db.query(
       `
 UPDATE tasks
-SET status = 'running',
+SET status = $6,
     output_dir = $2,
     git_branch_name = $3,
     git_state_json = $4,
@@ -243,9 +251,12 @@ WHERE id = $1
         gitState.branch_name,
         serializedGitState,
         input.requestedRecipientAgentId ?? null,
+        preserveMerging ? "merging" : "running",
       ],
     );
-    await notifyTaskStatus("running", "execute_runner");
+    if (!preserveMerging) {
+      await notifyTaskStatus("running", "execute_runner");
+    }
   } else {
     await db.query(
       `
@@ -502,16 +513,26 @@ WHERE id = $1
     });
 
     if (!shouldSkipOrchestrator) {
+      // Check current status to avoid overwriting 'merging' with 'running'
+      const orchStatusResult = await db.query<{ status: TaskStatus }>(
+        `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
+        [input.taskId],
+      );
+      const orchCurrentStatus = orchStatusResult.rows[0]?.status;
+      const orchPreserveMerging = orchCurrentStatus === "merging";
+
       await db.query(
         `
 UPDATE tasks
 SET assigned_to = $2,
-    status = 'running'
+    status = $3
 WHERE id = $1
 `,
-        [input.taskId, selectedWorker.id],
+        [input.taskId, selectedWorker.id, orchPreserveMerging ? "merging" : "running"],
       );
-      await notifyTaskStatus("running", "execute_runner");
+      if (!orchPreserveMerging) {
+        await notifyTaskStatus("running", "execute_runner");
+      }
     }
 
     await insertThreadEvent({
