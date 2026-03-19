@@ -40,6 +40,7 @@ import {
   syncTaskOutputsBackToWorkspace,
 } from "./conversation/gitWorkflow";
 import { resolveModelId } from "./conversation/models";
+import { isLoopbackOrigin } from "../shared/net";
 import { allAdapterDefinitions, getAdapterDefinition } from "./conversation/adapterRegistry";
 import { resolvePragmaCliCommand } from "./conversation/pragmaCli";
 import {
@@ -126,21 +127,6 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#x27;");
 }
 
-/**
- * Returns true when the Origin (or Referer) header comes from a trusted
- * loopback address (127.0.0.1 / localhost).  Requests with no Origin header
- * (e.g. same-origin navigations, curl) are also accepted since the CORS
- * policy already blocks cross-origin preflights from untrusted origins.
- */
-function isLoopbackOrigin(headerValue: string | undefined): boolean {
-  if (!headerValue) return true; // same-origin / non-browser
-  try {
-    const url = new URL(headerValue);
-    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
-  } catch {
-    return false;
-  }
-}
 
 type StartServerOptions = {
   port: number;

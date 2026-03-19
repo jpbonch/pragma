@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["cli", "server", "index.ts"]
+  "include": ["cli", "server", "shared", "index.ts"]
 }

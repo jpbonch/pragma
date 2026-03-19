@@ -1,9 +1,5 @@
 import { createParser } from 'eventsource-parser'
-
-function isLoopbackHost(hostname) {
-  const value = String(hostname || '').trim().toLowerCase()
-  return value === 'localhost' || value === '127.0.0.1' || value === '::1'
-}
+import { isLoopbackHost } from '../../shared/net'
 
 function isWildcardHost(hostname) {
   const value = String(hostname || '').trim().toLowerCase()
