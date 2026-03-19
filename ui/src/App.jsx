@@ -1259,7 +1259,7 @@ export default function App() {
         {activeTab === 'active-chat' && (
           <div className="feed-page">
             <div className="main-topbar">
-              <h1>{conversation.entries.find((e) => e.type === 'user')?.content?.slice(0, 60) || 'Chat'}</h1>
+              <h1>{sidebarChats.find((c) => c.id === conversation.threadId)?.chat_title || 'Chat'}</h1>
             </div>
             <InlineChatView
               entries={conversation.entries}
