@@ -254,7 +254,6 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
 
   useEffect(() => {
     if (!open) return
-    setConfirmDelete(false)
     setDeleting(false)
     setSkillDropdownOpen(false)
     setSkillBusy(false)
