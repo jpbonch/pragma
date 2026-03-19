@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
@@ -436,6 +437,70 @@ function publishThreadUpdated(
   for (const listener of listeners) {
     listener(event);
   }
+}
+
+type WriteEventFn = (
+  eventName: string,
+  payload: Record<string, unknown>,
+  seq?: number,
+) => Promise<void>;
+
+type SSEStreamOptions = {
+  setup: (writeEvent: WriteEventFn) => (() => void) | Promise<() => void>;
+  closedSignal?: () => boolean;
+};
+
+function createSSEStream(
+  c: Context,
+  options: SSEStreamOptions,
+): Response {
+  c.header("cache-control", "no-store");
+  c.header("connection", "keep-alive");
+
+  return streamSSE(c, async (stream) => {
+    let closed = false;
+    const writeEvent: WriteEventFn = async (eventName, payload, seq) => {
+      if (closed) return;
+      try {
+        await stream.writeSSE({
+          event: eventName,
+          data: JSON.stringify(payload),
+          ...(seq != null ? { id: String(seq) } : {}),
+        });
+      } catch {
+        closed = true;
+      }
+    };
+
+    const unsubscribe = await options.setup(writeEvent);
+
+    const pingTimer = setInterval(() => {
+      void writeEvent("ping", { ts: new Date().toISOString() });
+    }, 15000);
+
+    const abortSignal = c.req.raw.signal;
+    await new Promise<void>((resolve) => {
+      if (abortSignal.aborted || closed) {
+        resolve();
+        return;
+      }
+      let pollInterval: ReturnType<typeof setInterval> | undefined;
+      const done = () => {
+        if (pollInterval) clearInterval(pollInterval);
+        resolve();
+      };
+      abortSignal.addEventListener("abort", done, { once: true });
+      if (options.closedSignal) {
+        pollInterval = setInterval(() => {
+          if (closed || options.closedSignal!()) done();
+        }, 500);
+      }
+    });
+
+    closed = true;
+    clearInterval(pingTimer);
+    unsubscribe();
+  });
 }
 
 function getWorkspaceServiceStore(
@@ -1255,47 +1320,13 @@ LEFT JOIN LATERAL (
   app.get("/tasks/stream", async (c) => {
     const workspaceName = await requireActiveWorkspaceName();
 
-    c.header("cache-control", "no-store");
-    c.header("connection", "keep-alive");
-
-    return streamSSE(c, async (stream) => {
-      let closed = false;
-      const writeEvent = async (
-        eventName: string,
-        payload: Record<string, unknown>,
-      ): Promise<void> => {
-        if (closed) {
-          return;
-        }
-        await stream.writeSSE({
-          event: eventName,
-          data: JSON.stringify(payload),
+    return createSSEStream(c, {
+      setup: async (writeEvent) => {
+        await writeEvent("ready", { workspace: workspaceName, ts: new Date().toISOString() });
+        return subscribeTaskStatus(workspaceName, (event) => {
+          void writeEvent("task_status_changed", event);
         });
-      };
-
-      await writeEvent("ready", { workspace: workspaceName, ts: new Date().toISOString() });
-
-      const unsubscribe = subscribeTaskStatus(workspaceName, (event) => {
-        void writeEvent("task_status_changed", event);
-      });
-
-      const pingTimer = setInterval(() => {
-        void writeEvent("ping", { ts: new Date().toISOString() });
-      }, 15000);
-
-      const abortSignal = c.req.raw.signal;
-      await new Promise<void>((resolve) => {
-        const closeStream = () => resolve();
-        if (abortSignal.aborted) {
-          resolve();
-          return;
-        }
-        abortSignal.addEventListener("abort", closeStream, { once: true });
-      });
-
-      closed = true;
-      clearInterval(pingTimer);
-      unsubscribe();
+      },
     });
   });
 
@@ -1327,56 +1358,25 @@ LEFT JOIN LATERAL (
       throw new PragmaError("SERVICE_NOT_FOUND", 404, `Service not found: ${serviceId}`);
     }
 
-    c.header("cache-control", "no-store");
-    c.header("connection", "keep-alive");
-
-    return streamSSE(c, async (stream) => {
-      let closed = false;
-      const writeEvent = async (
-        eventName: string,
-        payload: Record<string, unknown>,
-      ): Promise<void> => {
-        if (closed) {
-          return;
-        }
-        await stream.writeSSE({
-          event: eventName,
-          data: JSON.stringify(payload),
+    return createSSEStream(c, {
+      setup: async (writeEvent) => {
+        await writeEvent("ready", {
+          service: toRuntimeServiceSummary(service),
+          logs: service.logs,
+          ts: new Date().toISOString(),
         });
-      };
 
-      await writeEvent("ready", {
-        service: toRuntimeServiceSummary(service),
-        logs: service.logs,
-        ts: new Date().toISOString(),
-      });
+        const listener: RuntimeServiceListener = (event) => {
+          if (event.type === "log") {
+            void writeEvent("log", { entry: event.entry });
+            return;
+          }
+          void writeEvent("status", { service: event.service });
+        };
+        service.listeners.add(listener);
 
-      const listener: RuntimeServiceListener = (event) => {
-        if (event.type === "log") {
-          void writeEvent("log", { entry: event.entry });
-          return;
-        }
-        void writeEvent("status", { service: event.service });
-      };
-      service.listeners.add(listener);
-
-      const pingTimer = setInterval(() => {
-        void writeEvent("ping", { ts: new Date().toISOString() });
-      }, 15000);
-
-      const abortSignal = c.req.raw.signal;
-      await new Promise<void>((resolve) => {
-        const closeStream = () => resolve();
-        if (abortSignal.aborted) {
-          resolve();
-          return;
-        }
-        abortSignal.addEventListener("abort", closeStream, { once: true });
-      });
-
-      closed = true;
-      clearInterval(pingTimer);
-      service.listeners.delete(listener);
+        return () => service.listeners.delete(listener);
+      },
     });
   });
 
@@ -1408,83 +1408,45 @@ LEFT JOIN LATERAL (
       }
     }
 
-    c.header("cache-control", "no-store");
-    c.header("connection", "keep-alive");
-
-    return streamSSE(c, async (stream) => {
-      let closed = false;
-      const writeEvent = async (
-        eventName: string,
-        payload: Record<string, unknown>,
-        seq?: number,
-      ): Promise<void> => {
-        if (closed) return;
+    return createSSEStream(c, {
+      setup: async (writeEvent) => {
+        // Replay missed events from the DB
+        const replayDb = await openDatabase(workspaceName);
         try {
-          await stream.writeSSE({
-            event: eventName,
-            data: JSON.stringify(payload),
-            ...(seq != null ? { id: String(seq) } : {}),
-          });
-        } catch {
-          closed = true;
-        }
-      };
-
-      // Replay missed events from the DB
-      const replayDb = await openDatabase(workspaceName);
-      try {
-        await ensureConversationSchema(replayDb);
-        const missedEvents = await getEventsSince(replayDb, threadId, lastSeq);
-        for (const evt of missedEvents) {
-          const payload = JSON.parse(evt.payload_json);
-          await writeEvent(evt.event_name, payload, evt.seq);
-          lastSeq = evt.seq;
-        }
-      } finally {
-        await replayDb.close();
-      }
-
-      await writeEvent("ready", { thread_id: threadId, ts: new Date().toISOString() });
-
-      // Subscribe to live thread updates and forward new events
-      const drainNewEvents = async (): Promise<void> => {
-        if (closed) return;
-        const eventDb = await openDatabase(workspaceName);
-        try {
-          await ensureConversationSchema(eventDb);
-          const events = await getEventsSince(eventDb, threadId, lastSeq);
-          for (const evt of events) {
-            lastSeq = evt.seq;
+          await ensureConversationSchema(replayDb);
+          const missedEvents = await getEventsSince(replayDb, threadId, lastSeq);
+          for (const evt of missedEvents) {
             const payload = JSON.parse(evt.payload_json);
             await writeEvent(evt.event_name, payload, evt.seq);
+            lastSeq = evt.seq;
           }
         } finally {
-          await eventDb.close();
+          await replayDb.close();
         }
-      };
 
-      const unsubscribe = subscribeThreadUpdates(workspaceName, threadId, (updateEvent) => {
-        void drainNewEvents();
-        void writeEvent("thread_updated", updateEvent);
-      });
+        await writeEvent("ready", { thread_id: threadId, ts: new Date().toISOString() });
 
-      const pingTimer = setInterval(() => {
-        void writeEvent("ping", { ts: new Date().toISOString() });
-      }, 15000);
+        // Subscribe to live thread updates and forward new events
+        const drainNewEvents = async (): Promise<void> => {
+          const eventDb = await openDatabase(workspaceName);
+          try {
+            await ensureConversationSchema(eventDb);
+            const events = await getEventsSince(eventDb, threadId, lastSeq);
+            for (const evt of events) {
+              lastSeq = evt.seq;
+              const payload = JSON.parse(evt.payload_json);
+              await writeEvent(evt.event_name, payload, evt.seq);
+            }
+          } finally {
+            await eventDb.close();
+          }
+        };
 
-      const abortSignal = c.req.raw.signal;
-      await new Promise<void>((resolve) => {
-        const closeStream = () => resolve();
-        if (abortSignal.aborted) {
-          resolve();
-          return;
-        }
-        abortSignal.addEventListener("abort", closeStream, { once: true });
-      });
-
-      closed = true;
-      clearInterval(pingTimer);
-      unsubscribe();
+        return subscribeThreadUpdates(workspaceName, threadId, (updateEvent) => {
+          void drainNewEvents();
+          void writeEvent("thread_updated", updateEvent);
+        });
+      },
     });
   });
 
@@ -3873,80 +3835,44 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
       });
 
       // Stream events from DB to the client until the turn completes or fails
-      return streamSSE(c, async (stream) => {
-        let lastSeq = seqBeforeTurn;
-        let closed = false;
+      let lastSeq = seqBeforeTurn;
+      let done = false;
 
-        const writeEvent = async (
-          eventName: string,
-          payload: Record<string, unknown>,
-          seq?: number,
-        ): Promise<void> => {
-          if (closed) return;
-          try {
-            await stream.writeSSE({
-              event: eventName,
-              data: JSON.stringify(payload),
-              ...(seq != null ? { id: String(seq) } : {}),
+      const drainEvents = async (writeEvent: WriteEventFn): Promise<boolean> => {
+        const eventDb = await openDatabase(workspaceName);
+        try {
+          await ensureConversationSchema(eventDb);
+          const events = await getEventsSince(eventDb, threadId, lastSeq);
+          for (const evt of events) {
+            lastSeq = evt.seq;
+            const payload = JSON.parse(evt.payload_json);
+            await writeEvent(evt.event_name, payload, evt.seq);
+            if (evt.event_name === "turn_completed" || evt.event_name === "error" || evt.event_name === "turn_failed") {
+              return true;
+            }
+          }
+        } finally {
+          await eventDb.close();
+        }
+        return false;
+      };
+
+      return createSSEStream(c, {
+        setup: async (writeEvent) => {
+          // Replay any events already written
+          if (await drainEvents(writeEvent)) {
+            done = true;
+            return () => {};
+          }
+
+          // Subscribe to live updates
+          return subscribeThreadUpdates(workspaceName, threadId, () => {
+            void drainEvents(writeEvent).then((finished) => {
+              if (finished) done = true;
             });
-          } catch {
-            closed = true;
-          }
-        };
-
-        const drainEvents = async (): Promise<boolean> => {
-          const eventDb = await openDatabase(workspaceName);
-          try {
-            await ensureConversationSchema(eventDb);
-            const events = await getEventsSince(eventDb, threadId, lastSeq);
-            for (const evt of events) {
-              lastSeq = evt.seq;
-              const payload = JSON.parse(evt.payload_json);
-              await writeEvent(evt.event_name, payload, evt.seq);
-              if (evt.event_name === "turn_completed" || evt.event_name === "error" || evt.event_name === "turn_failed") {
-                return true; // done
-              }
-            }
-          } finally {
-            await eventDb.close();
-          }
-          return false;
-        };
-
-        // Replay any events already written
-        if (await drainEvents()) return;
-
-        // Subscribe to live updates
-        const unsubscribe = subscribeThreadUpdates(workspaceName, threadId, () => {
-          void drainEvents().then((done) => {
-            if (done) {
-              closed = true;
-            }
           });
-        });
-
-        const pingTimer = setInterval(() => {
-          void writeEvent("ping", { ts: new Date().toISOString() });
-        }, 15000);
-
-        const abortSignal = c.req.raw.signal;
-        await new Promise<void>((resolve) => {
-          const check = () => { if (closed) resolve(); };
-          const interval = setInterval(check, 500);
-          const closeStream = () => {
-            clearInterval(interval);
-            resolve();
-          };
-          if (abortSignal.aborted || closed) {
-            clearInterval(interval);
-            resolve();
-            return;
-          }
-          abortSignal.addEventListener("abort", closeStream, { once: true });
-        });
-
-        clearInterval(pingTimer);
-        unsubscribe();
+        },
+        closedSignal: () => done,
       });
     } catch (error) {
       await db.close();
