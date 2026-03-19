@@ -17,17 +17,13 @@ import {
   PragmaError,
   createWorkspace,
   deleteWorkspace,
-  deleteJunctionOrThrow,
-  deleteOrThrow,
   closeOpenDatabases,
-  findOrThrow,
   getActiveWorkspaceName,
   getWorkspacePaths,
   listWorkspaceNames,
   openDatabase,
   setActiveWorkspaceName,
   setupPragma,
-  updateOrThrow,
   updateTaskTitle,
 } from "./db";
 import { generateTitle } from "./conversation/titleGenerator";
@@ -121,9 +117,77 @@ import {
   dbQuerySchema,
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
+import { workspaceMiddleware, type WorkspaceEnv } from "./http/middleware";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
 import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "./connectorRegistry";
 import { ensureConnectorBinary } from "./connectorBinaries";
+import {
+  listAgents,
+  getAgentById,
+  insertAgent,
+  updateAgent as updateAgentStore,
+  deleteAgent as deleteAgentStore,
+  generateNextAgentId,
+  listPlanWorkerCandidates,
+} from "./stores/agentStore";
+import {
+  listHumans,
+  insertHuman,
+  updateHuman as updateHumanStore,
+  deleteHuman as deleteHumanStore,
+} from "./stores/humanStore";
+import {
+  listSkills as listSkillsStore,
+  insertSkill,
+  updateSkill as updateSkillStore,
+  deleteSkill as deleteSkillStore,
+  getAgentSkills as getAgentSkillsStore,
+  assignAgentSkill,
+  unassignAgentSkill,
+  getAgentSkillContent,
+  skillExists,
+} from "./stores/skillStore";
+import {
+  listConnectors as listConnectorsStore,
+  getConnectorAuthInfo,
+  getConnectorForConfig,
+  setConnectorApiKeyToken,
+  updateConnectorOAuthConfig,
+  connectorExists,
+  storeConnectorTokens,
+  disconnectConnector,
+  refreshConnectorToken as refreshConnectorTokenStore,
+  getConnectorName,
+  getAgentConnectors as getAgentConnectorsStore,
+  assignAgentConnector,
+  unassignAgentConnector,
+  getAgentConnectorContent,
+  getConnectorTokenInfo,
+  agentExists,
+} from "./stores/connectorStore";
+import {
+  listTasks,
+  getTaskDetail,
+  getTaskStatus,
+  getTaskStatusAndAssignment,
+  getTaskWithTestCommands,
+  getTaskChangesInfo,
+  getTaskPlan,
+  getTaskTestCommands as getTaskTestCommandsStore,
+  getTaskOutputDir,
+  insertTask,
+  updateTaskStatus,
+  updateTaskTestCommandsJson,
+  updateTaskAssignment,
+  setTaskFollowup,
+  getTaskFollowupInfo,
+  getTaskCurrentStatus,
+  getTaskPredecessorId,
+  updateTaskForPlanExecution,
+  getStoredPlanRecipientForTurn,
+  updateTurnRecipient,
+  getTurnForPlanValidation,
+} from "./stores/taskStore";
 
 /** Walk predecessor chain from a task, returning all task IDs in chain order (current first). */
 async function walkPredecessorChain(
@@ -763,7 +827,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     },
   });
 
-  const app = new Hono();
+  const app = new Hono<WorkspaceEnv>();
 
   // Only allow requests from localhost / 127.0.0.1 origins (the Pragma UI).
   app.use(
@@ -797,6 +861,20 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     });
   };
 
+  // Workspace middleware: provides c.get("db") and c.get("workspace") for all workspace-scoped routes
+  app.use("/agents/*", workspaceMiddleware);
+  app.use("/humans/*", workspaceMiddleware);
+  app.use("/tasks/*", workspaceMiddleware);
+  app.use("/conversations/*", workspaceMiddleware);
+  app.use("/skills/*", workspaceMiddleware);
+  app.use("/connectors/*", workspaceMiddleware);
+  app.use("/db/*", workspaceMiddleware);
+  app.use("/uploads", workspaceMiddleware);
+  app.use("/services/*", workspaceMiddleware);
+  app.use("/code/*", workspaceMiddleware);
+  app.use("/context/*", workspaceMiddleware);
+  app.use("/context", workspaceMiddleware);
+
   const turnRunner = new TurnRunner({
     apiUrl,
     pragmaCliCommand,
@@ -812,8 +890,8 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         source: input.source,
       });
     },
-    getAgentRow,
-    listPlanWorkerCandidates,
+    getAgentRow: getAgentById,
+    listPlanWorkerCandidates: (db) => listPlanWorkerCandidates(db, DEFAULT_AGENT_ID),
     isDirectoryEmpty,
     getStoredPlanRecipientForTurn,
     buildConversationAgentEnv,
@@ -856,7 +934,6 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   });
 
   app.post("/db/query", validateJson(dbQuerySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
     const body = c.req.valid("json");
     const sql = body.sql.trim();
 
@@ -866,7 +943,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       return c.json({ error: "Only SELECT, WITH, and EXPLAIN statements are allowed." }, 400);
     }
 
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     try {
       const result = await db.query(sql, body.params ?? []);
       return c.json({
@@ -882,7 +959,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   app.post("/uploads", async (c) => {
     const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
 
     let formData: Awaited<ReturnType<typeof c.req.formData>>;
@@ -960,111 +1037,68 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   });
 
   app.get("/agents", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const db = await openDatabase(workspaceName);
-
-    try {
-      const result = await db.query<{
-        id: string;
-        name: string;
-        description: string | null;
-        status: string;
-        agent_file: string | null;
-        emoji: string | null;
-        harness: HarnessId;
-        model_label: string;
-        model_id: string;
-      }>(`
-SELECT id, name, description, status, agent_file, emoji, harness, model_label, model_id
-FROM agents
-ORDER BY name ASC
-`);
-
-      return c.json({ agents: result.rows });
-    } finally {
-      await db.close();
-    }
+    const db = c.get("db");
+    const rows = await listAgents(db);
+    return c.json({ agents: rows });
   });
 
   app.post("/agents", validateJson(createAgentSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const db = c.get("db");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      const harness = body.harness;
-      const modelLabel = body.model_label;
-      const modelId = resolveModelId(harness, modelLabel);
-      const agentId = await generateNextAgentId(db, body.name);
-      await db.query(
-        `
-INSERT INTO agents (id, name, description, status, agent_file, emoji, harness, model_label, model_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-`,
-        [
-          agentId,
-          body.name,
-          body.description ?? null,
-          "idle",
-          body.agent_file,
-          body.emoji,
-          harness,
-          modelLabel,
-          modelId,
-        ],
-      );
+    const harness = body.harness;
+    const modelLabel = body.model_label;
+    const modelId = resolveModelId(harness, modelLabel);
+    const agentId = await generateNextAgentId(db, body.name);
 
+    try {
+      await insertAgent(db, {
+        id: agentId,
+        name: body.name,
+        description: body.description ?? null,
+        agent_file: body.agent_file,
+        emoji: body.emoji,
+        harness,
+        model_label: modelLabel,
+        model_id: modelId,
+      });
       return c.json({ ok: true, id: agentId }, 201);
     } catch (error: unknown) {
-      const message = errorMessage(error);
-      throw new PragmaError("CREATE_AGENT_FAILED", 400, message);
-    } finally {
-      await db.close();
+      throw new PragmaError("CREATE_AGENT_FAILED", 400, errorMessage(error));
     }
   });
 
   app.put("/agents/:id", validateJson(updateAgentSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const db = c.get("db");
     const id = c.req.param("id");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      const modelId = resolveModelId(body.harness, body.model_label);
-      await updateOrThrow(
-        db,
-        `UPDATE agents
-SET name = $2, description = $3, agent_file = $4, emoji = $5,
-    harness = $6, model_label = $7, model_id = $8
-WHERE id = $1`,
-        [id, body.name, body.description ?? null, body.agent_file, body.emoji, body.harness, body.model_label, modelId],
-        "AGENT_NOT_FOUND", "Agent", id,
-      );
+    const modelId = resolveModelId(body.harness, body.model_label);
+    const affected = await updateAgentStore(db, {
+      id,
+      name: body.name,
+      description: body.description ?? null,
+      agent_file: body.agent_file,
+      emoji: body.emoji,
+      harness: body.harness,
+      model_label: body.model_label,
+      model_id: modelId,
+    });
 
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
+    if (affected === 0) {
+      throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${id}`);
     }
+    return c.json({ ok: true });
   });
 
   app.delete("/agents/:id", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const db = c.get("db");
     const id = c.req.param("id");
-    const db = await openDatabase(workspaceName);
-
-    try {
-      // Unassign tasks referencing this agent to avoid foreign key violation
-      await db.query(
-        `UPDATE tasks SET assigned_to = NULL WHERE assigned_to = $1`,
-        [id],
-      );
-
-      await deleteOrThrow(db, "agents", id, "AGENT_NOT_FOUND", "Agent");
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
+    const affected = await deleteAgentStore(db, id);
+    if (affected === 0) {
+      throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${id}`);
     }
+    return c.json({ ok: true });
   });
 
   // ── Agent Templates (GitHub catalog) ────────────────────────────────
@@ -1164,161 +1198,71 @@ WHERE id = $1`,
   // ── Humans ──────────────────────────────────────────────────────────
 
   app.get("/humans", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const db = await openDatabase(workspaceName);
-
-    try {
-      const result = await db.query<{
-        id: string;
-        emoji: string;
-        created_at: string;
-      }>(`SELECT id, emoji, created_at FROM humans ORDER BY created_at ASC`);
-
-      return c.json({ humans: result.rows });
-    } finally {
-      await db.close();
-    }
+    const db = c.get("db");
+    const rows = await listHumans(db);
+    return c.json({ humans: rows });
   });
 
   app.post("/humans", validateJson(createHumanSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const db = c.get("db");
     const body = c.req.valid("json");
-    const db = await openDatabase(workspaceName);
+    const id = randomUUID().slice(0, 12);
 
     try {
-      const id = randomUUID().slice(0, 12);
-      await db.query(
-        `INSERT INTO humans (id, emoji) VALUES ($1, $2)`,
-        [id, body.emoji],
-      );
-
+      await insertHuman(db, id, body.emoji);
       return c.json({ ok: true, id }, 201);
     } catch (error: unknown) {
-      const message = errorMessage(error);
-      throw new PragmaError("CREATE_HUMAN_FAILED", 400, message);
-    } finally {
-      await db.close();
+      throw new PragmaError("CREATE_HUMAN_FAILED", 400, errorMessage(error));
     }
   });
 
   app.put("/humans/:id", validateJson(updateHumanSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const db = c.get("db");
     const id = c.req.param("id");
     const body = c.req.valid("json");
-    const db = await openDatabase(workspaceName);
 
-    try {
-      await updateOrThrow(
-        db,
-        `UPDATE humans SET emoji = $2 WHERE id = $1`,
-        [id, body.emoji],
-        "HUMAN_NOT_FOUND", "Human", id,
-      );
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
+    const affected = await updateHumanStore(db, id, body.emoji);
+    if (affected === 0) {
+      throw new PragmaError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
     }
+    return c.json({ ok: true });
   });
 
   app.delete("/humans/:id", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const db = c.get("db");
     const id = c.req.param("id");
-    const db = await openDatabase(workspaceName);
-
-    try {
-      await deleteOrThrow(db, "humans", id, "HUMAN_NOT_FOUND", "Human");
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
+    const affected = await deleteHumanStore(db, id);
+    if (affected === 0) {
+      throw new PragmaError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
     }
+    return c.json({ ok: true });
   });
 
   app.get("/tasks", validateQuery(tasksQuerySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const db = c.get("db");
     const { status, limit } = c.req.valid("query");
+    const rows = await listTasks(db, { status, limit });
 
-    const db = await openDatabase(workspaceName);
-
-    try {
-      const params: Array<string | number> = [limit];
-      let query = `
-SELECT j.id,
-       j.title,
-       j.status,
-       j.assigned_to,
-       j.output_dir,
-       j.session_id,
-       j.created_at,
-       j.completed_at,
-       j.followup_task_id,
-       j.predecessor_task_id,
-       latest_thread.id AS thread_id,
-       latest_error.payload_json AS failure_payload_json
-FROM tasks j
-LEFT JOIN LATERAL (
-  SELECT ct.id
-  FROM conversation_threads ct
-  WHERE ct.task_id = j.id
-  ORDER BY ct.created_at DESC
-  LIMIT 1
-) AS latest_thread ON TRUE
-LEFT JOIN LATERAL (
-  SELECT ce.payload_json
-  FROM conversation_events ce
-  WHERE ce.thread_id = latest_thread.id
-    AND ce.event_name = 'error'
-  ORDER BY ce.created_at DESC
-  LIMIT 1
-) AS latest_error ON TRUE
-`;
-
-      if (status) {
-        query += "WHERE status = $2\n";
-        params.push(status);
-      }
-
-      query += "ORDER BY created_at DESC\nLIMIT $1";
-
-      const result = await db.query<{
-        id: string;
-        title: string;
-        status: TaskStatus;
-        assigned_to: string | null;
-        output_dir: string | null;
-        session_id: string | null;
-        created_at: string;
-        completed_at: string | null;
-        followup_task_id: string | null;
-        predecessor_task_id: string | null;
-        thread_id: string | null;
-        failure_payload_json: string | null;
-      }>(query, params);
-
-      return c.json({
-        tasks: result.rows.map((row) => ({
-          id: row.id,
-          title: row.title,
-          status: row.status,
-          assigned_to: row.assigned_to,
-          output_dir: row.output_dir,
-          session_id: row.session_id,
-          created_at: row.created_at,
-          completed_at: row.completed_at,
-          followup_task_id: row.followup_task_id,
-          predecessor_task_id: row.predecessor_task_id,
-          thread_id: row.thread_id,
-          failure_message: extractTaskFailureMessage(row.failure_payload_json),
-        })),
-      });
-    } finally {
-      await db.close();
-    }
+    return c.json({
+      tasks: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        status: row.status,
+        assigned_to: row.assigned_to,
+        output_dir: row.output_dir,
+        session_id: row.session_id,
+        created_at: row.created_at,
+        completed_at: row.completed_at,
+        followup_task_id: row.followup_task_id,
+        predecessor_task_id: row.predecessor_task_id,
+        thread_id: row.thread_id,
+        failure_message: extractTaskFailureMessage(row.failure_payload_json),
+      })),
+    });
   });
 
   app.get("/tasks/stream", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
 
     return createSSEStream(c, {
       setup: async (writeEvent) => {
@@ -1331,12 +1275,12 @@ LEFT JOIN LATERAL (
   });
 
   app.get("/services", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     return c.json({ services: listRuntimeServices(workspaceName) });
   });
 
   app.post("/services/:serviceId/stop", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const serviceId = c.req.param("serviceId");
     const service = getRuntimeService(workspaceName, serviceId);
     if (!service) {
@@ -1351,7 +1295,7 @@ LEFT JOIN LATERAL (
   });
 
   app.get("/services/:serviceId/stream", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const serviceId = c.req.param("serviceId");
     const service = getRuntimeService(workspaceName, serviceId);
     if (!service) {
@@ -1384,18 +1328,14 @@ LEFT JOIN LATERAL (
   // Replays missed events using Last-Event-ID (the seq number),
   // then tails new events via the in-memory pub/sub.
   app.get("/conversations/:threadId/stream", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const threadId = c.req.param("threadId");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      await ensureConversationSchema(db);
-      const thread = await getThreadById(db, threadId);
-      if (!thread) {
-        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
-      }
-    } finally {
-      await db.close();
+    await ensureConversationSchema(db);
+    const thread = await getThreadById(db, threadId);
+    if (!thread) {
+      throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
     }
 
     // Parse Last-Event-ID for reconnection replay
@@ -1451,356 +1391,205 @@ LEFT JOIN LATERAL (
   });
 
   app.get("/tasks/:taskId/output/changes", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      const taskResult = await db.query<{ id: string; status: string; git_state_json: string | null; changes_diff: string | null }>(
-        `
+    const taskResult = await db.query<{ id: string; status: string; git_state_json: string | null; changes_diff: string | null }>(
+      `
 SELECT id, status, git_state_json, changes_diff
 FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [taskId],
-      );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
 
-      const workspacePaths = getWorkspacePaths(workspaceName);
+    const workspacePaths = getWorkspacePaths(workspaceName);
 
-      if ((task.status === "completed" || task.status === "cancelled") && task.changes_diff != null) {
-        return c.json({
-          roots: [join(workspacePaths.worktreesDir, taskId, "workspace")],
-          repos: [],
-          diff: task.changes_diff,
-        });
-      }
-
-      const gitState = parseTaskGitState(task.git_state_json);
-      if (!gitState) {
-        throw new PragmaError(
-          "TASK_GIT_STATE_MISSING",
-          409,
-          `Task has no git execution state: ${taskId}`,
-        );
-      }
-
-      const repoDiffs = await buildRepoDiffEntries({
-        workspacePaths,
-        taskId,
-        gitState,
-      });
-
-      const combinedDiff = repoDiffs
-        .filter((entry) => entry.diff.trim().length > 0)
-        .map((entry) => {
-          if (repoDiffs.length === 1) {
-            return entry.diff;
-          }
-          return `# repo: ${entry.repo_path}\n${entry.diff}`;
-        })
-        .join("\n\n");
-
+    if ((task.status === "completed" || task.status === "cancelled") && task.changes_diff != null) {
       return c.json({
         roots: [join(workspacePaths.worktreesDir, taskId, "workspace")],
-        repos: repoDiffs,
-        diff: combinedDiff,
+        repos: [],
+        diff: task.changes_diff,
       });
-    } finally {
-      await db.close();
     }
+
+    const gitState = parseTaskGitState(task.git_state_json);
+    if (!gitState) {
+      throw new PragmaError(
+        "TASK_GIT_STATE_MISSING",
+        409,
+        `Task has no git execution state: ${taskId}`,
+      );
+    }
+
+    const repoDiffs = await buildRepoDiffEntries({
+      workspacePaths,
+      taskId,
+      gitState,
+    });
+
+    const combinedDiff = repoDiffs
+      .filter((entry) => entry.diff.trim().length > 0)
+      .map((entry) => {
+        if (repoDiffs.length === 1) {
+          return entry.diff;
+        }
+        return `# repo: ${entry.repo_path}\n${entry.diff}`;
+      })
+      .join("\n\n");
+
+    return c.json({
+      roots: [join(workspacePaths.worktreesDir, taskId, "workspace")],
+      repos: repoDiffs,
+      diff: combinedDiff,
+    });
   });
 
   app.get("/tasks/:taskId/output/files", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
-      const files = await listOutputFiles(outputsRoot);
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
+    const files = await listOutputFiles(outputsRoot);
 
-      return c.json({
-        root: outputsRoot,
-        files,
-      });
-    } finally {
-      await db.close();
-    }
+    return c.json({
+      root: outputsRoot,
+      files,
+    });
   });
 
   app.get("/tasks/:taskId/output/file/content", validateQuery(outputFileQuerySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
     const { path: relativePath } = c.req.valid("query");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
-      const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
-      const fileInfo = await stat(absolutePath).catch(() => null);
-      if (!fileInfo?.isFile()) {
-        throw new PragmaError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
-      }
-
-      const mime = lookupMimeType(absolutePath);
-      if (!mime) {
-        throw new PragmaError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
-      }
-      const content = await readFile(absolutePath);
-      return c.body(content, 200, {
-        "content-type": mime,
-        "content-disposition": `inline; filename="${basename(absolutePath)}"`,
-        "cache-control": "no-store",
-      });
-    } finally {
-      await db.close();
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
+    const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
+    const fileInfo = await stat(absolutePath).catch(() => null);
+    if (!fileInfo?.isFile()) {
+      throw new PragmaError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
     }
+
+    const mime = lookupMimeType(absolutePath);
+    if (!mime) {
+      throw new PragmaError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
+    }
+    const content = await readFile(absolutePath);
+    return c.body(content, 200, {
+      "content-type": mime,
+      "content-disposition": `inline; filename="${basename(absolutePath)}"`,
+      "cache-control": "no-store",
+    });
   });
 
   app.get("/tasks/:taskId/output/file/download", validateQuery(outputFileQuerySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
     const { path: relativePath } = c.req.valid("query");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
-      const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
-      const fileInfo = await stat(absolutePath).catch(() => null);
-      if (!fileInfo?.isFile()) {
-        throw new PragmaError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
-      }
-
-      const mime = lookupMimeType(absolutePath);
-      if (!mime) {
-        throw new PragmaError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
-      }
-      const content = await readFile(absolutePath);
-      return c.body(content, 200, {
-        "content-type": mime,
-        "content-disposition": `attachment; filename="${basename(absolutePath)}"`,
-        "cache-control": "no-store",
-      });
-    } finally {
-      await db.close();
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
+    const { absolutePath, normalizedPath } = resolveOutputPath(outputsRoot, relativePath);
+    const fileInfo = await stat(absolutePath).catch(() => null);
+    if (!fileInfo?.isFile()) {
+      throw new PragmaError("OUTPUT_FILE_NOT_FOUND", 404, `Output file not found: ${normalizedPath}`);
     }
+
+    const mime = lookupMimeType(absolutePath);
+    if (!mime) {
+      throw new PragmaError("OUTPUT_MIME_TYPE_UNKNOWN", 409, `Unknown mime type for ${normalizedPath}`);
+    }
+    const content = await readFile(absolutePath);
+    return c.body(content, 200, {
+      "content-type": mime,
+      "content-disposition": `attachment; filename="${basename(absolutePath)}"`,
+      "cache-control": "no-store",
+    });
   });
 
   app.post("/tasks/:taskId/output/open-folder", validateJson(openOutputFolderSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      const workspacePaths = getWorkspacePaths(workspaceName);
-      const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
+    const db = c.get("db");
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const outputsRoot = await getTaskOutputsRoot(db, workspacePaths, taskId);
 
-      let targetPath = outputsRoot;
-      if (body.path) {
-        const { absolutePath } = resolveOutputPath(outputsRoot, body.path);
-        const fileInfo = await stat(absolutePath).catch(() => null);
-        if (!fileInfo) {
-          throw new PragmaError("OUTPUT_PATH_NOT_FOUND", 404, "Output path does not exist.");
-        }
-        targetPath = fileInfo.isDirectory() ? absolutePath : dirname(absolutePath);
+    let targetPath = outputsRoot;
+    if (body.path) {
+      const { absolutePath } = resolveOutputPath(outputsRoot, body.path);
+      const fileInfo = await stat(absolutePath).catch(() => null);
+      if (!fileInfo) {
+        throw new PragmaError("OUTPUT_PATH_NOT_FOUND", 404, "Output path does not exist.");
       }
-
-      await openFolder(targetPath);
-      return c.json({ ok: true, path: targetPath });
-    } finally {
-      await db.close();
+      targetPath = fileInfo.isDirectory() ? absolutePath : dirname(absolutePath);
     }
+
+    await openFolder(targetPath);
+    return c.json({ ok: true, path: targetPath });
   });
 
   app.get("/tasks/:taskId/plan", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId = c.req.param("taskId");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      const result = await db.query<{ plan: string | null }>(
-        `SELECT plan FROM tasks WHERE id = $1 LIMIT 1`,
-        [taskId],
-      );
-      const plan = result.rows[0]?.plan?.trim() || null;
-      return c.json({ plan });
-    } finally {
-      await db.close();
-    }
+    const result = await db.query<{ plan: string | null }>(
+      `SELECT plan FROM tasks WHERE id = $1 LIMIT 1`,
+      [taskId],
+    );
+    const plan = result.rows[0]?.plan?.trim() || null;
+    return c.json({ plan });
   });
 
   app.get("/tasks/:taskId/test-commands", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      const result = await db.query<{ id: string; test_commands_json: string | null }>(
-        `
+    const result = await db.query<{ id: string; test_commands_json: string | null }>(
+      `
 SELECT id, test_commands_json
 FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [taskId],
-      );
-      const row = result.rows[0];
-      if (!row) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-
-      return c.json({
-        commands: parseTaskTestCommands(row.test_commands_json),
-      });
-    } finally {
-      await db.close();
+      [taskId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
     }
+
+    return c.json({
+      commands: parseTaskTestCommands(row.test_commands_json),
+    });
   });
 
   app.put(
     "/tasks/:taskId/test-commands",
     validateJson(updateTaskTestCommandsSchema),
     async (c) => {
-      const workspaceName = await requireActiveWorkspaceName();
+      const workspaceName = c.get("workspace");
       const taskId =c.req.param("taskId");
       const body = c.req.valid("json");
-      const db = await openDatabase(workspaceName);
+      const db = c.get("db");
 
-      try {
-        const taskResult = await db.query<{ id: string }>(
-          `
+      const taskResult = await db.query<{ id: string }>(
+        `
 SELECT id
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-          [taskId],
-        );
-        const task = taskResult.rows[0];
-        if (!task) {
-          throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-        }
-
-        const normalizedCommands = normalizeTaskTestCommands(body.commands);
-        if (normalizedCommands.length === 0) {
-          throw new PragmaError(
-            "INVALID_TEST_COMMANDS",
-            400,
-            "No valid test commands were provided.",
-          );
-        }
-
-        await db.query(
-          `
-UPDATE tasks
-SET test_commands_json = $2
-WHERE id = $1
-`,
-          [taskId, JSON.stringify(normalizedCommands)],
-        );
-
-        return c.json({
-          ok: true,
-          commands: normalizedCommands,
-        });
-      } finally {
-        await db.close();
-      }
-    },
-  );
-
-  app.post("/tasks/:taskId/test-commands/run", validateJson(runTaskTestCommandSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const taskId =c.req.param("taskId");
-    const body = c.req.valid("json");
-    const db = await openDatabase(workspaceName);
-
-    try {
-      const result = await db.query<{
-        id: string;
-        test_commands_json: string | null;
-      }>(
-        `
-SELECT id, test_commands_json
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-        [taskId],
-      );
-      const row = result.rows[0];
-      if (!row) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-
-      const commands = parseTaskTestCommands(row.test_commands_json);
-      const selected = commands.find(
-        (item) => item.command === body.command && item.cwd === body.cwd,
-      );
-      if (!selected) {
-        throw new PragmaError(
-          "TEST_COMMAND_NOT_ALLOWED",
-          409,
-          "Test command is not registered for this task.",
-        );
-      }
-
-      const workspacePaths = getWorkspacePaths(workspaceName);
-      const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
-      const commandCwd = await resolveTaskCommandCwd(runRoot, selected.cwd);
-      const service = startRuntimeService({
-        workspaceName,
-        taskId,
-        label: selected.label,
-        command: selected.command,
-        requestedCwd: selected.cwd,
-        absoluteCwd: commandCwd,
-        env: {
-          ...process.env,
-          PRAGMA_WORKSPACE_NAME: workspaceName,
-          PRAGMA_TASK_ID: taskId,
-        },
-      });
-
-      return c.json({
-        ok: true,
-        service: toRuntimeServiceSummary(service),
-      });
-    } finally {
-      await db.close();
-    }
-  });
-
-  app.post("/tasks/:taskId/review", validateJson(reviewTaskSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const taskId =c.req.param("taskId");
-    const body = c.req.valid("json");
-
-    const db = await openDatabase(workspaceName);
-    try {
-      await ensureConversationSchema(db);
-
-      const taskResult = await db.query<{
-        id: string;
-        title: string;
-        status: TaskStatus;
-        assigned_to: string | null;
-        merge_retry_count: number | null;
-        git_state_json: string | null;
-        predecessor_task_id: string | null;
-        followup_task_id: string | null;
-      }>(
-        `
-SELECT id, title, status, assigned_to, merge_retry_count, git_state_json, predecessor_task_id, followup_task_id
 FROM tasks
 WHERE id = $1
 LIMIT 1
@@ -1812,195 +1601,176 @@ LIMIT 1
         throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
       }
 
-      const pushAfterMerge = body.action === "approve_and_push" || body.action === "approve_chain_and_push";
+      const normalizedCommands = normalizeTaskTestCommands(body.commands);
+      if (normalizedCommands.length === 0) {
+        throw new PragmaError(
+          "INVALID_TEST_COMMANDS",
+          400,
+          "No valid test commands were provided.",
+        );
+      }
 
-      if (body.action === "reopen") {
-        if (task.status !== "completed") {
-          throw new PragmaError(
-            "TASK_NOT_COMPLETED",
-            409,
-            `Task is not completed: ${taskId}`,
-          );
-        }
+      await db.query(
+        `
+UPDATE tasks
+SET test_commands_json = $2
+WHERE id = $1
+`,
+        [taskId, JSON.stringify(normalizedCommands)],
+      );
 
-        const thread = await getThreadByTaskId(db, taskId);
-        if (!thread) {
-          throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
-        }
+      return c.json({
+        ok: true,
+        commands: normalizedCommands,
+      });
+    },
+  );
 
-        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
-        if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-          throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
-        }
+  app.post("/tasks/:taskId/test-commands/run", validateJson(runTaskTestCommandSchema), async (c) => {
+    const workspaceName = c.get("workspace");
+    const taskId =c.req.param("taskId");
+    const body = c.req.valid("json");
+    const db = c.get("db");
 
-        await db.query(
-          `
+    const result = await db.query<{
+      id: string;
+      test_commands_json: string | null;
+    }>(
+      `
+SELECT id, test_commands_json
+FROM tasks
+WHERE id = $1
+LIMIT 1
+`,
+      [taskId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+
+    const commands = parseTaskTestCommands(row.test_commands_json);
+    const selected = commands.find(
+      (item) => item.command === body.command && item.cwd === body.cwd,
+    );
+    if (!selected) {
+      throw new PragmaError(
+        "TEST_COMMAND_NOT_ALLOWED",
+        409,
+        "Test command is not registered for this task.",
+      );
+    }
+
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
+    const commandCwd = await resolveTaskCommandCwd(runRoot, selected.cwd);
+    const service = startRuntimeService({
+      workspaceName,
+      taskId,
+      label: selected.label,
+      command: selected.command,
+      requestedCwd: selected.cwd,
+      absoluteCwd: commandCwd,
+      env: {
+        ...process.env,
+        PRAGMA_WORKSPACE_NAME: workspaceName,
+        PRAGMA_TASK_ID: taskId,
+      },
+    });
+
+    return c.json({
+      ok: true,
+      service: toRuntimeServiceSummary(service),
+    });
+  });
+
+  app.post("/tasks/:taskId/review", validateJson(reviewTaskSchema), async (c) => {
+    const workspaceName = c.get("workspace");
+    const taskId =c.req.param("taskId");
+    const body = c.req.valid("json");
+
+    const db = c.get("db");
+    await ensureConversationSchema(db);
+
+    const taskResult = await db.query<{
+      id: string;
+      title: string;
+      status: TaskStatus;
+      assigned_to: string | null;
+      merge_retry_count: number | null;
+      git_state_json: string | null;
+      predecessor_task_id: string | null;
+      followup_task_id: string | null;
+    }>(
+      `
+SELECT id, title, status, assigned_to, merge_retry_count, git_state_json, predecessor_task_id, followup_task_id
+FROM tasks
+WHERE id = $1
+LIMIT 1
+`,
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+
+    const pushAfterMerge = body.action === "approve_and_push" || body.action === "approve_chain_and_push";
+
+    if (body.action === "reopen") {
+      if (task.status !== "completed") {
+        throw new PragmaError(
+          "TASK_NOT_COMPLETED",
+          409,
+          `Task is not completed: ${taskId}`,
+        );
+      }
+
+      const thread = await getThreadByTaskId(db, taskId);
+      if (!thread) {
+        throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
+      }
+
+      const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+      if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
+        throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
+      }
+
+      await db.query(
+        `
 UPDATE tasks
 SET status = 'waiting_for_help_response',
     merge_retry_count = 0,
     completed_at = NULL
 WHERE id = $1
 `,
-          [taskId],
-        );
-        emitTaskStatus(workspaceName, taskId, "waiting_for_help_response", "review_reopen");
+        [taskId],
+      );
+      emitTaskStatus(workspaceName, taskId, "waiting_for_help_response", "review_reopen");
 
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId: thread.id,
-          turnId: latestExecuteTurn.id,
-          eventName: "task_reopened",
-          payload: {
-            from_status: "completed",
-          },
-        });
-        publishThreadUpdated(workspaceName, thread.id, "task_reopened");
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: latestExecuteTurn.id,
+        eventName: "task_reopened",
+        payload: {
+          from_status: "completed",
+        },
+      });
+      publishThreadUpdated(workspaceName, thread.id, "task_reopened");
 
-        return c.json({
-          ok: true,
-          status: "waiting_for_help_response",
-        });
-      }
+      return c.json({
+        ok: true,
+        status: "waiting_for_help_response",
+      });
+    }
 
-      if (body.action === "mark_completed") {
-        if (task.status === "completed") {
-          return c.json({
-            ok: true,
-            status: "completed",
-            merge_state: "no_changes",
-          });
-        }
-
-        if (task.status !== "pending_review") {
-          throw new PragmaError(
-            "TASK_NOT_PENDING_REVIEW",
-            409,
-            `Task is not pending review: ${taskId}`,
-          );
-        }
-
-        const nextStatus: TaskStatus = "completed";
-        const workspacePaths = getWorkspacePaths(workspaceName);
-        await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId });
-        const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
-        await mkdir(mergedOutputDir, { recursive: true });
-        await db.query(
-          `
-UPDATE tasks
-SET status = $2,
-    output_dir = $3,
-    completed_at = CURRENT_TIMESTAMP
-WHERE id = $1
-`,
-          [taskId, nextStatus, mergedOutputDir],
-        );
-        emitTaskStatus(workspaceName, taskId, nextStatus, "review_mark_completed");
-        executeRunner.abort(taskId);
-        await deleteTaskWorktree({ workspacePaths, taskId });
-
-        return c.json({
-          ok: true,
-          status: nextStatus,
-          merge_state: "no_changes",
-        });
-      }
-
-      if (body.action === "mark_chain_completed") {
-        if (task.status !== "pending_review" && task.status !== "completed") {
-          throw new PragmaError("TASK_NOT_PENDING_REVIEW", 409, `Task is not pending review: ${taskId}`);
-        }
-
-        const workspacePaths = getWorkspacePaths(workspaceName);
-        const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
-        await completeChainTasks(db, workspacePaths, chainTaskIds, emitTaskStatus, executeRunner, workspaceName, "review_mark_chain_completed");
-
+    if (body.action === "mark_completed") {
+      if (task.status === "completed") {
         return c.json({
           ok: true,
           status: "completed",
           merge_state: "no_changes",
-          chain_completed: chainTaskIds,
-        });
-      }
-
-      const isChainApprove = body.action === "approve_chain" || body.action === "approve_chain_and_push";
-
-      if (isChainApprove) {
-        if (task.status !== "pending_review") {
-          throw new PragmaError("TASK_NOT_PENDING_REVIEW", 409, `Task is not pending review: ${taskId}`);
-        }
-
-        const gitState = parseTaskGitState(task.git_state_json);
-        if (!gitState) {
-          // No git state — output-files-only chain approval, mark all chain tasks completed
-          const workspacePaths = getWorkspacePaths(workspaceName);
-          const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
-          await completeChainTasks(db, workspacePaths, chainTaskIds, emitTaskStatus, executeRunner, workspaceName, "review_chain_action");
-          return c.json({
-            ok: true,
-            status: "completed",
-            merge_state: "no_changes",
-            chain_completed: chainTaskIds,
-          });
-        }
-
-        const workspacePaths = getWorkspacePaths(workspaceName);
-        const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
-
-        // Merge only the current (last) task's branch — it has all cumulative commits
-        const mergeResult = await mergeApprovedTask({
-          workspacePaths,
-          taskId,
-          taskTitle: task.title,
-          gitState,
-        });
-
-        if (mergeResult.conflicts.length === 0) {
-          // Mark all chain tasks as completed
-          for (const chainId of chainTaskIds) {
-            const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
-            await db.query(
-              `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
-              [chainId, mergedOutputDir],
-            );
-            emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action");
-          }
-
-          await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
-
-          for (const chainId of chainTaskIds) {
-            executeRunner.abort(chainId);
-            await deleteTaskWorktree({ workspacePaths, taskId: chainId });
-          }
-
-          if (pushAfterMerge) {
-            await pushReposToOrigin(gitState, workspacePaths);
-          }
-
-          return c.json({
-            ok: true,
-            status: "completed",
-            merge_state: pushAfterMerge ? "merged_and_pushed" : "merged",
-            conflicts: [],
-            chain_completed: chainTaskIds,
-          });
-        }
-
-        // Merge conflicts — use same retry logic as normal approve
-        const retryResult = await handleMergeConflictRetry({
-          db, workspacePaths, taskId, gitState, task, mergeConflicts: mergeResult.conflicts,
-          pushAfterMerge, workspaceName, emitTaskStatus, executeRunner, statusSource: "review_chain_conflict_retry",
-        });
-        if (retryResult.outcome === "retried") {
-          return c.json(retryResult.response);
-        }
-
-        await db.query(`UPDATE tasks SET status = 'needs_fix' WHERE id = $1`, [taskId]);
-        emitTaskStatus(workspaceName, taskId, "needs_fix", "review_chain_conflict_manual");
-        return c.json({
-          ok: true,
-          status: "needs_fix",
-          merge_state: "manual_intervention_required",
-          conflicts: mergeResult.conflicts,
         });
       }
 
@@ -2012,25 +1782,74 @@ WHERE id = $1
         );
       }
 
-      const gitState = parseTaskGitState(task.git_state_json);
-      if (!gitState) {
-        // No git state — output-files-only approval, just mark completed
-        const nextStatus: TaskStatus = "completed";
-        const workspacePaths = getWorkspacePaths(workspaceName);
-        await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId });
-        const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
-        await mkdir(mergedOutputDir, { recursive: true });
-        await db.query(
-          `UPDATE tasks SET status = $2, output_dir = $3, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [taskId, nextStatus, mergedOutputDir],
-        );
-        emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
-        executeRunner.abort(taskId);
-        await deleteTaskWorktree({ workspacePaths, taskId });
-        return c.json({ ok: true, status: nextStatus, merge_state: "no_changes", conflicts: [] });
+      const nextStatus: TaskStatus = "completed";
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId });
+      const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
+      await mkdir(mergedOutputDir, { recursive: true });
+      await db.query(
+        `
+UPDATE tasks
+SET status = $2,
+    output_dir = $3,
+    completed_at = CURRENT_TIMESTAMP
+WHERE id = $1
+`,
+        [taskId, nextStatus, mergedOutputDir],
+      );
+      emitTaskStatus(workspaceName, taskId, nextStatus, "review_mark_completed");
+      executeRunner.abort(taskId);
+      await deleteTaskWorktree({ workspacePaths, taskId });
+
+      return c.json({
+        ok: true,
+        status: nextStatus,
+        merge_state: "no_changes",
+      });
+    }
+
+    if (body.action === "mark_chain_completed") {
+      if (task.status !== "pending_review" && task.status !== "completed") {
+        throw new PragmaError("TASK_NOT_PENDING_REVIEW", 409, `Task is not pending review: ${taskId}`);
       }
 
       const workspacePaths = getWorkspacePaths(workspaceName);
+      const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
+      await completeChainTasks(db, workspacePaths, chainTaskIds, emitTaskStatus, executeRunner, workspaceName, "review_mark_chain_completed");
+
+      return c.json({
+        ok: true,
+        status: "completed",
+        merge_state: "no_changes",
+        chain_completed: chainTaskIds,
+      });
+    }
+
+    const isChainApprove = body.action === "approve_chain" || body.action === "approve_chain_and_push";
+
+    if (isChainApprove) {
+      if (task.status !== "pending_review") {
+        throw new PragmaError("TASK_NOT_PENDING_REVIEW", 409, `Task is not pending review: ${taskId}`);
+      }
+
+      const gitState = parseTaskGitState(task.git_state_json);
+      if (!gitState) {
+        // No git state — output-files-only chain approval, mark all chain tasks completed
+        const workspacePaths = getWorkspacePaths(workspaceName);
+        const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
+        await completeChainTasks(db, workspacePaths, chainTaskIds, emitTaskStatus, executeRunner, workspaceName, "review_chain_action");
+        return c.json({
+          ok: true,
+          status: "completed",
+          merge_state: "no_changes",
+          chain_completed: chainTaskIds,
+        });
+      }
+
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
+
+      // Merge only the current (last) task's branch — it has all cumulative commits
       const mergeResult = await mergeApprovedTask({
         workspacePaths,
         taskId,
@@ -2039,22 +1858,22 @@ WHERE id = $1
       });
 
       if (mergeResult.conflicts.length === 0) {
-        const nextStatus: TaskStatus = "completed";
-        const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
-        await db.query(
-          `
-UPDATE tasks
-SET status = $2,
-    output_dir = $3,
-    completed_at = CURRENT_TIMESTAMP
-WHERE id = $1
-`,
-          [taskId, nextStatus, mergedOutputDir],
-        );
-        emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+        // Mark all chain tasks as completed
+        for (const chainId of chainTaskIds) {
+          const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
+          await db.query(
+            `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [chainId, mergedOutputDir],
+          );
+          emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action");
+        }
+
         await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
-        executeRunner.abort(taskId);
-        await deleteTaskWorktree({ workspacePaths, taskId });
+
+        for (const chainId of chainTaskIds) {
+          executeRunner.abort(chainId);
+          await deleteTaskWorktree({ workspacePaths, taskId: chainId });
+        }
 
         if (pushAfterMerge) {
           await pushReposToOrigin(gitState, workspacePaths);
@@ -2062,105 +1881,182 @@ WHERE id = $1
 
         return c.json({
           ok: true,
-          status: nextStatus,
+          status: "completed",
           merge_state: pushAfterMerge ? "merged_and_pushed" : "merged",
           conflicts: [],
+          chain_completed: chainTaskIds,
         });
       }
 
+      // Merge conflicts — use same retry logic as normal approve
       const retryResult = await handleMergeConflictRetry({
         db, workspacePaths, taskId, gitState, task, mergeConflicts: mergeResult.conflicts,
-        pushAfterMerge, workspaceName, emitTaskStatus, executeRunner, statusSource: "review_conflict_retry",
+        pushAfterMerge, workspaceName, emitTaskStatus, executeRunner, statusSource: "review_chain_conflict_retry",
       });
       if (retryResult.outcome === "retried") {
         return c.json(retryResult.response);
       }
 
-      if (retryResult.outcome === "missing_context") {
-        await db.query(
-          `UPDATE tasks SET status = 'needs_fix', push_after_merge = FALSE WHERE id = $1`,
-          [taskId],
-        );
-        emitTaskStatus(workspaceName, taskId, "needs_fix", "review_conflict_missing_retry_context");
-        return c.json({
-          ok: true,
-          status: "needs_fix",
-          merge_state: "manual_intervention_required",
-          conflicts: mergeResult.conflicts,
-        });
-      }
-
-      await db.query(
-        `UPDATE tasks SET status = 'needs_fix' WHERE id = $1`,
-        [taskId],
-      );
-      emitTaskStatus(workspaceName, taskId, "needs_fix", "review_conflict_manual");
+      await db.query(`UPDATE tasks SET status = 'needs_fix' WHERE id = $1`, [taskId]);
+      emitTaskStatus(workspaceName, taskId, "needs_fix", "review_chain_conflict_manual");
       return c.json({
         ok: true,
         status: "needs_fix",
         merge_state: "manual_intervention_required",
         conflicts: mergeResult.conflicts,
       });
-    } finally {
-      await db.close();
     }
+
+    if (task.status !== "pending_review") {
+      throw new PragmaError(
+        "TASK_NOT_PENDING_REVIEW",
+        409,
+        `Task is not pending review: ${taskId}`,
+      );
+    }
+
+    const gitState = parseTaskGitState(task.git_state_json);
+    if (!gitState) {
+      // No git state — output-files-only approval, just mark completed
+      const nextStatus: TaskStatus = "completed";
+      const workspacePaths = getWorkspacePaths(workspaceName);
+      await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId });
+      const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
+      await mkdir(mergedOutputDir, { recursive: true });
+      await db.query(
+        `UPDATE tasks SET status = $2, output_dir = $3, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [taskId, nextStatus, mergedOutputDir],
+      );
+      emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+      executeRunner.abort(taskId);
+      await deleteTaskWorktree({ workspacePaths, taskId });
+      return c.json({ ok: true, status: nextStatus, merge_state: "no_changes", conflicts: [] });
+    }
+
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const mergeResult = await mergeApprovedTask({
+      workspacePaths,
+      taskId,
+      taskTitle: task.title,
+      gitState,
+    });
+
+    if (mergeResult.conflicts.length === 0) {
+      const nextStatus: TaskStatus = "completed";
+      const mergedOutputDir = getTaskMainOutputDir(workspacePaths, taskId);
+      await db.query(
+        `
+UPDATE tasks
+SET status = $2,
+    output_dir = $3,
+    completed_at = CURRENT_TIMESTAMP
+WHERE id = $1
+`,
+        [taskId, nextStatus, mergedOutputDir],
+      );
+      emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+      await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
+      executeRunner.abort(taskId);
+      await deleteTaskWorktree({ workspacePaths, taskId });
+
+      if (pushAfterMerge) {
+        await pushReposToOrigin(gitState, workspacePaths);
+      }
+
+      return c.json({
+        ok: true,
+        status: nextStatus,
+        merge_state: pushAfterMerge ? "merged_and_pushed" : "merged",
+        conflicts: [],
+      });
+    }
+
+    const retryResult = await handleMergeConflictRetry({
+      db, workspacePaths, taskId, gitState, task, mergeConflicts: mergeResult.conflicts,
+      pushAfterMerge, workspaceName, emitTaskStatus, executeRunner, statusSource: "review_conflict_retry",
+    });
+    if (retryResult.outcome === "retried") {
+      return c.json(retryResult.response);
+    }
+
+    if (retryResult.outcome === "missing_context") {
+      await db.query(
+        `UPDATE tasks SET status = 'needs_fix', push_after_merge = FALSE WHERE id = $1`,
+        [taskId],
+      );
+      emitTaskStatus(workspaceName, taskId, "needs_fix", "review_conflict_missing_retry_context");
+      return c.json({
+        ok: true,
+        status: "needs_fix",
+        merge_state: "manual_intervention_required",
+        conflicts: mergeResult.conflicts,
+      });
+    }
+
+    await db.query(
+      `UPDATE tasks SET status = 'needs_fix' WHERE id = $1`,
+      [taskId],
+    );
+    emitTaskStatus(workspaceName, taskId, "needs_fix", "review_conflict_manual");
+    return c.json({
+      ok: true,
+      status: "needs_fix",
+      merge_state: "manual_intervention_required",
+      conflicts: mergeResult.conflicts,
+    });
   });
 
   app.delete("/tasks/:taskId", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await ensureConversationSchema(db);
+    const db = c.get("db");
+    await ensureConversationSchema(db);
 
-      const taskResult = await db.query<{
-        id: string;
-        status: TaskStatus;
-      }>(
-        `
+    const taskResult = await db.query<{
+      id: string;
+      status: TaskStatus;
+    }>(
+      `
 SELECT id, status
 FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [taskId],
-      );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
 
-      const workspacePaths = getWorkspacePaths(workspaceName);
+    const workspacePaths = getWorkspacePaths(workspaceName);
 
-      await db.query(
-        `
+    await db.query(
+      `
 UPDATE tasks
 SET status = 'cancelled',
     completed_at = CURRENT_TIMESTAMP
 WHERE id = $1
 `,
-        [taskId],
-      );
-      emitTaskStatus(workspaceName, taskId, "cancelled", "task_deleted");
+      [taskId],
+    );
+    emitTaskStatus(workspaceName, taskId, "cancelled", "task_deleted");
 
-      executeRunner.abort(taskId);
-      await deleteTaskWorktree({ workspacePaths, taskId });
-      await rm(getTaskMainOutputDir(workspacePaths, taskId), { recursive: true, force: true });
+    executeRunner.abort(taskId);
+    await deleteTaskWorktree({ workspacePaths, taskId });
+    await rm(getTaskMainOutputDir(workspacePaths, taskId), { recursive: true, force: true });
 
-      return c.json({ ok: true, status: "cancelled" });
-    } finally {
-      await db.close();
-    }
+    return c.json({ ok: true, status: "cancelled" });
   });
 
   app.post("/tasks", validateJson(createTaskSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const body = c.req.valid("json");
 
     const taskId =`task_${randomUUID().slice(0, 8)}`;
     const status: TaskStatus = body.status;
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
     try {
       await db.query(
@@ -2180,15 +2076,13 @@ VALUES ($1, $2, $3, $4, $5, $6)
       emitTaskStatus(workspaceName, taskId, status, "task_created");
     } catch (error: unknown) {
       throw new PragmaError("CREATE_TASK_FAILED", 400, errorMessage(error));
-    } finally {
-      await db.close();
     }
 
     return c.json({ id: taskId }, 201);
   });
 
   app.post("/tasks/execute", validateJson(createExecuteTaskSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const body = c.req.valid("json");
     const prompt = body.prompt;
     const reasoningEffort = body.reasoning_effort;
@@ -2196,11 +2090,11 @@ VALUES ($1, $2, $3, $4, $5, $6)
     const taskId =`task_${randomUUID().slice(0, 8)}`;
     const threadId = `thread_${randomUUID().slice(0, 12)}`;
 
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     try {
       await ensureConversationSchema(db);
 
-      const orchestrator = await getAgentRow(db, DEFAULT_AGENT_ID);
+      const orchestrator = await getAgentById(db, DEFAULT_AGENT_ID);
       if (!orchestrator) {
         throw new PragmaError(
           "ORCHESTRATOR_NOT_FOUND",
@@ -2216,7 +2110,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
           throw new PragmaError("INVALID_RECIPIENT", 400, "recipient_agent_id cannot be empty.");
         }
 
-        const recipient = await getAgentRow(db, requestedRecipientAgentId);
+        const recipient = await getAgentById(db, requestedRecipientAgentId);
         if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
           throw new PragmaError(
             "INVALID_RECIPIENT",
@@ -2271,15 +2165,13 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
         throw error;
       }
       throw new PragmaError("CREATE_EXECUTE_TASK_FAILED", 400, errorMessage(error));
-    } finally {
-      await db.close();
     }
 
     return c.json({ task_id: taskId }, 201);
   });
 
   app.post("/tasks/:taskId/followup", validateJson(createFollowupTaskSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const parentTaskId = c.req.param("taskId");
     const body = c.req.valid("json");
     const prompt = body.prompt;
@@ -2288,7 +2180,7 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
     const newTaskId = `task_${randomUUID().slice(0, 8)}`;
     const threadId = `thread_${randomUUID().slice(0, 12)}`;
 
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     try {
       await ensureConversationSchema(db);
 
@@ -2312,7 +2204,7 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
         );
       }
 
-      const orchestrator = await getAgentRow(db, DEFAULT_AGENT_ID);
+      const orchestrator = await getAgentById(db, DEFAULT_AGENT_ID);
       if (!orchestrator) {
         throw new PragmaError("ORCHESTRATOR_NOT_FOUND", 400, `Orchestrator agent is missing: ${DEFAULT_AGENT_ID}`);
       }
@@ -2320,7 +2212,7 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
       let requestedRecipientAgentId: string | null = null;
       if (body.recipient_agent_id) {
         requestedRecipientAgentId = body.recipient_agent_id;
-        const recipient = await getAgentRow(db, requestedRecipientAgentId);
+        const recipient = await getAgentById(db, requestedRecipientAgentId);
         if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
           throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${requestedRecipientAgentId}`);
         }
@@ -2377,83 +2269,77 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
         throw error;
       }
       throw new PragmaError("CREATE_FOLLOWUP_TASK_FAILED", 400, errorMessage(error));
-    } finally {
-      await db.close();
     }
 
     return c.json({ task_id: newTaskId, parent_task_id: parentTaskId }, 201);
   });
 
   app.post("/tasks/:taskId/recipient", validateJson(setTaskRecipientSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
     const recipientAgentId = body.recipient_agent_id;
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      await ensureConversationSchema(db);
-      const taskResult = await db.query<{ id: string; status: TaskStatus }>(
-        `
+    await ensureConversationSchema(db);
+    const taskResult = await db.query<{ id: string; status: TaskStatus }>(
+      `
 SELECT id, status
 FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [taskId],
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+    if (task.status !== "waiting_for_recipient") {
+      throw new PragmaError(
+        "TASK_NOT_WAITING_FOR_RECIPIENT",
+        409,
+        `Task is not waiting for recipient input: ${taskId}`,
       );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-      if (task.status !== "waiting_for_recipient") {
-        throw new PragmaError(
-          "TASK_NOT_WAITING_FOR_RECIPIENT",
-          409,
-          `Task is not waiting for recipient input: ${taskId}`,
-        );
-      }
+    }
 
-      const recipient = await getAgentRow(db, recipientAgentId);
-      if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-        throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${recipientAgentId}`);
-      }
+    const recipient = await getAgentById(db, recipientAgentId);
+    if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+      throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${recipientAgentId}`);
+    }
 
-      const thread = await getThreadByTaskId(db, taskId);
-      if (!thread) {
-        throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
-      }
+    const thread = await getThreadByTaskId(db, taskId);
+    if (!thread) {
+      throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
+    }
 
-      const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
-      if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-        throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
-      }
+    const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+    if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
+      throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
+    }
 
-      await db.query(
-        `
+    await db.query(
+      `
 UPDATE tasks
 SET status = 'queued'
 WHERE id = $1
 `,
-        [taskId],
-      );
-      emitTaskStatus(workspaceName, taskId, "queued", "human_response");
-      emitTaskStatus(workspaceName, taskId, "queued", "recipient_selected");
+      [taskId],
+    );
+    emitTaskStatus(workspaceName, taskId, "queued", "human_response");
+    emitTaskStatus(workspaceName, taskId, "queued", "recipient_selected");
 
-      executeRunner.execute({
-        workspaceName,
-        taskId,
-        threadId: thread.id,
-        prompt: latestExecuteTurn.user_message,
-        requestedRecipientAgentId: recipientAgentId,
-        reasoningEffort: requireReasoningEffort(
-          latestExecuteTurn.reasoning_effort,
-          `latest execute turn for task ${taskId}`,
-        ),
-      });
-    } finally {
-      await db.close();
-    }
+    executeRunner.execute({
+      workspaceName,
+      taskId,
+      threadId: thread.id,
+      prompt: latestExecuteTurn.user_message,
+      requestedRecipientAgentId: recipientAgentId,
+      reasoningEffort: requireReasoningEffort(
+        latestExecuteTurn.reasoning_effort,
+        `latest execute turn for task ${taskId}`,
+      ),
+    });
 
     return c.json({ ok: true });
   });
@@ -2462,52 +2348,48 @@ WHERE id = $1
     "/tasks/:taskId/agent/select-recipient",
     validateJson(agentSelectRecipientSchema),
     async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
     const selectedAgentId = body.agent_id;
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      await ensureConversationSchema(db);
-      const taskResult = await db.query<{ id: string; status: TaskStatus }>(
-        `
+    await ensureConversationSchema(db);
+    const taskResult = await db.query<{ id: string; status: TaskStatus }>(
+      `
 SELECT id, status
 FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-        [taskId],
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+    if (task.status !== "orchestrating") {
+      throw new PragmaError(
+        "TASK_NOT_ORCHESTRATING",
+        409,
+        `Task is not orchestrating: ${taskId}`,
       );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-      if (task.status !== "orchestrating") {
-        throw new PragmaError(
-          "TASK_NOT_ORCHESTRATING",
-          409,
-          `Task is not orchestrating: ${taskId}`,
-        );
-      }
+    }
 
-      const recipient = await getAgentRow(db, selectedAgentId);
-      if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-        throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${selectedAgentId}`);
-      }
+    const recipient = await getAgentById(db, selectedAgentId);
+    if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+      throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${selectedAgentId}`);
+    }
 
-      await db.query(
-        `
+    await db.query(
+      `
 UPDATE tasks
 SET assigned_to = $2
 WHERE id = $1
 `,
-        [taskId, selectedAgentId],
-      );
+      [taskId, selectedAgentId],
+    );
 
-    } finally {
-      await db.close();
-    }
 
     return c.json({ ok: true, assigned_to: selectedAgentId });
   });
@@ -2516,200 +2398,74 @@ WHERE id = $1
     "/tasks/:taskId/agent/test-commands",
     validateJson(agentSubmitTestCommandsSchema),
     async (c) => {
-      const workspaceName = await requireActiveWorkspaceName();
+      const workspaceName = c.get("workspace");
       const taskId =c.req.param("taskId");
       const body = c.req.valid("json");
 
-      const db = await openDatabase(workspaceName);
-      try {
-        await ensureConversationSchema(db);
-        const taskResult = await db.query<{
-          id: string;
-          status: TaskStatus;
-          assigned_to: string | null;
-          test_commands_json: string | null;
-        }>(
-          `
+      const db = c.get("db");
+      await ensureConversationSchema(db);
+      const taskResult = await db.query<{
+        id: string;
+        status: TaskStatus;
+        assigned_to: string | null;
+        test_commands_json: string | null;
+      }>(
+        `
 SELECT id, status, assigned_to, test_commands_json
 FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
-          [taskId],
+        [taskId],
+      );
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+      }
+      if (task.status !== "running" && task.status !== "pending_review") {
+        throw new PragmaError(
+          "TASK_NOT_ACCEPTING_TEST_COMMANDS",
+          409,
+          `Task cannot accept test commands in status: ${task.status}`,
         );
-        const task = taskResult.rows[0];
-        if (!task) {
-          throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-        }
-        if (task.status !== "running" && task.status !== "pending_review") {
-          throw new PragmaError(
-            "TASK_NOT_ACCEPTING_TEST_COMMANDS",
-            409,
-            `Task cannot accept test commands in status: ${task.status}`,
-          );
-        }
+      }
 
-        const normalizedCommands = normalizeTaskTestCommands(body.commands);
-        if (normalizedCommands.length === 0) {
-          throw new PragmaError(
-            "INVALID_TEST_COMMANDS",
-            400,
-            "No valid test commands were provided.",
-          );
-        }
-
-        const disallowed = normalizedCommands.find((entry) =>
-          isDisallowedHumanOnlyTestCommand(entry.command),
+      const normalizedCommands = normalizeTaskTestCommands(body.commands);
+      if (normalizedCommands.length === 0) {
+        throw new PragmaError(
+          "INVALID_TEST_COMMANDS",
+          400,
+          "No valid test commands were provided.",
         );
-        if (disallowed) {
-          throw new PragmaError(
-            "INVALID_TEST_COMMAND_POLICY",
-            400,
-            `Disallowed command for task window: ${disallowed.command}`,
-          );
-        }
+      }
 
-        const existingCommands = parseTaskTestCommands(task.test_commands_json);
-        const combinedCommands = body.replace
-          ? normalizedCommands
-          : normalizeTaskTestCommands(
-              [...existingCommands, ...normalizedCommands],
-              Number.MAX_SAFE_INTEGER,
-            ).slice(-8);
+      const disallowed = normalizedCommands.find((entry) =>
+        isDisallowedHumanOnlyTestCommand(entry.command),
+      );
+      if (disallowed) {
+        throw new PragmaError(
+          "INVALID_TEST_COMMAND_POLICY",
+          400,
+          `Disallowed command for task window: ${disallowed.command}`,
+        );
+      }
 
-        await db.query(
-          `
+      const existingCommands = parseTaskTestCommands(task.test_commands_json);
+      const combinedCommands = body.replace
+        ? normalizedCommands
+        : normalizeTaskTestCommands(
+            [...existingCommands, ...normalizedCommands],
+            Number.MAX_SAFE_INTEGER,
+          ).slice(-8);
+
+      await db.query(
+        `
 UPDATE tasks
 SET test_commands_json = $2
 WHERE id = $1
 `,
-          [taskId, JSON.stringify(combinedCommands)],
-        );
-
-        const thread = await getThreadByTaskId(db, taskId);
-        if (thread) {
-          const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
-          await insertEvent(db, {
-            id: `evt_${randomUUID().slice(0, 12)}`,
-            threadId: thread.id,
-            turnId: body.turn_id || latestExecuteTurn?.id || null,
-            eventName: "worker_test_commands_submitted",
-            payload: {
-              commands: combinedCommands,
-              replace: Boolean(body.replace),
-              agent_id: body.agent_id ?? task.assigned_to ?? null,
-            },
-          });
-          publishThreadUpdated(workspaceName, thread.id, "worker_test_commands_submitted");
-        }
-
-        return c.json({
-          ok: true,
-          commands: combinedCommands,
-        });
-      } finally {
-        await db.close();
-      }
-    },
-  );
-
-  app.post("/tasks/:taskId/agent/ask-question", validateJson(agentAskQuestionSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const taskId =c.req.param("taskId");
-    const body = c.req.valid("json");
-
-    const db = await openDatabase(workspaceName);
-    try {
-      await ensureConversationSchema(db);
-      const taskResult = await db.query<{ id: string; status: TaskStatus; assigned_to: string | null }>(
-        `
-SELECT id, status, assigned_to
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-        [taskId],
+        [taskId, JSON.stringify(combinedCommands)],
       );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-      if (task.status !== "running" && task.status !== "planning") {
-        throw new PragmaError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
-      }
-
-      const previousStatus = task.status;
-
-      await db.query(
-        `
-UPDATE tasks
-SET status = 'waiting_for_question_response'
-WHERE id = $1
-`,
-        [taskId],
-      );
-      emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "worker_ask_question");
-
-      const thread = await getThreadByTaskId(db, taskId);
-      if (thread) {
-        const latestTurn = thread.mode === "plan"
-          ? await getLatestPlanTurn(db, thread.id)
-          : await getLatestExecuteTurn(db, thread.id);
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId: thread.id,
-          turnId: body.turn_id || latestTurn?.id || null,
-          eventName: "worker_question_requested",
-          payload: {
-            question: body.question,
-            details: body.details ?? null,
-            options: body.options ?? null,
-            agent_id: body.agent_id ?? task.assigned_to ?? null,
-            previous_status: previousStatus,
-          },
-        });
-      }
-
-      return c.json({ ok: true, status: "waiting_for_question_response" });
-    } finally {
-      await db.close();
-    }
-  });
-
-  app.post("/tasks/:taskId/agent/request-help", validateJson(agentRequestHelpSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const taskId =c.req.param("taskId");
-    const body = c.req.valid("json");
-
-    const db = await openDatabase(workspaceName);
-    try {
-      await ensureConversationSchema(db);
-      const taskResult = await db.query<{ id: string; status: TaskStatus; assigned_to: string | null }>(
-        `
-SELECT id, status, assigned_to
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-        [taskId],
-      );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-      if (task.status !== "running") {
-        throw new PragmaError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
-      }
-
-      await db.query(
-        `
-UPDATE tasks
-SET status = 'waiting_for_help_response'
-WHERE id = $1
-`,
-        [taskId],
-      );
-      emitTaskStatus(workspaceName, taskId, "waiting_for_help_response", "worker_request_help");
 
       const thread = await getThreadByTaskId(db, taskId);
       if (thread) {
@@ -2718,27 +2474,141 @@ WHERE id = $1
           id: `evt_${randomUUID().slice(0, 12)}`,
           threadId: thread.id,
           turnId: body.turn_id || latestExecuteTurn?.id || null,
-          eventName: "worker_help_requested",
+          eventName: "worker_test_commands_submitted",
           payload: {
-            summary: body.summary,
-            details: body.details ?? null,
+            commands: combinedCommands,
+            replace: Boolean(body.replace),
             agent_id: body.agent_id ?? task.assigned_to ?? null,
           },
         });
+        publishThreadUpdated(workspaceName, thread.id, "worker_test_commands_submitted");
       }
 
-      return c.json({ ok: true, status: "waiting_for_help_response" });
-    } finally {
-      await db.close();
+      return c.json({
+        ok: true,
+        commands: combinedCommands,
+      });
+    },
+  );
+
+  app.post("/tasks/:taskId/agent/ask-question", validateJson(agentAskQuestionSchema), async (c) => {
+    const workspaceName = c.get("workspace");
+    const taskId =c.req.param("taskId");
+    const body = c.req.valid("json");
+
+    const db = c.get("db");
+    await ensureConversationSchema(db);
+    const taskResult = await db.query<{ id: string; status: TaskStatus; assigned_to: string | null }>(
+      `
+SELECT id, status, assigned_to
+FROM tasks
+WHERE id = $1
+LIMIT 1
+`,
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
     }
+    if (task.status !== "running" && task.status !== "planning") {
+      throw new PragmaError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
+    }
+
+    const previousStatus = task.status;
+
+    await db.query(
+      `
+UPDATE tasks
+SET status = 'waiting_for_question_response'
+WHERE id = $1
+`,
+      [taskId],
+    );
+    emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "worker_ask_question");
+
+    const thread = await getThreadByTaskId(db, taskId);
+    if (thread) {
+      const latestTurn = thread.mode === "plan"
+        ? await getLatestPlanTurn(db, thread.id)
+        : await getLatestExecuteTurn(db, thread.id);
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: body.turn_id || latestTurn?.id || null,
+        eventName: "worker_question_requested",
+        payload: {
+          question: body.question,
+          details: body.details ?? null,
+          options: body.options ?? null,
+          agent_id: body.agent_id ?? task.assigned_to ?? null,
+          previous_status: previousStatus,
+        },
+      });
+    }
+
+    return c.json({ ok: true, status: "waiting_for_question_response" });
+  });
+
+  app.post("/tasks/:taskId/agent/request-help", validateJson(agentRequestHelpSchema), async (c) => {
+    const workspaceName = c.get("workspace");
+    const taskId =c.req.param("taskId");
+    const body = c.req.valid("json");
+
+    const db = c.get("db");
+    await ensureConversationSchema(db);
+    const taskResult = await db.query<{ id: string; status: TaskStatus; assigned_to: string | null }>(
+      `
+SELECT id, status, assigned_to
+FROM tasks
+WHERE id = $1
+LIMIT 1
+`,
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+    if (task.status !== "running") {
+      throw new PragmaError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
+    }
+
+    await db.query(
+      `
+UPDATE tasks
+SET status = 'waiting_for_help_response'
+WHERE id = $1
+`,
+      [taskId],
+    );
+    emitTaskStatus(workspaceName, taskId, "waiting_for_help_response", "worker_request_help");
+
+    const thread = await getThreadByTaskId(db, taskId);
+    if (thread) {
+      const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: body.turn_id || latestExecuteTurn?.id || null,
+        eventName: "worker_help_requested",
+        payload: {
+          summary: body.summary,
+          details: body.details ?? null,
+          agent_id: body.agent_id ?? task.assigned_to ?? null,
+        },
+      });
+    }
+
+    return c.json({ ok: true, status: "waiting_for_help_response" });
   });
 
   app.post("/tasks/:taskId/stop", validateJson(stopTaskSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId = c.req.param("taskId");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     let requeue: {
       threadId: string;
       prompt: string;
@@ -2748,91 +2618,87 @@ WHERE id = $1
       followUpMessage: string;
     } | null = null;
 
-    try {
-      await ensureConversationSchema(db);
-      const taskResult = await db.query<{
-        id: string;
-        status: TaskStatus;
-        assigned_to: string | null;
-      }>(
-        `SELECT id, status, assigned_to FROM tasks WHERE id = $1 LIMIT 1`,
-        [taskId],
+    await ensureConversationSchema(db);
+    const taskResult = await db.query<{
+      id: string;
+      status: TaskStatus;
+      assigned_to: string | null;
+    }>(
+      `SELECT id, status, assigned_to FROM tasks WHERE id = $1 LIMIT 1`,
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+
+    const stoppable = task.status === "running" || task.status === "orchestrating" || task.status === "queued";
+    if (!stoppable) {
+      throw new PragmaError(
+        "TASK_NOT_STOPPABLE",
+        409,
+        `Task is not in a stoppable state (${task.status}): ${taskId}`,
       );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
+    }
 
-      const stoppable = task.status === "running" || task.status === "orchestrating" || task.status === "queued";
-      if (!stoppable) {
-        throw new PragmaError(
-          "TASK_NOT_STOPPABLE",
-          409,
-          `Task is not in a stoppable state (${task.status}): ${taskId}`,
-        );
-      }
+    executeRunner.abort(taskId);
 
-      executeRunner.abort(taskId);
+    const thread = await getThreadByTaskId(db, taskId);
 
-      const thread = await getThreadByTaskId(db, taskId);
+    if (body.message && thread) {
+      // User sent a redirect message — insert it and requeue
+      await insertMessage(db, {
+        id: `msg_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: null,
+        role: "user",
+        content: body.message,
+      });
 
-      if (body.message && thread) {
-        // User sent a redirect message — insert it and requeue
-        await insertMessage(db, {
-          id: `msg_${randomUUID().slice(0, 12)}`,
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: null,
+        eventName: "task_stopped",
+        payload: { message: body.message, previous_status: task.status },
+      });
+
+      await db.query(`UPDATE tasks SET status = 'queued' WHERE id = $1`, [taskId]);
+      emitTaskStatus(workspaceName, taskId, "queued", "task_stopped");
+      publishThreadUpdated(workspaceName, thread.id, "task_stopped");
+
+      const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+      if (latestExecuteTurn && task.assigned_to) {
+        requeue = {
           threadId: thread.id,
-          turnId: null,
-          role: "user",
-          content: body.message,
-        });
-
+          prompt: latestExecuteTurn.user_message,
+          recipientAgentId: task.assigned_to,
+          reasoningEffort: requireReasoningEffort(
+            latestExecuteTurn.reasoning_effort,
+            `latest execute turn for task ${taskId}`,
+          ),
+          resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
+          followUpMessage: body.message,
+        };
+      }
+    } else {
+      // No message — just stop
+      if (thread) {
         await insertEvent(db, {
           id: `evt_${randomUUID().slice(0, 12)}`,
           threadId: thread.id,
           turnId: null,
           eventName: "task_stopped",
-          payload: { message: body.message, previous_status: task.status },
+          payload: { previous_status: task.status },
         });
-
-        await db.query(`UPDATE tasks SET status = 'queued' WHERE id = $1`, [taskId]);
-        emitTaskStatus(workspaceName, taskId, "queued", "task_stopped");
         publishThreadUpdated(workspaceName, thread.id, "task_stopped");
-
-        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
-        if (latestExecuteTurn && task.assigned_to) {
-          requeue = {
-            threadId: thread.id,
-            prompt: latestExecuteTurn.user_message,
-            recipientAgentId: task.assigned_to,
-            reasoningEffort: requireReasoningEffort(
-              latestExecuteTurn.reasoning_effort,
-              `latest execute turn for task ${taskId}`,
-            ),
-            resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
-            followUpMessage: body.message,
-          };
-        }
-      } else {
-        // No message — just stop
-        if (thread) {
-          await insertEvent(db, {
-            id: `evt_${randomUUID().slice(0, 12)}`,
-            threadId: thread.id,
-            turnId: null,
-            eventName: "task_stopped",
-            payload: { previous_status: task.status },
-          });
-          publishThreadUpdated(workspaceName, thread.id, "task_stopped");
-        }
-
-        await db.query(
-          `UPDATE tasks SET status = 'waiting_for_question_response' WHERE id = $1`,
-          [taskId],
-        );
-        emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "task_stopped");
       }
-    } finally {
-      await db.close();
+
+      await db.query(
+        `UPDATE tasks SET status = 'waiting_for_question_response' WHERE id = $1`,
+        [taskId],
+      );
+      emitTaskStatus(workspaceName, taskId, "waiting_for_question_response", "task_stopped");
     }
 
     if (requeue) {
@@ -2853,11 +2719,11 @@ WHERE id = $1
   });
 
   app.post("/tasks/:taskId/respond", validateJson(taskRespondSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     let requeue: {
       threadId: string;
       prompt: string;
@@ -2879,173 +2745,169 @@ WHERE id = $1
       requestedRecipientAgentId?: string | null;
     } | null = null;
 
-    try {
-      await ensureConversationSchema(db);
-      const taskResult = await db.query<{
-        id: string;
-        status: TaskStatus;
-        assigned_to: string | null;
-      }>(
-        `
+    await ensureConversationSchema(db);
+    const taskResult = await db.query<{
+      id: string;
+      status: TaskStatus;
+      assigned_to: string | null;
+    }>(
+      `
 SELECT id, status, assigned_to
 FROM tasks
 WHERE id = $1
 LIMIT 1
 `,
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+    if (
+      task.status !== "waiting_for_question_response" &&
+      task.status !== "waiting_for_help_response" &&
+      task.status !== "pending_review" &&
+      task.status !== "completed"
+    ) {
+      throw new PragmaError(
+        "TASK_NOT_WAITING_FOR_RESPONSE",
+        409,
+        `Task is not waiting for a human response: ${taskId}`,
+      );
+    }
+
+    const thread = await getThreadByTaskId(db, taskId);
+    if (!thread) {
+      throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
+    }
+
+    // Plan threads: transition back to planning and start a continuation turn
+    if (thread.mode === "plan") {
+      const latestPlanTurn = await getLatestPlanTurn(db, thread.id);
+
+      const continuationTurnId = `turn_${randomUUID().slice(0, 12)}`;
+      const continuationMsgId = `msg_${randomUUID().slice(0, 12)}`;
+
+      await insertMessage(db, {
+        id: `msg_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: null,
+        role: "user",
+        content: body.message,
+      });
+
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: null,
+        eventName: "human_response_received",
+        payload: {
+          message: body.message,
+          responded_to_status: task.status,
+        },
+      });
+
+      const reasoningEffort = latestPlanTurn?.reasoning_effort ?? "high";
+
+      await createTurn(db, {
+        id: continuationTurnId,
+        threadId: thread.id,
+        mode: "plan",
+        userMessage: body.message,
+        reasoningEffort,
+        requestedRecipientAgentId: latestPlanTurn?.requested_recipient_agent_id ?? null,
+      });
+
+      await insertMessage(db, {
+        id: continuationMsgId,
+        threadId: thread.id,
+        turnId: continuationTurnId,
+        role: "user",
+        content: body.message,
+      });
+
+      await db.query(
+        `UPDATE tasks SET status = 'planning' WHERE id = $1`,
         [taskId],
       );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-      if (
-        task.status !== "waiting_for_question_response" &&
-        task.status !== "waiting_for_help_response" &&
-        task.status !== "pending_review" &&
-        task.status !== "completed"
-      ) {
+      emitTaskStatus(workspaceName, taskId, "planning", "plan_question_responded");
+      publishThreadUpdated(workspaceName, thread.id, "human_response_received");
+
+      planContinuation = {
+        threadId: thread.id,
+        turnId: continuationTurnId,
+        userMessageId: continuationMsgId,
+        message: body.message,
+        harness: thread.harness,
+        modelLabel: thread.model_label,
+        modelId: thread.model_id,
+        reasoningEffort,
+        requestedRecipientAgentId: latestPlanTurn?.requested_recipient_agent_id ?? null,
+      };
+    } else {
+      // Execute threads: requeue via executeRunner
+      if (!task.assigned_to) {
         throw new PragmaError(
-          "TASK_NOT_WAITING_FOR_RESPONSE",
+          "TASK_MISSING_ASSIGNED_WORKER",
           409,
-          `Task is not waiting for a human response: ${taskId}`,
+          `Task has no assigned worker to resume: ${taskId}`,
+        );
+      }
+      const resumeWorker = await getAgentById(db, task.assigned_to);
+      if (!resumeWorker || resumeWorker.id === DEFAULT_AGENT_ID) {
+        throw new PragmaError(
+          "TASK_INVALID_ASSIGNED_WORKER",
+          409,
+          `Assigned worker is invalid for task resume: ${taskId}`,
         );
       }
 
-      const thread = await getThreadByTaskId(db, taskId);
-      if (!thread) {
-        throw new PragmaError("TASK_THREAD_NOT_FOUND", 404, `No conversation thread found for task: ${taskId}`);
+      const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+      if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
+        throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
       }
 
-      // Plan threads: transition back to planning and start a continuation turn
-      if (thread.mode === "plan") {
-        const latestPlanTurn = await getLatestPlanTurn(db, thread.id);
+      await insertMessage(db, {
+        id: `msg_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: null,
+        role: "user",
+        content: body.message,
+      });
 
-        const continuationTurnId = `turn_${randomUUID().slice(0, 12)}`;
-        const continuationMsgId = `msg_${randomUUID().slice(0, 12)}`;
-
-        await insertMessage(db, {
-          id: `msg_${randomUUID().slice(0, 12)}`,
-          threadId: thread.id,
-          turnId: null,
-          role: "user",
-          content: body.message,
-        });
-
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId: thread.id,
-          turnId: null,
-          eventName: "human_response_received",
-          payload: {
-            message: body.message,
-            responded_to_status: task.status,
-          },
-        });
-
-        const reasoningEffort = latestPlanTurn?.reasoning_effort ?? "high";
-
-        await createTurn(db, {
-          id: continuationTurnId,
-          threadId: thread.id,
-          mode: "plan",
-          userMessage: body.message,
-          reasoningEffort,
-          requestedRecipientAgentId: latestPlanTurn?.requested_recipient_agent_id ?? null,
-        });
-
-        await insertMessage(db, {
-          id: continuationMsgId,
-          threadId: thread.id,
-          turnId: continuationTurnId,
-          role: "user",
-          content: body.message,
-        });
-
-        await db.query(
-          `UPDATE tasks SET status = 'planning' WHERE id = $1`,
-          [taskId],
-        );
-        emitTaskStatus(workspaceName, taskId, "planning", "plan_question_responded");
-        publishThreadUpdated(workspaceName, thread.id, "human_response_received");
-
-        planContinuation = {
-          threadId: thread.id,
-          turnId: continuationTurnId,
-          userMessageId: continuationMsgId,
+      await insertEvent(db, {
+        id: `evt_${randomUUID().slice(0, 12)}`,
+        threadId: thread.id,
+        turnId: latestExecuteTurn.id,
+        eventName: "human_response_received",
+        payload: {
           message: body.message,
-          harness: thread.harness,
-          modelLabel: thread.model_label,
-          modelId: thread.model_id,
-          reasoningEffort,
-          requestedRecipientAgentId: latestPlanTurn?.requested_recipient_agent_id ?? null,
-        };
-      } else {
-        // Execute threads: requeue via executeRunner
-        if (!task.assigned_to) {
-          throw new PragmaError(
-            "TASK_MISSING_ASSIGNED_WORKER",
-            409,
-            `Task has no assigned worker to resume: ${taskId}`,
-          );
-        }
-        const resumeWorker = await getAgentRow(db, task.assigned_to);
-        if (!resumeWorker || resumeWorker.id === DEFAULT_AGENT_ID) {
-          throw new PragmaError(
-            "TASK_INVALID_ASSIGNED_WORKER",
-            409,
-            `Assigned worker is invalid for task resume: ${taskId}`,
-          );
-        }
+          responded_to_status: task.status,
+        },
+      });
 
-        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
-        if (!latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
-          throw new PragmaError("NO_EXECUTE_PROMPT", 409, "No execute task prompt is available for this task.");
-        }
-
-        await insertMessage(db, {
-          id: `msg_${randomUUID().slice(0, 12)}`,
-          threadId: thread.id,
-          turnId: null,
-          role: "user",
-          content: body.message,
-        });
-
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId: thread.id,
-          turnId: latestExecuteTurn.id,
-          eventName: "human_response_received",
-          payload: {
-            message: body.message,
-            responded_to_status: task.status,
-          },
-        });
-
-        await db.query(
-          `
+      await db.query(
+        `
 UPDATE tasks
 SET status = 'queued'
 WHERE id = $1
 `,
-          [taskId],
-        );
-        emitTaskStatus(workspaceName, taskId, "queued", "execute_question_responded");
-        publishThreadUpdated(workspaceName, thread.id, "human_response_received");
+        [taskId],
+      );
+      emitTaskStatus(workspaceName, taskId, "queued", "execute_question_responded");
+      publishThreadUpdated(workspaceName, thread.id, "human_response_received");
 
-        requeue = {
-          threadId: thread.id,
-          prompt: latestExecuteTurn.user_message,
-          recipientAgentId: resumeWorker.id,
-          reasoningEffort: requireReasoningEffort(
-            latestExecuteTurn.reasoning_effort,
-            `latest execute turn for task ${taskId}`,
-          ),
-          resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
-          followUpMessage: body.message,
-        };
-      }
-    } finally {
-      await db.close();
+      requeue = {
+        threadId: thread.id,
+        prompt: latestExecuteTurn.user_message,
+        recipientAgentId: resumeWorker.id,
+        reasoningEffort: requireReasoningEffort(
+          latestExecuteTurn.reasoning_effort,
+          `latest execute turn for task ${taskId}`,
+        ),
+        resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
+        followUpMessage: body.message,
+      };
     }
 
     if (requeue) {
@@ -3085,92 +2947,88 @@ WHERE id = $1
     "/conversations/:threadId/turns/:turnId/agent/select-recipient",
     validateJson(planSelectRecipientSchema),
     async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const threadId = c.req.param("threadId");
     const turnId = c.req.param("turnId");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await ensureConversationSchema(db);
+    const db = c.get("db");
+    await ensureConversationSchema(db);
 
-      const turnResult = await db.query<{
-        id: string;
-        thread_id: string;
-        mode: "chat" | "plan" | "execute";
-      }>(
-        `
+    const turnResult = await db.query<{
+      id: string;
+      thread_id: string;
+      mode: "chat" | "plan" | "execute";
+    }>(
+      `
 SELECT id, thread_id, mode
 FROM conversation_turns
 WHERE id = $1
   AND thread_id = $2
 LIMIT 1
 `,
-        [turnId, threadId],
+      [turnId, threadId],
+    );
+
+    const turn = turnResult.rows[0];
+    if (!turn) {
+      throw new PragmaError(
+        "TURN_NOT_FOUND",
+        404,
+        `Conversation turn not found: ${turnId}`,
       );
+    }
+    if (turn.mode !== "plan") {
+      throw new PragmaError(
+        "TURN_NOT_PLAN_MODE",
+        409,
+        `Turn is not in plan mode: ${turnId}`,
+      );
+    }
 
-      const turn = turnResult.rows[0];
-      if (!turn) {
-        throw new PragmaError(
-          "TURN_NOT_FOUND",
-          404,
-          `Conversation turn not found: ${turnId}`,
-        );
-      }
-      if (turn.mode !== "plan") {
-        throw new PragmaError(
-          "TURN_NOT_PLAN_MODE",
-          409,
-          `Turn is not in plan mode: ${turnId}`,
-        );
-      }
+    const selectedAgentId = body.agent_id;
+    const recipient = await getAgentById(db, selectedAgentId);
+    if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+      const candidates = await listPlanWorkerCandidates(db, DEFAULT_AGENT_ID);
+      const validAgentIds = candidates.map((candidate) => candidate.id);
+      const validSuffix =
+        validAgentIds.length > 0
+          ? ` Valid worker ids: ${validAgentIds.join(", ")}.`
+          : " No worker agents are currently available.";
+      return c.json(
+        {
+          error: "INVALID_RECIPIENT",
+          message: `Invalid recipient agent id: ${selectedAgentId}.${validSuffix}`,
+          valid_agent_ids: validAgentIds,
+          valid_agents: candidates,
+        },
+        400,
+      );
+    }
 
-      const selectedAgentId = body.agent_id;
-      const recipient = await getAgentRow(db, selectedAgentId);
-      if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-        const candidates = await listPlanWorkerCandidates(db);
-        const validAgentIds = candidates.map((candidate) => candidate.id);
-        const validSuffix =
-          validAgentIds.length > 0
-            ? ` Valid worker ids: ${validAgentIds.join(", ")}.`
-            : " No worker agents are currently available.";
-        return c.json(
-          {
-            error: "INVALID_RECIPIENT",
-            message: `Invalid recipient agent id: ${selectedAgentId}.${validSuffix}`,
-            valid_agent_ids: validAgentIds,
-            valid_agents: candidates,
-          },
-          400,
-        );
-      }
-
-      await db.query(
-        `
+    await db.query(
+      `
 UPDATE conversation_turns
 SET selected_agent_id = $2,
     selection_status = 'auto_selected'
 WHERE id = $1
 `,
-        [turnId, selectedAgentId],
-      );
+      [turnId, selectedAgentId],
+    );
 
-      await insertEvent(db, {
-        id: `evt_${randomUUID().slice(0, 12)}`,
-        threadId,
-        turnId,
-        eventName: "plan_recipient_selected",
-        payload: {
-          source: "cli",
-          selected_agent_id: selectedAgentId,
-          reason: body.reason,
-        },
-      });
+    await insertEvent(db, {
+      id: `evt_${randomUUID().slice(0, 12)}`,
+      threadId,
+      turnId,
+      eventName: "plan_recipient_selected",
+      payload: {
+        source: "cli",
+        selected_agent_id: selectedAgentId,
+        reason: body.reason,
+      },
+    });
 
-      return c.json({ ok: true, selected_agent_id: selectedAgentId });
-    } finally {
-      await db.close();
-    }
+    return c.json({ ok: true, selected_agent_id: selectedAgentId });
   });
 
   // Plan proposal: agent submits a structured list of tasks
@@ -3178,91 +3036,83 @@ WHERE id = $1
     "/conversations/:threadId/turns/:turnId/agent/plan-propose",
     validateJson(planProposeSchema),
     async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const threadId = c.req.param("threadId");
     const turnId = c.req.param("turnId");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await ensureConversationSchema(db);
+    const db = c.get("db");
+    await ensureConversationSchema(db);
 
-      const turnResult = await db.query<{
-        id: string;
-        thread_id: string;
-        mode: "chat" | "plan" | "execute";
-      }>(
-        `SELECT id, thread_id, mode FROM conversation_turns WHERE id = $1 AND thread_id = $2 LIMIT 1`,
-        [turnId, threadId],
-      );
+    const turnResult = await db.query<{
+      id: string;
+      thread_id: string;
+      mode: "chat" | "plan" | "execute";
+    }>(
+      `SELECT id, thread_id, mode FROM conversation_turns WHERE id = $1 AND thread_id = $2 LIMIT 1`,
+      [turnId, threadId],
+    );
 
-      const turn = turnResult.rows[0];
-      if (!turn) {
-        throw new PragmaError("TURN_NOT_FOUND", 404, `Conversation turn not found: ${turnId}`);
-      }
-      if (turn.mode !== "plan") {
-        throw new PragmaError("TURN_NOT_PLAN_MODE", 409, `Turn is not in plan mode: ${turnId}`);
-      }
-
-      // Validate all recipient agent ids
-      for (const task of body.tasks) {
-        const recipient = await getAgentRow(db, task.recipient);
-        if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-          const candidates = await listPlanWorkerCandidates(db);
-          const validAgentIds = candidates.map((c) => c.id);
-          return c.json(
-            {
-              error: "INVALID_RECIPIENT",
-              message: `Invalid recipient agent id: ${task.recipient}. Valid worker ids: ${validAgentIds.join(", ")}.`,
-              valid_agent_ids: validAgentIds,
-            },
-            400,
-          );
-        }
-      }
-
-      // Store proposal on the turn
-      await storePlanProposal(db, turnId, { tasks: body.tasks });
-
-      // Also set selected_agent_id to the first task's recipient for backwards compatibility
-      await db.query(
-        `UPDATE conversation_turns SET selected_agent_id = $2, selection_status = 'auto_selected' WHERE id = $1`,
-        [turnId, body.tasks[0].recipient],
-      );
-
-      // Emit event
-      await insertEvent(db, {
-        id: `evt_${randomUUID().slice(0, 12)}`,
-        threadId,
-        turnId,
-        eventName: "plan_proposal_submitted",
-        payload: {
-          source: "cli",
-          tasks: body.tasks,
-        },
-      });
-
-      publishThreadUpdated(workspaceName, threadId, "plan_proposal_submitted");
-
-      return c.json({ ok: true, task_count: body.tasks.length });
-    } finally {
-      await db.close();
+    const turn = turnResult.rows[0];
+    if (!turn) {
+      throw new PragmaError("TURN_NOT_FOUND", 404, `Conversation turn not found: ${turnId}`);
     }
+    if (turn.mode !== "plan") {
+      throw new PragmaError("TURN_NOT_PLAN_MODE", 409, `Turn is not in plan mode: ${turnId}`);
+    }
+
+    // Validate all recipient agent ids
+    for (const task of body.tasks) {
+      const recipient = await getAgentById(db, task.recipient);
+      if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+        const candidates = await listPlanWorkerCandidates(db, DEFAULT_AGENT_ID);
+        const validAgentIds = candidates.map((c) => c.id);
+        return c.json(
+          {
+            error: "INVALID_RECIPIENT",
+            message: `Invalid recipient agent id: ${task.recipient}. Valid worker ids: ${validAgentIds.join(", ")}.`,
+            valid_agent_ids: validAgentIds,
+          },
+          400,
+        );
+      }
+    }
+
+    // Store proposal on the turn
+    await storePlanProposal(db, turnId, { tasks: body.tasks });
+
+    // Also set selected_agent_id to the first task's recipient for backwards compatibility
+    await db.query(
+      `UPDATE conversation_turns SET selected_agent_id = $2, selection_status = 'auto_selected' WHERE id = $1`,
+      [turnId, body.tasks[0].recipient],
+    );
+
+    // Emit event
+    await insertEvent(db, {
+      id: `evt_${randomUUID().slice(0, 12)}`,
+      threadId,
+      turnId,
+      eventName: "plan_proposal_submitted",
+      payload: {
+        source: "cli",
+        tasks: body.tasks,
+      },
+    });
+
+    publishThreadUpdated(workspaceName, threadId, "plan_proposal_submitted");
+
+    return c.json({ ok: true, task_count: body.tasks.length });
   });
 
   // Read the plan proposal for a thread
   app.get("/conversations/:threadId/plan-proposal", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const threadId = c.req.param("threadId");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      await ensureConversationSchema(db);
-      const proposal = await getPlanProposal(db, threadId);
-      return c.json({ proposal });
-    } finally {
-      await db.close();
-    }
+    await ensureConversationSchema(db);
+    const proposal = await getPlanProposal(db, threadId);
+    return c.json({ proposal });
   });
 
   // Execute a plan proposal as a chain of tasks
@@ -3270,419 +3120,395 @@ WHERE id = $1
     "/conversations/:threadId/execute-proposal",
     validateJson(executePlanProposalSchema),
     async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const threadId = c.req.param("threadId");
     const body = c.req.valid("json");
     const reasoningEffort = body.reasoning_effort;
 
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     const taskIds: string[] = [];
 
-    try {
-      await ensureConversationSchema(db);
+    await ensureConversationSchema(db);
 
-      const thread = await getThreadById(db, threadId);
-      if (!thread) {
-        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
-      }
-
-      const latestPlanTurn = await getLatestCompletedPlanTurn(db, threadId);
-      const planText = latestPlanTurn?.assistant_message?.trim() || null;
-
-      // Validate all recipients
-      for (const task of body.tasks) {
-        const recipient = await getAgentRow(db, task.recipient_agent_id);
-        if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-          throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${task.recipient_agent_id}`);
-        }
-      }
-
-      // Create tasks as a chain
-      let previousTaskId: string | null = thread.task_id || null;
-      let firstTaskId = "";
-
-      for (let i = 0; i < body.tasks.length; i++) {
-        const taskSpec = body.tasks[i];
-        const recipient = await getAgentRow(db, taskSpec.recipient_agent_id);
-        if (!recipient) continue;
-
-        const newTaskId = `task_${randomUUID().slice(0, 8)}`;
-        const taskTitle = taskSpec.title.length > 80 ? `${taskSpec.title.slice(0, 77)}...` : taskSpec.title;
-
-        if (i === 0 && previousTaskId) {
-          // First task: update the existing plan task
-          await db.query(
-            `UPDATE tasks SET status = 'running', assigned_to = $2, plan = $3, title = $4 WHERE id = $1`,
-            [previousTaskId, recipient.id, taskSpec.prompt, taskTitle],
-          );
-          emitTaskStatus(workspaceName, previousTaskId, "running", "execute_proposal");
-          firstTaskId = previousTaskId;
-          taskIds.push(previousTaskId);
-
-          // Create execute thread for first task
-          const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
-          await createThread(db, {
-            id: execThreadId,
-            mode: "execute",
-            harness: recipient.harness,
-            modelLabel: recipient.model_label,
-            modelId: recipient.model_id,
-            sourceThreadId: threadId,
-            taskId: previousTaskId,
-          });
-          await setThreadTaskId(db, execThreadId, previousTaskId);
-
-          executeRunner.execute({
-            workspaceName,
-            taskId: previousTaskId,
-            threadId: execThreadId,
-            prompt: taskSpec.prompt,
-            requestedRecipientAgentId: recipient.id,
-            reasoningEffort,
-            skipOrchestratorSelection: true,
-          });
-        } else if (i === 0) {
-          // First task: create new task
-          await db.query(
-            `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan) VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)`,
-            [newTaskId, taskTitle, recipient.id, taskSpec.prompt],
-          );
-          emitTaskStatus(workspaceName, newTaskId, "queued", "execute_proposal_created");
-          firstTaskId = newTaskId;
-          taskIds.push(newTaskId);
-
-          const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
-          await createThread(db, {
-            id: execThreadId,
-            mode: "execute",
-            harness: recipient.harness,
-            modelLabel: recipient.model_label,
-            modelId: recipient.model_id,
-            sourceThreadId: threadId,
-            taskId: newTaskId,
-          });
-          await setThreadTaskId(db, execThreadId, newTaskId);
-
-          executeRunner.execute({
-            workspaceName,
-            taskId: newTaskId,
-            threadId: execThreadId,
-            prompt: taskSpec.prompt,
-            requestedRecipientAgentId: recipient.id,
-            reasoningEffort,
-            skipOrchestratorSelection: true,
-          });
-          previousTaskId = newTaskId;
-        } else {
-          // Subsequent tasks: create as followups
-          await db.query(
-            `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan, predecessor_task_id) VALUES ($1, $2, 'queued', $3, NULL, NULL, $4, $5)`,
-            [newTaskId, taskTitle, recipient.id, taskSpec.prompt, previousTaskId],
-          );
-          await db.query(
-            `UPDATE tasks SET followup_task_id = $2 WHERE id = $1`,
-            [previousTaskId!, newTaskId],
-          );
-
-          const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
-          await createThread(db, {
-            id: execThreadId,
-            mode: "execute",
-            harness: recipient.harness,
-            modelLabel: recipient.model_label,
-            modelId: recipient.model_id,
-            sourceThreadId: threadId,
-            taskId: newTaskId,
-          });
-          await setThreadTaskId(db, execThreadId, newTaskId);
-
-          emitTaskStatus(workspaceName, newTaskId, "queued", "proposal_followup_created");
-          taskIds.push(newTaskId);
-          previousTaskId = newTaskId;
-        }
-      }
-
-      // Close the plan thread
-      await closeThread(db, threadId);
-
-      return c.json({ task_ids: taskIds }, 201);
-    } finally {
-      await db.close();
+    const thread = await getThreadById(db, threadId);
+    if (!thread) {
+      throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
     }
+
+    const latestPlanTurn = await getLatestCompletedPlanTurn(db, threadId);
+    const planText = latestPlanTurn?.assistant_message?.trim() || null;
+
+    // Validate all recipients
+    for (const task of body.tasks) {
+      const recipient = await getAgentById(db, task.recipient_agent_id);
+      if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
+        throw new PragmaError("INVALID_RECIPIENT", 400, `Invalid recipient agent id: ${task.recipient_agent_id}`);
+      }
+    }
+
+    // Create tasks as a chain
+    let previousTaskId: string | null = thread.task_id || null;
+    let firstTaskId = "";
+
+    for (let i = 0; i < body.tasks.length; i++) {
+      const taskSpec = body.tasks[i];
+      const recipient = await getAgentById(db, taskSpec.recipient_agent_id);
+      if (!recipient) continue;
+
+      const newTaskId = `task_${randomUUID().slice(0, 8)}`;
+      const taskTitle = taskSpec.title.length > 80 ? `${taskSpec.title.slice(0, 77)}...` : taskSpec.title;
+
+      if (i === 0 && previousTaskId) {
+        // First task: update the existing plan task
+        await db.query(
+          `UPDATE tasks SET status = 'running', assigned_to = $2, plan = $3, title = $4 WHERE id = $1`,
+          [previousTaskId, recipient.id, taskSpec.prompt, taskTitle],
+        );
+        emitTaskStatus(workspaceName, previousTaskId, "running", "execute_proposal");
+        firstTaskId = previousTaskId;
+        taskIds.push(previousTaskId);
+
+        // Create execute thread for first task
+        const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
+        await createThread(db, {
+          id: execThreadId,
+          mode: "execute",
+          harness: recipient.harness,
+          modelLabel: recipient.model_label,
+          modelId: recipient.model_id,
+          sourceThreadId: threadId,
+          taskId: previousTaskId,
+        });
+        await setThreadTaskId(db, execThreadId, previousTaskId);
+
+        executeRunner.execute({
+          workspaceName,
+          taskId: previousTaskId,
+          threadId: execThreadId,
+          prompt: taskSpec.prompt,
+          requestedRecipientAgentId: recipient.id,
+          reasoningEffort,
+          skipOrchestratorSelection: true,
+        });
+      } else if (i === 0) {
+        // First task: create new task
+        await db.query(
+          `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan) VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)`,
+          [newTaskId, taskTitle, recipient.id, taskSpec.prompt],
+        );
+        emitTaskStatus(workspaceName, newTaskId, "queued", "execute_proposal_created");
+        firstTaskId = newTaskId;
+        taskIds.push(newTaskId);
+
+        const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
+        await createThread(db, {
+          id: execThreadId,
+          mode: "execute",
+          harness: recipient.harness,
+          modelLabel: recipient.model_label,
+          modelId: recipient.model_id,
+          sourceThreadId: threadId,
+          taskId: newTaskId,
+        });
+        await setThreadTaskId(db, execThreadId, newTaskId);
+
+        executeRunner.execute({
+          workspaceName,
+          taskId: newTaskId,
+          threadId: execThreadId,
+          prompt: taskSpec.prompt,
+          requestedRecipientAgentId: recipient.id,
+          reasoningEffort,
+          skipOrchestratorSelection: true,
+        });
+        previousTaskId = newTaskId;
+      } else {
+        // Subsequent tasks: create as followups
+        await db.query(
+          `INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan, predecessor_task_id) VALUES ($1, $2, 'queued', $3, NULL, NULL, $4, $5)`,
+          [newTaskId, taskTitle, recipient.id, taskSpec.prompt, previousTaskId],
+        );
+        await db.query(
+          `UPDATE tasks SET followup_task_id = $2 WHERE id = $1`,
+          [previousTaskId!, newTaskId],
+        );
+
+        const execThreadId = `thread_${randomUUID().slice(0, 12)}`;
+        await createThread(db, {
+          id: execThreadId,
+          mode: "execute",
+          harness: recipient.harness,
+          modelLabel: recipient.model_label,
+          modelId: recipient.model_id,
+          sourceThreadId: threadId,
+          taskId: newTaskId,
+        });
+        await setThreadTaskId(db, execThreadId, newTaskId);
+
+        emitTaskStatus(workspaceName, newTaskId, "queued", "proposal_followup_created");
+        taskIds.push(newTaskId);
+        previousTaskId = newTaskId;
+      }
+    }
+
+    // Close the plan thread
+    await closeThread(db, threadId);
+
+    return c.json({ task_ids: taskIds }, 201);
   });
 
   app.get("/conversations/chats", validateQuery(chatsQuerySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const { limit, cursor } = c.req.valid("query");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      await ensureConversationSchema(db);
-      const chats = await listChatThreads(db, { limit, cursor });
-      return c.json({ chats });
-    } finally {
-      await db.close();
-    }
+    await ensureConversationSchema(db);
+    const chats = await listChatThreads(db, { limit, cursor });
+    return c.json({ chats });
   });
 
   app.get("/conversations/plans", validateQuery(plansQuerySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const { limit, cursor } = c.req.valid("query");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      await ensureConversationSchema(db);
-      const pendingPlans = await listOpenPlanThreads(db, { limit, cursor });
-      const plans = pendingPlans.map((plan) => {
-        const metadata = derivePendingPlanMetadata(plan.first_user_message);
-        return {
-          id: plan.id,
-          plan_title: metadata.title,
-          plan_preview: metadata.preview,
-          status: plan.status,
-          created_at: plan.created_at,
-          updated_at: plan.updated_at,
-          has_completed_plan_turn: Boolean(plan.has_completed_plan_turn),
-          latest_turn_status: plan.latest_turn_status ?? null,
-          task_id: plan.task_id ?? null,
-          task_status: plan.task_status ?? null,
-        };
-      });
-      return c.json({ plans });
-    } finally {
-      await db.close();
-    }
+    await ensureConversationSchema(db);
+    const pendingPlans = await listOpenPlanThreads(db, { limit, cursor });
+    const plans = pendingPlans.map((plan) => {
+      const metadata = derivePendingPlanMetadata(plan.first_user_message);
+      return {
+        id: plan.id,
+        plan_title: metadata.title,
+        plan_preview: metadata.preview,
+        status: plan.status,
+        created_at: plan.created_at,
+        updated_at: plan.updated_at,
+        has_completed_plan_turn: Boolean(plan.has_completed_plan_turn),
+        latest_turn_status: plan.latest_turn_status ?? null,
+        task_id: plan.task_id ?? null,
+        task_status: plan.task_status ?? null,
+      };
+    });
+    return c.json({ plans });
   });
 
   app.get("/conversations/:threadId", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const threadId = c.req.param("threadId");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      await ensureConversationSchema(db);
-      const data = await getThreadWithDetails(db, threadId);
-      if (!data.thread) {
-        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
-      }
-
-      const events = data.events.map((event) => ({
-        ...event,
-        payload: safeParseJson(event.payload_json),
-      }));
-
-      return c.json({
-        thread: data.thread,
-        turns: data.turns,
-        messages: data.messages,
-        events,
-      });
-    } finally {
-      await db.close();
+    await ensureConversationSchema(db);
+    const data = await getThreadWithDetails(db, threadId);
+    if (!data.thread) {
+      throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
     }
+
+    const events = data.events.map((event) => ({
+      ...event,
+      payload: safeParseJson(event.payload_json),
+    }));
+
+    return c.json({
+      thread: data.thread,
+      turns: data.turns,
+      messages: data.messages,
+      events,
+    });
   });
 
   app.delete("/conversations/:threadId", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const threadId = c.req.param("threadId");
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
 
-    try {
-      await ensureConversationSchema(db);
-      const thread = await getThreadById(db, threadId);
-      if (!thread) {
-        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
-      }
-      if (thread.mode !== "plan") {
-        throw new PragmaError("INVALID_OPERATION", 400, "Only plan threads can be deleted.");
-      }
-      await closeThread(db, threadId);
+    await ensureConversationSchema(db);
+    const thread = await getThreadById(db, threadId);
+    if (!thread) {
+      throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+    }
+    if (thread.mode !== "plan") {
+      throw new PragmaError("INVALID_OPERATION", 400, "Only plan threads can be deleted.");
+    }
+    await closeThread(db, threadId);
 
-      // If the thread is associated with a task, cancel the task too
-      if (thread.task_id) {
-        const taskResult = await db.query<{ id: string; status: string }>(
-          `SELECT id, status FROM tasks WHERE id = $1 LIMIT 1`,
+    // If the thread is associated with a task, cancel the task too
+    if (thread.task_id) {
+      const taskResult = await db.query<{ id: string; status: string }>(
+        `SELECT id, status FROM tasks WHERE id = $1 LIMIT 1`,
+        [thread.task_id],
+      );
+      const task = taskResult.rows[0];
+      if (task && task.status !== "cancelled" && task.status !== "completed" && task.status !== "failed") {
+        await db.query(
+          `UPDATE tasks SET status = 'cancelled', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
           [thread.task_id],
         );
-        const task = taskResult.rows[0];
-        if (task && task.status !== "cancelled" && task.status !== "completed" && task.status !== "failed") {
-          await db.query(
-            `UPDATE tasks SET status = 'cancelled', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
-            [thread.task_id],
-          );
-          emitTaskStatus(workspaceName, thread.task_id, "cancelled", "plan_deleted");
+        emitTaskStatus(workspaceName, thread.task_id, "cancelled", "plan_deleted");
 
-          executeRunner.abort(thread.task_id);
-          const workspacePaths = getWorkspacePaths(workspaceName);
-          await deleteTaskWorktree({ workspacePaths, taskId: thread.task_id });
-        }
+        executeRunner.abort(thread.task_id);
+        const workspacePaths = getWorkspacePaths(workspaceName);
+        await deleteTaskWorktree({ workspacePaths, taskId: thread.task_id });
       }
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
     }
+
+    return c.json({ ok: true });
   });
 
   // Fire-and-forget turn creation. No SSE — the UI subscribes via
   // GET /conversations/:threadId/stream to watch events.
   app.post("/conversations/turns", validateJson(conversationTurnSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const body = c.req.valid("json");
     const modelId = resolveModelId(body.harness, body.model_label);
     const reasoningEffort = body.reasoning_effort;
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     await ensureConversationSchema(db);
-    try {
-      const requestedRecipientAgentId =
-        body.mode === "plan" ? (body.recipient_agent_id ?? null) : null;
-      if (requestedRecipientAgentId) {
-        const recipient = await getAgentRow(db, requestedRecipientAgentId);
-        if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
-          throw new PragmaError(
-            "INVALID_RECIPIENT",
-            400,
-            `Invalid recipient agent id: ${requestedRecipientAgentId}`,
-          );
-        }
-      }
-
-      let threadId = body.thread_id ?? `thread_${randomUUID().slice(0, 12)}`;
-      let thread = await getThreadById(db, threadId);
-      let isNewThread = false;
-
-      if (!thread) {
-        isNewThread = true;
-        await createThread(db, {
-          id: threadId,
-          mode: body.mode,
-          harness: body.harness,
-          modelLabel: body.model_label,
-          modelId,
-        });
-        thread = await getThreadById(db, threadId);
-      }
-
-      if (!thread) {
-        throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
-      }
-
-      // Create a task row when a plan thread starts so ask-question works
-      if (body.mode === "plan" && isNewThread) {
-        const planTaskId = `task_${randomUUID().slice(0, 8)}`;
-        const planTitle = truncateChatText(
-          body.message.replace(/\s+/g, " ").trim() || "Plan",
-          80,
-        );
-        await db.query(
-          `
-INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
-VALUES ($1, $2, 'planning', NULL, NULL, NULL)
-`,
-          [planTaskId, planTitle],
-        );
-        emitTaskStatus(workspaceName, planTaskId, "planning", "plan_created");
-
-        // Fire-and-forget: generate an AI title from the prompt
-        generateTitle(db, body.message, "").then(async (aiTitle) => {
-          await updateTaskTitle(db, planTaskId, aiTitle);
-          const row = await db.query<{ status: TaskStatus }>(
-            `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
-            [planTaskId],
-          );
-          const currentStatus = row.rows[0]?.status;
-          if (currentStatus) {
-            emitTaskStatus(workspaceName, planTaskId, currentStatus, "title_generated");
-          }
-        }).catch(() => {});
-
-        await setThreadTaskId(db, threadId, planTaskId);
-        thread = await getThreadById(db, threadId);
-      }
-
-      if (!thread) {
-        throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
-      }
-
-      if (thread.harness !== body.harness) {
+    const requestedRecipientAgentId =
+      body.mode === "plan" ? (body.recipient_agent_id ?? null) : null;
+    if (requestedRecipientAgentId) {
+      const recipient = await getAgentById(db, requestedRecipientAgentId);
+      if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
         throw new PragmaError(
-          "THREAD_HARNESS_MISMATCH",
-          409,
-          "Thread harness does not match the requested harness.",
+          "INVALID_RECIPIENT",
+          400,
+          `Invalid recipient agent id: ${requestedRecipientAgentId}`,
         );
       }
+    }
 
-      if (thread.status === "closed") {
-        if (thread.mode === "execute" || thread.mode === "plan") {
-          await reopenThread(db, thread.id);
-          thread = await getThreadById(db, thread.id);
-        } else {
-          throw new PragmaError("THREAD_CLOSED", 409, "Conversation thread is already closed.");
-        }
-      }
+    let threadId = body.thread_id ?? `thread_${randomUUID().slice(0, 12)}`;
+    let thread = await getThreadById(db, threadId);
+    let isNewThread = false;
 
-      if (!thread) {
-        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
-      }
-
-      const turnId = `turn_${randomUUID().slice(0, 12)}`;
-      const userMessageId = `msg_${randomUUID().slice(0, 12)}`;
-      const message = body.message;
-
-      await createTurn(db, {
-        id: turnId,
-        threadId,
-        mode: body.mode,
-        userMessage: message,
-        reasoningEffort,
-        requestedRecipientAgentId,
-      });
-
-      await insertMessage(db, {
-        id: userMessageId,
-        threadId,
-        turnId,
-        role: "user",
-        content: message,
-      });
-
-      // Kick off the turn in the background — no blocking, no SSE.
-      turnRunner.execute({
-        workspaceName,
-        threadId,
-        turnId,
-        userMessageId,
-        isNewThread,
-        message,
+    if (!thread) {
+      isNewThread = true;
+      await createThread(db, {
+        id: threadId,
         mode: body.mode,
         harness: body.harness,
         modelLabel: body.model_label,
         modelId,
-        reasoningEffort,
-        requestedRecipientAgentId,
       });
-
-      return c.json({ turn_id: turnId, thread_id: threadId, task_id: thread.task_id ?? null });
-    } finally {
-      await db.close();
+      thread = await getThreadById(db, threadId);
     }
+
+    if (!thread) {
+      throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
+    }
+
+    // Create a task row when a plan thread starts so ask-question works
+    if (body.mode === "plan" && isNewThread) {
+      const planTaskId = `task_${randomUUID().slice(0, 8)}`;
+      const planTitle = truncateChatText(
+        body.message.replace(/\s+/g, " ").trim() || "Plan",
+        80,
+      );
+      await db.query(
+        `
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id)
+VALUES ($1, $2, 'planning', NULL, NULL, NULL)
+`,
+        [planTaskId, planTitle],
+      );
+      emitTaskStatus(workspaceName, planTaskId, "planning", "plan_created");
+
+      // Fire-and-forget: generate an AI title from the prompt
+      generateTitle(db, body.message, "").then(async (aiTitle) => {
+        await updateTaskTitle(db, planTaskId, aiTitle);
+        const row = await db.query<{ status: TaskStatus }>(
+          `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
+          [planTaskId],
+        );
+        const currentStatus = row.rows[0]?.status;
+        if (currentStatus) {
+          emitTaskStatus(workspaceName, planTaskId, currentStatus, "title_generated");
+        }
+      }).catch(() => {});
+
+      await setThreadTaskId(db, threadId, planTaskId);
+      thread = await getThreadById(db, threadId);
+    }
+
+    if (!thread) {
+      throw new PragmaError("THREAD_CREATE_FAILED", 400, "Could not create conversation thread.");
+    }
+
+    if (thread.harness !== body.harness) {
+      throw new PragmaError(
+        "THREAD_HARNESS_MISMATCH",
+        409,
+        "Thread harness does not match the requested harness.",
+      );
+    }
+
+    if (thread.status === "closed") {
+      if (thread.mode === "execute" || thread.mode === "plan") {
+        await reopenThread(db, thread.id);
+        thread = await getThreadById(db, thread.id);
+      } else {
+        throw new PragmaError("THREAD_CLOSED", 409, "Conversation thread is already closed.");
+      }
+    }
+
+    if (!thread) {
+      throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+    }
+
+    const turnId = `turn_${randomUUID().slice(0, 12)}`;
+    const userMessageId = `msg_${randomUUID().slice(0, 12)}`;
+    const message = body.message;
+
+    await createTurn(db, {
+      id: turnId,
+      threadId,
+      mode: body.mode,
+      userMessage: message,
+      reasoningEffort,
+      requestedRecipientAgentId,
+    });
+
+    await insertMessage(db, {
+      id: userMessageId,
+      threadId,
+      turnId,
+      role: "user",
+      content: message,
+    });
+
+    // Kick off the turn in the background — no blocking, no SSE.
+    turnRunner.execute({
+      workspaceName,
+      threadId,
+      turnId,
+      userMessageId,
+      isNewThread,
+      message,
+      mode: body.mode,
+      harness: body.harness,
+      modelLabel: body.model_label,
+      modelId,
+      reasoningEffort,
+      requestedRecipientAgentId,
+    });
+
+    return c.json({ turn_id: turnId, thread_id: threadId, task_id: thread.task_id ?? null });
   });
 
   // Backwards-compat: keep the old streaming endpoint alive but redirect
   // to the new fire-and-forget endpoint. Clients should migrate to
   // POST /conversations/turns + GET /conversations/:threadId/stream.
   app.post("/conversations/turns/stream", validateJson(conversationTurnSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const body = c.req.valid("json");
     const modelId = resolveModelId(body.harness, body.model_label);
     const reasoningEffort = body.reasoning_effort;
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     await ensureConversationSchema(db);
     try {
       const requestedRecipientAgentId =
         body.mode === "plan" ? (body.recipient_agent_id ?? null) : null;
       if (requestedRecipientAgentId) {
-        const recipient = await getAgentRow(db, requestedRecipientAgentId);
+        const recipient = await getAgentById(db, requestedRecipientAgentId);
         if (!recipient || recipient.id === DEFAULT_AGENT_ID) {
           throw new PragmaError(
             "INVALID_RECIPIENT",
@@ -3875,7 +3701,6 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
         closedSignal: () => done,
       });
     } catch (error) {
-      await db.close();
       throw error;
     }
   });
@@ -3891,98 +3716,94 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
   });
 
   app.post("/conversations/:threadId/execute", validateJson(executeFromThreadSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const threadId = c.req.param("threadId");
     const body = c.req.valid("json");
     const reasoningEffort = body.reasoning_effort;
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     let taskId = "";
     let executeThreadId = `thread_${randomUUID().slice(0, 12)}`;
     let executePrompt = "";
     let requestedRecipientAgentId: string | null = null;
 
-    try {
-      await ensureConversationSchema(db);
+    await ensureConversationSchema(db);
 
-      const thread = await getThreadById(db, threadId);
-      if (!thread) {
-        throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
-      }
+    const thread = await getThreadById(db, threadId);
+    if (!thread) {
+      throw new PragmaError("THREAD_NOT_FOUND", 404, `Conversation thread not found: ${threadId}`);
+    }
 
-      const latestPlanTurn = await getLatestCompletedPlanTurn(db, threadId);
-      if (!latestPlanTurn) {
-        throw new PragmaError("NO_PLAN_FOUND", 409, "No completed plan turn found.");
-      }
+    const latestPlanTurn = await getLatestCompletedPlanTurn(db, threadId);
+    if (!latestPlanTurn) {
+      throw new PragmaError("NO_PLAN_FOUND", 409, "No completed plan turn found.");
+    }
 
-      const planText = latestPlanTurn.assistant_message?.trim() || null;
-      if (!planText) {
-        throw new PragmaError("PLAN_EMPTY", 409, "Plan turn has no assistant message.");
-      }
-      const plannedRecipientAgentId =
-        typeof latestPlanTurn.selected_agent_id === "string" &&
-        latestPlanTurn.selected_agent_id.trim().length > 0
-          ? latestPlanTurn.selected_agent_id.trim()
-          : null;
-      requestedRecipientAgentId = body.recipient_agent_id ?? plannedRecipientAgentId;
-      if (!requestedRecipientAgentId) {
-        throw new PragmaError(
-          "PLAN_RECIPIENT_MISSING",
-          409,
-          "Plan is missing a selected recipient. Submit `pragma task plan-select-recipient` in plan mode.",
-        );
-      }
-      const executeRecipient = await getAgentRow(db, requestedRecipientAgentId);
-      if (!executeRecipient || executeRecipient.id === DEFAULT_AGENT_ID) {
-        throw new PragmaError(
-          "INVALID_RECIPIENT",
-          400,
-          `Invalid recipient agent id: ${requestedRecipientAgentId}`,
-        );
-      }
+    const planText = latestPlanTurn.assistant_message?.trim() || null;
+    if (!planText) {
+      throw new PragmaError("PLAN_EMPTY", 409, "Plan turn has no assistant message.");
+    }
+    const plannedRecipientAgentId =
+      typeof latestPlanTurn.selected_agent_id === "string" &&
+      latestPlanTurn.selected_agent_id.trim().length > 0
+        ? latestPlanTurn.selected_agent_id.trim()
+        : null;
+    requestedRecipientAgentId = body.recipient_agent_id ?? plannedRecipientAgentId;
+    if (!requestedRecipientAgentId) {
+      throw new PragmaError(
+        "PLAN_RECIPIENT_MISSING",
+        409,
+        "Plan is missing a selected recipient. Submit `pragma task plan-select-recipient` in plan mode.",
+      );
+    }
+    const executeRecipient = await getAgentById(db, requestedRecipientAgentId);
+    if (!executeRecipient || executeRecipient.id === DEFAULT_AGENT_ID) {
+      throw new PragmaError(
+        "INVALID_RECIPIENT",
+        400,
+        `Invalid recipient agent id: ${requestedRecipientAgentId}`,
+      );
+    }
 
-      executePrompt = planText;
+    executePrompt = planText;
 
-      // Use existing task from the plan thread if available, otherwise create a new one
-      if (thread.task_id) {
-        taskId = thread.task_id;
-        await db.query(
-          `
+    // Use existing task from the plan thread if available, otherwise create a new one
+    if (thread.task_id) {
+      taskId = thread.task_id;
+      await db.query(
+        `
 UPDATE tasks
 SET status = 'running',
     assigned_to = $2,
     plan = $3
 WHERE id = $1
 `,
-          [taskId, executeRecipient.id, planText],
-        );
-        emitTaskStatus(workspaceName, taskId, "running", "execute_from_plan");
-      } else {
-        taskId = `task_${randomUUID().slice(0, 8)}`;
-        await db.query(
-          `
+        [taskId, executeRecipient.id, planText],
+      );
+      emitTaskStatus(workspaceName, taskId, "running", "execute_from_plan");
+    } else {
+      taskId = `task_${randomUUID().slice(0, 8)}`;
+      await db.query(
+        `
 INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan)
 VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 `,
-          [taskId, truncateChatText(latestPlanTurn.user_message?.replace(/\s+/g, " ").trim() || "Task", 80), executeRecipient.id, planText],
-        );
-        emitTaskStatus(workspaceName, taskId, "queued", "execute_from_plan_created");
-      }
-
-      await createThread(db, {
-        id: executeThreadId,
-        mode: "execute",
-        harness: executeRecipient.harness,
-        modelLabel: executeRecipient.model_label,
-        modelId: executeRecipient.model_id,
-        sourceThreadId: threadId,
-        taskId,
-      });
-
-      await setThreadTaskId(db, executeThreadId, taskId);
-      await closeThread(db, threadId);
-    } finally {
-      await db.close();
+        [taskId, truncateChatText(latestPlanTurn.user_message?.replace(/\s+/g, " ").trim() || "Task", 80), executeRecipient.id, planText],
+      );
+      emitTaskStatus(workspaceName, taskId, "queued", "execute_from_plan_created");
     }
+
+    await createThread(db, {
+      id: executeThreadId,
+      mode: "execute",
+      harness: executeRecipient.harness,
+      modelLabel: executeRecipient.model_label,
+      modelId: executeRecipient.model_id,
+      sourceThreadId: threadId,
+      taskId,
+    });
+
+    await setThreadTaskId(db, executeThreadId, taskId);
+    await closeThread(db, threadId);
 
     executeRunner.execute({
       workspaceName,
@@ -3998,14 +3819,14 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.get("/code/folders", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const folders = await listCodeFolders(paths.codeDir);
     return c.json({ folders });
   });
 
   app.post("/code/repos/clone", validateJson(createCodeRepoCloneSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const body = c.req.valid("json");
 
@@ -4068,7 +3889,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.post("/code/folders/copy-local", validateJson(createCodeFolderCopySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const body = c.req.valid("json");
 
@@ -4109,7 +3930,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.post("/code/folders/import", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
 
     let formData: Awaited<ReturnType<typeof c.req.formData>>;
@@ -4195,7 +4016,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.post("/code/folders/:name/push", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const folderName = c.req.param("name");
     const folderPath = join(paths.codeDir, folderName);
@@ -4224,14 +4045,14 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.get("/workspace/outputs/files", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const files = await listAllWorkspaceOutputFiles(paths.outputsDir);
     return c.json({ files });
   });
 
   app.get("/workspace/outputs/file/content", validateQuery(outputFileQuerySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const { path: relativePath } = c.req.valid("query");
     const { absolutePath, normalizedPath } = resolveOutputPath(paths.outputsDir, relativePath);
@@ -4252,7 +4073,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.get("/workspace/outputs/file/download", validateQuery(outputFileQuerySchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const { path: relativePath } = c.req.valid("query");
     const { absolutePath, normalizedPath } = resolveOutputPath(paths.outputsDir, relativePath);
@@ -4273,7 +4094,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.get("/context", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
 
     const context = await listContext(paths.contextDir);
@@ -4281,7 +4102,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.post("/context/folders", validateJson(createContextFolderSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const body = c.req.valid("json");
 
@@ -4301,7 +4122,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.post("/context/files", validateJson(createContextFileSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const body = c.req.valid("json");
 
@@ -4338,7 +4159,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   app.put("/context/file", validateJson(updateContextFileSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const paths = getWorkspacePaths(workspaceName);
     const body = c.req.valid("json");
 
@@ -4618,7 +4439,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       skill_path: z.string().trim().min(1),
     }).strict()
   ), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const body = c.req.valid("json");
 
     // Fetch the SKILL.md content from GitHub
@@ -4626,7 +4447,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     const skillMdContent = await fetchGitHubFileContent(owner, repo, `${body.skill_path}/SKILL.md`);
     const description = parseSkillMdDescription(skillMdContent);
 
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     try {
       const skillId = `skill_${randomUUID().slice(0, 12)}`;
       await db.query(
@@ -4641,8 +4462,6 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         throw new PragmaError("SKILL_NAME_EXISTS", 409, `Skill "${body.name}" is already installed.`);
       }
       throw new PragmaError("INSTALL_SKILL_FAILED", 400, message);
-    } finally {
-      await db.close();
     }
   });
 
@@ -4769,48 +4588,44 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
   // GET /connectors — list all connectors
   app.get("/connectors", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const db = await openDatabase(workspaceName);
+    const workspaceName = c.get("workspace");
+    const db = c.get("db");
 
-    try {
-      await seedConnectors(db);
+    await seedConnectors(db);
 
-      const result = await db.query<{
-        id: string;
-        name: string;
-        display_name: string | null;
-        description: string | null;
-        provider: string;
-        status: string;
-        auth_type: string;
-        oauth_client_id: string | null;
-        oauth_client_secret: string | null;
-      }>(
-        `SELECT id, name, display_name, description, provider, status, auth_type,
-                oauth_client_id, oauth_client_secret
-         FROM connectors ORDER BY name ASC`,
-      );
+    const result = await db.query<{
+      id: string;
+      name: string;
+      display_name: string | null;
+      description: string | null;
+      provider: string;
+      status: string;
+      auth_type: string;
+      oauth_client_id: string | null;
+      oauth_client_secret: string | null;
+    }>(
+      `SELECT id, name, display_name, description, provider, status, auth_type,
+              oauth_client_id, oauth_client_secret
+       FROM connectors ORDER BY name ASC`,
+    );
 
-      const connectors = result.rows.map((row) => {
-        const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === row.name);
-        return {
-          id: row.id,
-          name: row.name,
-          display_name: row.display_name,
-          description: row.description,
-          provider: row.provider,
-          status: row.status,
-          auth_type: row.auth_type,
-          has_proxy: !!registryDef?.proxyProvider,
-          has_client_id: !!row.oauth_client_id,
-          has_client_secret: !!row.oauth_client_secret,
-        };
-      });
+    const connectors = result.rows.map((row) => {
+      const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === row.name);
+      return {
+        id: row.id,
+        name: row.name,
+        display_name: row.display_name,
+        description: row.description,
+        provider: row.provider,
+        status: row.status,
+        auth_type: row.auth_type,
+        has_proxy: !!registryDef?.proxyProvider,
+        has_client_id: !!row.oauth_client_id,
+        has_client_secret: !!row.oauth_client_secret,
+      };
+    });
 
-      return c.json({ connectors });
-    } finally {
-      await db.close();
-    }
+    return c.json({ connectors });
   });
 
   // PUT /connectors/:id/config — set client_id/secret or api_key
@@ -4819,121 +4634,129 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     if (!isLoopbackOrigin(origin)) {
       throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
     }
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const connectorId = c.req.param("id");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      const connector = await findOrThrow<{ id: string; name: string; auth_type: string }>(
-        db, "connectors", connectorId, "CONNECTOR_NOT_FOUND", "Connector", "id, name, auth_type",
+    const db = c.get("db");
+    const existing = await db.query<{
+      id: string;
+      name: string;
+      auth_type: string;
+    }>(`SELECT id, name, auth_type FROM connectors WHERE id = $1 LIMIT 1`, [connectorId]);
+
+    if (existing.rows.length === 0) {
+      throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
+    }
+
+    const connector = existing.rows[0];
+
+    if (connector.auth_type === "api_key" && body.access_token) {
+      // For api_key connectors, setting the token directly connects
+      await db.query(
+        `UPDATE connectors SET access_token = $1, status = 'connected' WHERE id = $2`,
+        [body.access_token, connectorId],
       );
+    } else {
+      // OAuth connectors — store client credentials (including proxy-managed connectors for manual config)
+      const sets: string[] = [];
+      const params: unknown[] = [connectorId];
+      let paramIndex = 2;
 
-      if (connector.auth_type === "api_key" && body.access_token) {
-        // For api_key connectors, setting the token directly connects
-        await db.query(
-          `UPDATE connectors SET access_token = $1, status = 'connected' WHERE id = $2`,
-          [body.access_token, connectorId],
-        );
-      } else {
-        // OAuth connectors — store client credentials (including proxy-managed connectors for manual config)
-        const sets: string[] = [];
-        const params: unknown[] = [connectorId];
-        let paramIndex = 2;
-
-        if (body.oauth_client_id !== undefined) {
-          sets.push(`oauth_client_id = $${paramIndex++}`);
-          params.push(body.oauth_client_id || null);
-        }
-        if (body.oauth_client_secret !== undefined) {
-          sets.push(`oauth_client_secret = $${paramIndex++}`);
-          params.push(body.oauth_client_secret || null);
-        }
-
-        if (sets.length > 0) {
-          // Set status to disconnected (ready to connect) if it was needs_config
-          sets.push(`status = 'disconnected'`);
-          await db.query(`UPDATE connectors SET ${sets.join(", ")} WHERE id = $1`, params);
-        }
+      if (body.oauth_client_id !== undefined) {
+        sets.push(`oauth_client_id = $${paramIndex++}`);
+        params.push(body.oauth_client_id || null);
+      }
+      if (body.oauth_client_secret !== undefined) {
+        sets.push(`oauth_client_secret = $${paramIndex++}`);
+        params.push(body.oauth_client_secret || null);
       }
 
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
+      if (sets.length > 0) {
+        // Set status to disconnected (ready to connect) if it was needs_config
+        sets.push(`status = 'disconnected'`);
+        await db.query(`UPDATE connectors SET ${sets.join(", ")} WHERE id = $1`, params);
+      }
     }
+
+    return c.json({ ok: true });
   });
 
   // GET /connectors/:id/auth — start OAuth flow
   app.get("/connectors/:id/auth", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const connectorId = c.req.param("id");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      const connector = await findOrThrow<{
-        id: string;
-        name: string;
-        oauth_client_id: string | null;
-        oauth_client_secret: string | null;
-        oauth_auth_url: string;
-        scopes: string;
-        redirect_uri: string;
-        auth_type: string;
-      }>(
-        db, "connectors", connectorId, "CONNECTOR_NOT_FOUND", "Connector",
-        "id, name, oauth_client_id, oauth_client_secret, oauth_auth_url, scopes, redirect_uri, auth_type",
-      );
+    const db = c.get("db");
+    const result = await db.query<{
+      id: string;
+      name: string;
+      oauth_client_id: string | null;
+      oauth_client_secret: string | null;
+      oauth_auth_url: string;
+      scopes: string;
+      redirect_uri: string;
+      auth_type: string;
+    }>(
+      `SELECT id, name, oauth_client_id, oauth_client_secret, oauth_auth_url,
+              scopes, redirect_uri, auth_type
+       FROM connectors WHERE id = $1 LIMIT 1`,
+      [connectorId],
+    );
 
-      if (connector.auth_type !== "oauth2") {
-        throw new PragmaError("INVALID_AUTH_TYPE", 400, "This connector does not use OAuth2");
-      }
-
-      // Check if this connector uses the OAuth proxy (only if no custom credentials are configured)
-      const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
-      const hasCustomCredentials = !!connector.oauth_client_id && !!connector.oauth_client_secret;
-      if (registryDef?.proxyProvider && !hasCustomCredentials) {
-        // Record that we initiated a proxy OAuth flow for this connector so the
-        // proxy-callback endpoint can verify the callback is expected.
-        pendingProxyOAuthFlows.set(connectorId, {
-          expiresAt: Date.now() + 10 * 60 * 1000, // 10 min
-        });
-        const proxyUrl = `${OAUTH_PROXY_URL}/auth/${registryDef.proxyProvider}?connector_id=${connectorId}&port=${options.port}`;
-        return c.json({ url: proxyUrl });
-      }
-
-      if (!connector.oauth_client_id || !connector.oauth_client_secret) {
-        throw new PragmaError("CONNECTOR_NOT_CONFIGURED", 400, "Client ID and secret must be configured first");
-      }
-
-      const state = randomUUID();
-      oauthStateStore.set(state, {
-        connectorId: connector.id,
-        expiresAt: Date.now() + 5 * 60 * 1000,
-      });
-
-      // Clean up expired states
-      for (const [key, value] of oauthStateStore) {
-        if (value.expiresAt < Date.now()) {
-          oauthStateStore.delete(key);
-        }
-      }
-
-      const params = new URLSearchParams({
-        client_id: connector.oauth_client_id,
-        redirect_uri: connector.redirect_uri,
-        scope: connector.scopes,
-        state,
-        response_type: "code",
-        access_type: "offline",
-        prompt: "consent",
-      });
-
-      const url = `${connector.oauth_auth_url}?${params.toString()}`;
-
-      return c.json({ url });
-    } finally {
-      await db.close();
+    if (result.rows.length === 0) {
+      throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
     }
+
+    const connector = result.rows[0];
+
+    if (connector.auth_type !== "oauth2") {
+      throw new PragmaError("INVALID_AUTH_TYPE", 400, "This connector does not use OAuth2");
+    }
+
+    // Check if this connector uses the OAuth proxy (only if no custom credentials are configured)
+    const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
+    const hasCustomCredentials = !!connector.oauth_client_id && !!connector.oauth_client_secret;
+    if (registryDef?.proxyProvider && !hasCustomCredentials) {
+      // Record that we initiated a proxy OAuth flow for this connector so the
+      // proxy-callback endpoint can verify the callback is expected.
+      pendingProxyOAuthFlows.set(connectorId, {
+        expiresAt: Date.now() + 10 * 60 * 1000, // 10 min
+      });
+      const proxyUrl = `${OAUTH_PROXY_URL}/auth/${registryDef.proxyProvider}?connector_id=${connectorId}&port=${options.port}`;
+      return c.json({ url: proxyUrl });
+    }
+
+    if (!connector.oauth_client_id || !connector.oauth_client_secret) {
+      throw new PragmaError("CONNECTOR_NOT_CONFIGURED", 400, "Client ID and secret must be configured first");
+    }
+
+    const state = randomUUID();
+    oauthStateStore.set(state, {
+      connectorId: connector.id,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+
+    // Clean up expired states
+    for (const [key, value] of oauthStateStore) {
+      if (value.expiresAt < Date.now()) {
+        oauthStateStore.delete(key);
+      }
+    }
+
+    const params = new URLSearchParams({
+      client_id: connector.oauth_client_id,
+      redirect_uri: connector.redirect_uri,
+      scope: connector.scopes,
+      state,
+      response_type: "code",
+      access_type: "offline",
+      prompt: "consent",
+    });
+
+    const url = `${connector.oauth_auth_url}?${params.toString()}`;
+
+    return c.json({ url });
   });
 
   // POST /connectors/proxy-callback — OAuth proxy callback (tokens sent via POST body)
@@ -4972,39 +4795,35 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
     pendingProxyOAuthFlows.delete(connectorId);
 
-    const workspaceName = await requireActiveWorkspaceName();
-    const db = await openDatabase(workspaceName);
+    const workspaceName = c.get("workspace");
+    const db = c.get("db");
 
-    try {
-      const result = await db.query<{ id: string }>(
-        `SELECT id FROM connectors WHERE id = $1 LIMIT 1`,
-        [connectorId],
-      );
+    const result = await db.query<{ id: string }>(
+      `SELECT id FROM connectors WHERE id = $1 LIMIT 1`,
+      [connectorId],
+    );
 
-      if (result.rows.length === 0) {
-        return c.html(
-          "<html><body><h2>Error</h2><p>Connector not found.</p></body></html>",
-          404,
-        );
-      }
-
-      const tokenExpiresAt = expiresIn
-        ? new Date(Date.now() + Number(expiresIn) * 1000).toISOString()
-        : new Date(Date.now() + 3600 * 1000).toISOString();
-
-      await db.query(
-        `UPDATE connectors
-         SET access_token = $1, refresh_token = $2, token_expires_at = $3, status = 'connected'
-         WHERE id = $4`,
-        [accessToken, refreshToken ?? null, tokenExpiresAt, connectorId],
-      );
-
+    if (result.rows.length === 0) {
       return c.html(
-        `<html><body><h2>Connected!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`,
+        "<html><body><h2>Error</h2><p>Connector not found.</p></body></html>",
+        404,
       );
-    } finally {
-      await db.close();
     }
+
+    const tokenExpiresAt = expiresIn
+      ? new Date(Date.now() + Number(expiresIn) * 1000).toISOString()
+      : new Date(Date.now() + 3600 * 1000).toISOString();
+
+    await db.query(
+      `UPDATE connectors
+       SET access_token = $1, refresh_token = $2, token_expires_at = $3, status = 'connected'
+       WHERE id = $4`,
+      [accessToken, refreshToken ?? null, tokenExpiresAt, connectorId],
+    );
+
+    return c.html(
+      `<html><body><h2>Connected!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`,
+    );
   });
 
   // GET /connectors/callback — OAuth callback
@@ -5023,75 +4842,71 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
     oauthStateStore.delete(state);
 
-    const workspaceName = await requireActiveWorkspaceName();
-    const db = await openDatabase(workspaceName);
+    const workspaceName = c.get("workspace");
+    const db = c.get("db");
 
-    try {
-      const result = await db.query<{
-        id: string;
-        oauth_client_id: string;
-        oauth_client_secret: string;
-        oauth_token_url: string;
-        redirect_uri: string;
-      }>(
-        `SELECT id, oauth_client_id, oauth_client_secret, oauth_token_url, redirect_uri
-         FROM connectors WHERE id = $1 LIMIT 1`,
-        [stateEntry.connectorId],
-      );
+    const result = await db.query<{
+      id: string;
+      oauth_client_id: string;
+      oauth_client_secret: string;
+      oauth_token_url: string;
+      redirect_uri: string;
+    }>(
+      `SELECT id, oauth_client_id, oauth_client_secret, oauth_token_url, redirect_uri
+       FROM connectors WHERE id = $1 LIMIT 1`,
+      [stateEntry.connectorId],
+    );
 
-      if (result.rows.length === 0) {
-        return c.html("<html><body><h2>Error</h2><p>Connector not found.</p></body></html>", 404);
-      }
-
-      const connector = result.rows[0];
-
-      // Exchange code for tokens
-      const tokenResponse = await fetch(connector.oauth_token_url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          client_id: connector.oauth_client_id,
-          client_secret: connector.oauth_client_secret,
-          redirect_uri: connector.redirect_uri,
-        }),
-      });
-
-      if (!tokenResponse.ok) {
-        const errorBody = await tokenResponse.text().catch(() => "");
-        console.error(`OAuth token exchange failed: ${tokenResponse.status} ${errorBody}`);
-        return c.html("<html><body><h2>Error</h2><p>Token exchange failed. Please try again.</p></body></html>", 500);
-      }
-
-      const tokenData = (await tokenResponse.json()) as {
-        access_token: string;
-        refresh_token?: string;
-        expires_in?: number;
-      };
-
-      const expiresAt = new Date(
-        Date.now() + (tokenData.expires_in ?? 3600) * 1000,
-      ).toISOString();
-
-      await db.query(
-        `UPDATE connectors
-         SET access_token = $1, refresh_token = $2, token_expires_at = $3, status = 'connected'
-         WHERE id = $4`,
-        [
-          tokenData.access_token,
-          tokenData.refresh_token ?? null,
-          expiresAt,
-          connector.id,
-        ],
-      );
-
-      return c.html(
-        `<html><body><h2>Connected!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`,
-      );
-    } finally {
-      await db.close();
+    if (result.rows.length === 0) {
+      return c.html("<html><body><h2>Error</h2><p>Connector not found.</p></body></html>", 404);
     }
+
+    const connector = result.rows[0];
+
+    // Exchange code for tokens
+    const tokenResponse = await fetch(connector.oauth_token_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        client_id: connector.oauth_client_id,
+        client_secret: connector.oauth_client_secret,
+        redirect_uri: connector.redirect_uri,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errorBody = await tokenResponse.text().catch(() => "");
+      console.error(`OAuth token exchange failed: ${tokenResponse.status} ${errorBody}`);
+      return c.html("<html><body><h2>Error</h2><p>Token exchange failed. Please try again.</p></body></html>", 500);
+    }
+
+    const tokenData = (await tokenResponse.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+
+    const expiresAt = new Date(
+      Date.now() + (tokenData.expires_in ?? 3600) * 1000,
+    ).toISOString();
+
+    await db.query(
+      `UPDATE connectors
+       SET access_token = $1, refresh_token = $2, token_expires_at = $3, status = 'connected'
+       WHERE id = $4`,
+      [
+        tokenData.access_token,
+        tokenData.refresh_token ?? null,
+        expiresAt,
+        connector.id,
+      ],
+    );
+
+    return c.html(
+      `<html><body><h2>Connected!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`,
+    );
   });
 
   // DELETE /connectors/:id/auth — disconnect
@@ -5100,22 +4915,18 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     if (!isLoopbackOrigin(origin)) {
       throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
     }
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const connectorId = c.req.param("id");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await db.query(
-        `UPDATE connectors
-         SET status = 'disconnected', access_token = NULL,
-             refresh_token = NULL, token_expires_at = NULL
-         WHERE id = $1`,
-        [connectorId],
-      );
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
-    }
+    const db = c.get("db");
+    await db.query(
+      `UPDATE connectors
+       SET status = 'disconnected', access_token = NULL,
+           refresh_token = NULL, token_expires_at = NULL
+       WHERE id = $1`,
+      [connectorId],
+    );
+    return c.json({ ok: true });
   });
 
   // POST /connectors/:id/ensure-binary — download binary on demand
@@ -5124,160 +4935,166 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     if (!isLoopbackOrigin(origin)) {
       throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
     }
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const connectorId = c.req.param("id");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      const row = await findOrThrow<{ name: string }>(
-        db, "connectors", connectorId, "CONNECTOR_NOT_FOUND", "Connector", "name",
-      );
+    const db = c.get("db");
+    const result = await db.query<{ name: string }>(
+      `SELECT name FROM connectors WHERE id = $1 LIMIT 1`,
+      [connectorId],
+    );
 
-      const def = CONNECTOR_REGISTRY.find((d) => d.name === row.name);
-      if (!def) {
-        throw new PragmaError("CONNECTOR_DEF_NOT_FOUND", 404, "Connector definition not found in registry");
-      }
-
-      const platform = process.platform === "darwin" ? "darwin" : "linux";
-      const arch = process.arch === "arm64" ? "arm64" : "x64";
-      const downloadUrl = def.getBinaryUrl(platform, arch);
-      const binPath = await ensureConnectorBinary(def.binaryName, downloadUrl, workspaceName);
-
-      return c.json({ ok: true, path: binPath });
-    } finally {
-      await db.close();
+    if (result.rows.length === 0) {
+      throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
     }
+
+    const def = CONNECTOR_REGISTRY.find((d) => d.name === result.rows[0].name);
+    if (!def) {
+      throw new PragmaError("CONNECTOR_DEF_NOT_FOUND", 404, "Connector definition not found in registry");
+    }
+
+    const platform = process.platform === "darwin" ? "darwin" : "linux";
+    const arch = process.arch === "arm64" ? "arm64" : "x64";
+    const downloadUrl = def.getBinaryUrl(platform, arch);
+    const binPath = await ensureConnectorBinary(def.binaryName, downloadUrl, workspaceName);
+
+    return c.json({ ok: true, path: binPath });
   });
 
   // ── Agent-Connector Assignments ──────────────────────────────────
 
   // GET /agents/:id/connectors
   app.get("/agents/:id/connectors", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const agentId = c.req.param("id");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await findOrThrow(db, "agents", agentId, "AGENT_NOT_FOUND", "Agent");
-
-      const result = await db.query<{
-        id: string;
-        name: string;
-        description: string | null;
-        status: string;
-      }>(
-        `SELECT c.id, c.name, c.description, c.status
-         FROM connectors c
-         JOIN agent_connectors ac ON ac.connector_id = c.id
-         WHERE ac.agent_id = $1
-         ORDER BY c.name ASC`,
-        [agentId],
-      );
-
-      return c.json({ connectors: result.rows });
-    } finally {
-      await db.close();
+    const db = c.get("db");
+    const agent = await db.query<{ id: string }>(
+      `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
+      [agentId],
+    );
+    if (agent.rows.length === 0) {
+      throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
     }
+
+    const result = await db.query<{
+      id: string;
+      name: string;
+      description: string | null;
+      status: string;
+    }>(
+      `SELECT c.id, c.name, c.description, c.status
+       FROM connectors c
+       JOIN agent_connectors ac ON ac.connector_id = c.id
+       WHERE ac.agent_id = $1
+       ORDER BY c.name ASC`,
+      [agentId],
+    );
+
+    return c.json({ connectors: result.rows });
   });
 
   // POST /agents/:id/connectors — assign connector
   app.post("/agents/:id/connectors", validateJson(assignAgentConnectorSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const agentId = c.req.param("id");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await findOrThrow(db, "agents", agentId, "AGENT_NOT_FOUND", "Agent");
-      await findOrThrow(db, "connectors", body.connector_id, "CONNECTOR_NOT_FOUND", "Connector");
-
-      await db.query(
-        `INSERT INTO agent_connectors (agent_id, connector_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [agentId, body.connector_id],
-      );
-
-      return c.json({ ok: true }, 201);
-    } finally {
-      await db.close();
+    const db = c.get("db");
+    const agent = await db.query<{ id: string }>(
+      `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
+      [agentId],
+    );
+    if (agent.rows.length === 0) {
+      throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
     }
+
+    const connector = await db.query<{ id: string }>(
+      `SELECT id FROM connectors WHERE id = $1 LIMIT 1`,
+      [body.connector_id],
+    );
+    if (connector.rows.length === 0) {
+      throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${body.connector_id}`);
+    }
+
+    await db.query(
+      `INSERT INTO agent_connectors (agent_id, connector_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [agentId, body.connector_id],
+    );
+
+    return c.json({ ok: true }, 201);
   });
 
   // DELETE /agents/:id/connectors/:connId — unassign connector
   app.delete("/agents/:id/connectors/:connId", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const agentId = c.req.param("id");
     const connId = c.req.param("connId");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await deleteJunctionOrThrow(
-        db, "agent_connectors", "agent_id", agentId, "connector_id", connId,
+    const db = c.get("db");
+    const result = await db.query(
+      `DELETE FROM agent_connectors WHERE agent_id = $1 AND connector_id = $2`,
+      [agentId, connId],
+    );
+    if ((result.affectedRows ?? 0) === 0) {
+      throw new PragmaError(
         "AGENT_CONNECTOR_NOT_FOUND",
+        404,
         `Connector assignment not found for agent ${agentId} and connector ${connId}`,
       );
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
     }
+
+    return c.json({ ok: true });
   });
 
   // GET /agents/:id/connectors/:connId/content — connector skill markdown
   app.get("/agents/:id/connectors/:connId/content", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const agentId = c.req.param("id");
     const connId = c.req.param("connId");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      const result = await db.query<{ content: string }>(
-        `SELECT c.content
-         FROM connectors c
-         JOIN agent_connectors ac ON ac.connector_id = c.id
-         WHERE ac.agent_id = $1 AND c.id = $2
-         LIMIT 1`,
-        [agentId, connId],
+    const db = c.get("db");
+    const result = await db.query<{ content: string }>(
+      `SELECT c.content
+       FROM connectors c
+       JOIN agent_connectors ac ON ac.connector_id = c.id
+       WHERE ac.agent_id = $1 AND c.id = $2
+       LIMIT 1`,
+      [agentId, connId],
+    );
+
+    if (result.rows.length === 0) {
+      throw new PragmaError(
+        "AGENT_CONNECTOR_NOT_FOUND",
+        404,
+        `Connector not found or not assigned to agent ${agentId}`,
       );
-
-      if (result.rows.length === 0) {
-        throw new PragmaError(
-          "AGENT_CONNECTOR_NOT_FOUND",
-          404,
-          `Connector not found or not assigned to agent ${agentId}`,
-        );
-      }
-
-      return c.text(result.rows[0].content);
-    } finally {
-      await db.close();
     }
+
+    return c.text(result.rows[0].content);
   });
 
   // ── Skills CRUD ────────────────────────────────────────────────────
 
   app.get("/skills", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
-    const db = await openDatabase(workspaceName);
+    const workspaceName = c.get("workspace");
+    const db = c.get("db");
 
-    try {
-      const result = await db.query<{
-        id: string;
-        name: string;
-        description: string | null;
-        content: string;
-      }>(`SELECT id, name, description, content FROM skills ORDER BY name ASC`);
+    const result = await db.query<{
+      id: string;
+      name: string;
+      description: string | null;
+      content: string;
+    }>(`SELECT id, name, description, content FROM skills ORDER BY name ASC`);
 
-      return c.json({ skills: result.rows });
-    } finally {
-      await db.close();
-    }
+    return c.json({ skills: result.rows });
   });
 
   app.post("/skills", validateJson(createSkillSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
+    const db = c.get("db");
     try {
       const skillId = `skill_${randomUUID().slice(0, 12)}`;
       await db.query(
@@ -5292,158 +5109,166 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         throw new PragmaError("SKILL_NAME_EXISTS", 409, `A skill with this name already exists.`);
       }
       throw new PragmaError("CREATE_SKILL_FAILED", 400, message);
-    } finally {
-      await db.close();
     }
   });
 
   app.put("/skills/:id", validateJson(updateSkillSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const id = c.req.param("id");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await findOrThrow(db, "skills", id, "SKILL_NOT_FOUND", "Skill");
-
-      const sets: string[] = [];
-      const params: unknown[] = [id];
-      let paramIndex = 2;
-
-      if (body.name !== undefined) {
-        sets.push(`name = $${paramIndex++}`);
-        params.push(body.name);
-      }
-      if (body.description !== undefined) {
-        sets.push(`description = $${paramIndex++}`);
-        params.push(body.description);
-      }
-      if (body.content !== undefined) {
-        sets.push(`content = $${paramIndex++}`);
-        params.push(body.content);
-      }
-
-      if (sets.length > 0) {
-        await db.query(`UPDATE skills SET ${sets.join(", ")} WHERE id = $1`, params);
-      }
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
+    const db = c.get("db");
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM skills WHERE id = $1 LIMIT 1`,
+      [id],
+    );
+    if (existing.rows.length === 0) {
+      throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${id}`);
     }
+
+    const sets: string[] = [];
+    const params: unknown[] = [id];
+    let paramIndex = 2;
+
+    if (body.name !== undefined) {
+      sets.push(`name = $${paramIndex++}`);
+      params.push(body.name);
+    }
+    if (body.description !== undefined) {
+      sets.push(`description = $${paramIndex++}`);
+      params.push(body.description);
+    }
+    if (body.content !== undefined) {
+      sets.push(`content = $${paramIndex++}`);
+      params.push(body.content);
+    }
+
+    if (sets.length > 0) {
+      await db.query(`UPDATE skills SET ${sets.join(", ")} WHERE id = $1`, params);
+    }
+
+    return c.json({ ok: true });
   });
 
   app.delete("/skills/:id", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const id = c.req.param("id");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await deleteOrThrow(db, "skills", id, "SKILL_NOT_FOUND", "Skill");
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
+    const db = c.get("db");
+    const result = await db.query(`DELETE FROM skills WHERE id = $1`, [id]);
+    if ((result.affectedRows ?? 0) === 0) {
+      throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${id}`);
     }
+
+    return c.json({ ok: true });
   });
 
   // ── Agent-Skill Assignments ────────────────────────────────────────
 
   app.get("/agents/:id/skills", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const agentId = c.req.param("id");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await findOrThrow(db, "agents", agentId, "AGENT_NOT_FOUND", "Agent");
-
-      const result = await db.query<{
-        id: string;
-        name: string;
-        description: string | null;
-      }>(
-        `SELECT s.id, s.name, s.description
-         FROM skills s
-         JOIN agent_skills as_rel ON as_rel.skill_id = s.id
-         WHERE as_rel.agent_id = $1
-         ORDER BY s.name ASC`,
-        [agentId],
-      );
-
-      return c.json({ skills: result.rows });
-    } finally {
-      await db.close();
+    const db = c.get("db");
+    const agent = await db.query<{ id: string }>(
+      `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
+      [agentId],
+    );
+    if (agent.rows.length === 0) {
+      throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
     }
+
+    const result = await db.query<{
+      id: string;
+      name: string;
+      description: string | null;
+    }>(
+      `SELECT s.id, s.name, s.description
+       FROM skills s
+       JOIN agent_skills as_rel ON as_rel.skill_id = s.id
+       WHERE as_rel.agent_id = $1
+       ORDER BY s.name ASC`,
+      [agentId],
+    );
+
+    return c.json({ skills: result.rows });
   });
 
   app.post("/agents/:id/skills", validateJson(assignAgentSkillSchema), async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const agentId = c.req.param("id");
     const body = c.req.valid("json");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await findOrThrow(db, "agents", agentId, "AGENT_NOT_FOUND", "Agent");
-      await findOrThrow(db, "skills", body.skill_id, "SKILL_NOT_FOUND", "Skill");
-
-      await db.query(
-        `INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [agentId, body.skill_id],
-      );
-
-      return c.json({ ok: true }, 201);
-    } finally {
-      await db.close();
+    const db = c.get("db");
+    const agent = await db.query<{ id: string }>(
+      `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
+      [agentId],
+    );
+    if (agent.rows.length === 0) {
+      throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
     }
+
+    const skill = await db.query<{ id: string }>(
+      `SELECT id FROM skills WHERE id = $1 LIMIT 1`,
+      [body.skill_id],
+    );
+    if (skill.rows.length === 0) {
+      throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${body.skill_id}`);
+    }
+
+    await db.query(
+      `INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [agentId, body.skill_id],
+    );
+
+    return c.json({ ok: true }, 201);
   });
 
   app.delete("/agents/:id/skills/:skillId", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const agentId = c.req.param("id");
     const skillId = c.req.param("skillId");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      await deleteJunctionOrThrow(
-        db, "agent_skills", "agent_id", agentId, "skill_id", skillId,
+    const db = c.get("db");
+    const result = await db.query(
+      `DELETE FROM agent_skills WHERE agent_id = $1 AND skill_id = $2`,
+      [agentId, skillId],
+    );
+    if ((result.affectedRows ?? 0) === 0) {
+      throw new PragmaError(
         "AGENT_SKILL_NOT_FOUND",
+        404,
         `Skill assignment not found for agent ${agentId} and skill ${skillId}`,
       );
-
-      return c.json({ ok: true });
-    } finally {
-      await db.close();
     }
+
+    return c.json({ ok: true });
   });
 
   app.get("/agents/:id/skills/:skillId/content", async (c) => {
-    const workspaceName = await requireActiveWorkspaceName();
+    const workspaceName = c.get("workspace");
     const agentId = c.req.param("id");
     const skillId = c.req.param("skillId");
 
-    const db = await openDatabase(workspaceName);
-    try {
-      const result = await db.query<{ content: string }>(
-        `SELECT s.content
-         FROM skills s
-         JOIN agent_skills as_rel ON as_rel.skill_id = s.id
-         WHERE as_rel.agent_id = $1 AND s.id = $2
-         LIMIT 1`,
-        [agentId, skillId],
+    const db = c.get("db");
+    const result = await db.query<{ content: string }>(
+      `SELECT s.content
+       FROM skills s
+       JOIN agent_skills as_rel ON as_rel.skill_id = s.id
+       WHERE as_rel.agent_id = $1 AND s.id = $2
+       LIMIT 1`,
+      [agentId, skillId],
+    );
+
+    if (result.rows.length === 0) {
+      throw new PragmaError(
+        "AGENT_SKILL_NOT_FOUND",
+        404,
+        `Skill not found or not assigned to agent ${agentId}`,
       );
-
-      if (result.rows.length === 0) {
-        throw new PragmaError(
-          "AGENT_SKILL_NOT_FOUND",
-          404,
-          `Skill not found or not assigned to agent ${agentId}`,
-        );
-      }
-
-      return c.text(result.rows[0].content);
-    } finally {
-      await db.close();
     }
+
+    return c.text(result.rows[0].content);
   });
 
   app.onError((error, c) => {
@@ -5474,121 +5299,6 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   process.once("SIGTERM", shutdown);
 }
 
-async function generateNextAgentId(
-  db: Awaited<ReturnType<typeof openDatabase>>,
-  name: string,
-): Promise<string> {
-  const base = normalizeAgentIdBase(name);
-  const likePattern = `${base}-%`;
-  const existing = await db.query<{ id: string }>(
-    `
-SELECT id
-FROM agents
-WHERE id = $1 OR id LIKE $2
-`,
-    [base, likePattern],
-  );
-
-  if (existing.rows.length === 0) {
-    return base;
-  }
-
-  let maxSuffix = -1;
-  const suffixRegex = new RegExp(`^${escapeRegex(base)}-(\\d+)$`);
-
-  for (const row of existing.rows) {
-    if (row.id === base) {
-      maxSuffix = Math.max(maxSuffix, 0);
-      continue;
-    }
-
-    const match = row.id.match(suffixRegex);
-    if (!match) {
-      continue;
-    }
-
-    const parsed = Number.parseInt(match[1], 10);
-    if (Number.isInteger(parsed)) {
-      maxSuffix = Math.max(maxSuffix, parsed);
-    }
-  }
-
-  return `${base}-${Math.max(1, maxSuffix + 1)}`;
-}
-
-function normalizeAgentIdBase(name: string): string {
-  const normalized = name
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-z0-9_-]/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^[_-]+|[_-]+$/g, "");
-
-  return normalized || "agent";
-}
-
-function escapeRegex(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-async function getAgentRow(
-  db: Awaited<ReturnType<typeof openDatabase>>,
-  id: string,
-): Promise<{
-  id: string;
-  name: string;
-  harness: HarnessId;
-  model_label: string;
-  model_id: string;
-  agent_file: string | null;
-} | null> {
-  const result = await db.query<{
-    id: string;
-    name: string;
-    harness: HarnessId;
-    model_label: string;
-    model_id: string;
-    agent_file: string | null;
-  }>(
-    `
-SELECT id, name, harness, model_label, model_id, agent_file
-FROM agents
-WHERE id = $1
-LIMIT 1
-`,
-    [id],
-  );
-
-  return result.rows[0] ?? null;
-}
-
-async function listPlanWorkerCandidates(
-  db: Awaited<ReturnType<typeof openDatabase>>,
-): Promise<Array<{
-  id: string;
-  name: string;
-  description: string | null;
-  harness: HarnessId;
-  model_label: string;
-}>> {
-  const result = await db.query<{
-    id: string;
-    name: string;
-    description: string | null;
-    harness: HarnessId;
-    model_label: string;
-  }>(
-    `
-SELECT id, name, description, harness, model_label
-FROM agents
-WHERE id <> $1
-ORDER BY name ASC
-`,
-    [DEFAULT_AGENT_ID],
-  );
-  return result.rows;
-}
 
 async function isDirectoryEmpty(path: string): Promise<boolean> {
   try {
@@ -5674,21 +5384,6 @@ function truncateChatText(value: string, maxLength: number): string {
   return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
-async function getStoredPlanRecipientForTurn(
-  db: Awaited<ReturnType<typeof openDatabase>>,
-  turnId: string,
-): Promise<string | null> {
-  const result = await db.query<{ selected_agent_id: string | null }>(
-    `
-SELECT selected_agent_id
-FROM conversation_turns
-WHERE id = $1
-LIMIT 1
-`,
-    [turnId],
-  );
-  return result.rows[0]?.selected_agent_id ?? null;
-}
 
 
 function buildConversationAgentEnv(input: {
@@ -6006,18 +5701,6 @@ async function isDirectory(path: string): Promise<boolean> {
   return Boolean(info?.isDirectory());
 }
 
-async function requireActiveWorkspaceName(): Promise<string> {
-  const activeWorkspace = await getActiveWorkspaceName();
-  if (!activeWorkspace) {
-    throw new PragmaError(
-      "NO_ACTIVE_WORKSPACE",
-      409,
-      "No active workspace. Create one or set an active workspace.",
-    );
-  }
-
-  return activeWorkspace;
-}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
