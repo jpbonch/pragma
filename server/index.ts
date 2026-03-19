@@ -39,6 +39,8 @@ import {
   saveDiffSnapshot,
   syncTaskOutputsBackToWorkspace,
 } from "./conversation/gitWorkflow";
+import type { TaskGitState, WorkspacePathsLike, MergeConflict } from "./conversation/gitWorkflow";
+import type { PGlite } from "@electric-sql/pglite";
 import { resolveModelId } from "./conversation/models";
 import { isLoopbackOrigin } from "../shared/net";
 import { allAdapterDefinitions, getAdapterDefinition } from "./conversation/adapterRegistry";
@@ -117,6 +119,167 @@ import { validateJson, validateQuery } from "./http/validators";
 import { runCommand, spawnShellCommand } from "./process/runCommand";
 import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "./connectorRegistry";
 import { ensureConnectorBinary } from "./connectorBinaries";
+
+/** Walk predecessor chain from a task, returning all task IDs in chain order (current first). */
+async function walkPredecessorChain(
+  db: PGlite,
+  taskId: string,
+  predecessorTaskId: string | null,
+): Promise<string[]> {
+  const chainTaskIds: string[] = [taskId];
+  let currentPredecessorId = predecessorTaskId;
+  while (currentPredecessorId) {
+    chainTaskIds.push(currentPredecessorId);
+    const predResult = await db.query<{ predecessor_task_id: string | null }>(
+      `SELECT predecessor_task_id FROM tasks WHERE id = $1 LIMIT 1`,
+      [currentPredecessorId],
+    );
+    currentPredecessorId = predResult.rows[0]?.predecessor_task_id ?? null;
+  }
+  return chainTaskIds;
+}
+
+/** Mark all tasks in a chain as completed: sync outputs, update DB, emit status, abort runners, delete worktrees. */
+async function completeChainTasks(
+  db: PGlite,
+  workspacePaths: ReturnType<typeof getWorkspacePaths>,
+  chainTaskIds: string[],
+  emitTaskStatus: (workspaceName: string, taskId: string, status: TaskStatus, source: string) => void,
+  executeRunner: { abort(taskId: string): void },
+  workspaceName: string,
+  source: string,
+): Promise<void> {
+  for (const chainId of chainTaskIds) {
+    await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId: chainId });
+    const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
+    await mkdir(mergedOutputDir, { recursive: true });
+    await db.query(
+      `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
+      [chainId, mergedOutputDir],
+    );
+    emitTaskStatus(workspaceName, chainId, "completed", source);
+    executeRunner.abort(chainId);
+    await deleteTaskWorktree({ workspacePaths, taskId: chainId });
+  }
+}
+
+/** Push all repos in a git state to their origin base branches. */
+async function pushReposToOrigin(
+  gitState: TaskGitState,
+  workspacePaths: WorkspacePathsLike,
+): Promise<void> {
+  for (const repo of gitState.repos) {
+    const repoPath = repo.relative_path === "."
+      ? workspacePaths.workspaceDir
+      : join(workspacePaths.workspaceDir, repo.relative_path);
+    await runCommand({
+      command: "git",
+      args: ["push", "origin", repo.base_branch],
+      cwd: repoPath,
+      env: process.env,
+    });
+  }
+}
+
+/**
+ * Attempt to enrich merge conflicts and enqueue a retry execution.
+ * Returns "retried" if the retry was enqueued, "retry_exhausted" if retries are used up,
+ * or "missing_context" if the retry was started but thread/turn context was unavailable.
+ */
+async function handleMergeConflictRetry(input: {
+  db: PGlite;
+  workspacePaths: ReturnType<typeof getWorkspacePaths>;
+  taskId: string;
+  gitState: TaskGitState;
+  task: { assigned_to: string | null; merge_retry_count: number | null };
+  mergeConflicts: MergeConflict[];
+  pushAfterMerge: boolean;
+  workspaceName: string;
+  emitTaskStatus: (workspaceName: string, taskId: string, status: TaskStatus, source: string) => void;
+  executeRunner: {
+    execute(opts: {
+      workspaceName: string;
+      taskId: string;
+      threadId: string;
+      prompt: string;
+      requestedRecipientAgentId?: string;
+      reasoningEffort: ReasoningEffort;
+    }): void;
+  };
+  statusSource: string;
+}): Promise<
+  | { outcome: "retried"; response: object }
+  | { outcome: "retry_exhausted" }
+  | { outcome: "missing_context" }
+> {
+  const { db, workspacePaths, taskId, gitState, task, mergeConflicts, pushAfterMerge, workspaceName, emitTaskStatus, executeRunner, statusSource } = input;
+  const retryCount = Number.isInteger(task.merge_retry_count) ? (task.merge_retry_count as number) : 0;
+  if (retryCount >= 1) {
+    return { outcome: "retry_exhausted" };
+  }
+
+  await db.query(
+    `UPDATE tasks SET status = 'merging', merge_retry_count = COALESCE(merge_retry_count, 0) + 1, push_after_merge = $2 WHERE id = $1`,
+    [taskId, pushAfterMerge],
+  );
+  emitTaskStatus(workspaceName, taskId, "merging", statusSource);
+
+  const thread = await getThreadByTaskId(db, taskId);
+  const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
+  if (!thread || !latestExecuteTurn || !latestExecuteTurn.user_message.trim()) {
+    return { outcome: "missing_context" };
+  }
+
+  const taskWorkspaceDir = join(workspacePaths.worktreesDir, taskId, "workspace");
+  const enrichedConflicts = await Promise.all(
+    mergeConflicts.map(async (conflict) => {
+      const repo = gitState.repos.find((r) => r.relative_path === conflict.repo_path);
+      const sourceRepoPath = resolveRepoPath(workspacePaths.workspaceDir, conflict.repo_path);
+      const taskRepoPath = resolveRepoPath(taskWorkspaceDir, conflict.repo_path);
+      const mainChangesSummary = repo
+        ? await getMainChangesSummary({
+            sourceRepoPath,
+            baseCommit: repo.base_commit,
+            baseBranch: repo.base_branch,
+            files: conflict.files,
+          })
+        : "";
+      return {
+        repo_path: conflict.repo_path,
+        files: conflict.files,
+        taskRepoPath,
+        branchName: gitState.branch_name,
+        baseBranch: repo?.base_branch ?? "main",
+        mainChangesSummary,
+      };
+    }),
+  );
+  const retryPrompt = buildConflictRetryPrompt({
+    originalTask: latestExecuteTurn.user_message,
+    conflicts: enrichedConflicts,
+  });
+  executeRunner.execute({
+    workspaceName,
+    taskId,
+    threadId: thread.id,
+    prompt: retryPrompt,
+    requestedRecipientAgentId: task.assigned_to ?? undefined,
+    reasoningEffort: requireReasoningEffort(
+      latestExecuteTurn.reasoning_effort,
+      `latest execute turn for conflict retry task ${taskId}`,
+    ),
+  });
+
+  return {
+    outcome: "retried",
+    response: {
+      ok: true,
+      status: "merging",
+      merge_state: "conflict_retry_enqueued",
+      conflicts: mergeConflicts,
+    },
+  };
+}
 
 function escapeHtml(str: string): string {
   return str
@@ -1816,31 +1979,8 @@ WHERE id = $1
         }
 
         const workspacePaths = getWorkspacePaths(workspaceName);
-
-        // Walk predecessor chain and mark all as completed
-        const chainTaskIds: string[] = [taskId];
-        let currentPredecessorId = task.predecessor_task_id;
-        while (currentPredecessorId) {
-          chainTaskIds.push(currentPredecessorId);
-          const predResult = await db.query<{ predecessor_task_id: string | null }>(
-            `SELECT predecessor_task_id FROM tasks WHERE id = $1 LIMIT 1`,
-            [currentPredecessorId],
-          );
-          currentPredecessorId = predResult.rows[0]?.predecessor_task_id ?? null;
-        }
-
-        for (const chainId of chainTaskIds) {
-          await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId: chainId });
-          const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
-          await mkdir(mergedOutputDir, { recursive: true });
-          await db.query(
-            `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
-            [chainId, mergedOutputDir],
-          );
-          emitTaskStatus(workspaceName, chainId, "completed", "review_mark_chain_completed");
-          executeRunner.abort(chainId);
-          await deleteTaskWorktree({ workspacePaths, taskId: chainId });
-        }
+        const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
+        await completeChainTasks(db, workspacePaths, chainTaskIds, emitTaskStatus, executeRunner, workspaceName, "review_mark_chain_completed");
 
         return c.json({
           ok: true,
@@ -1861,28 +2001,8 @@ WHERE id = $1
         if (!gitState) {
           // No git state — output-files-only chain approval, mark all chain tasks completed
           const workspacePaths = getWorkspacePaths(workspaceName);
-          const chainTaskIds: string[] = [taskId];
-          let currentPredecessorId = task.predecessor_task_id;
-          while (currentPredecessorId) {
-            chainTaskIds.push(currentPredecessorId);
-            const predResult = await db.query<{ predecessor_task_id: string | null }>(
-              `SELECT predecessor_task_id FROM tasks WHERE id = $1 LIMIT 1`,
-              [currentPredecessorId],
-            );
-            currentPredecessorId = predResult.rows[0]?.predecessor_task_id ?? null;
-          }
-          for (const chainId of chainTaskIds) {
-            await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId: chainId });
-            const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
-            await mkdir(mergedOutputDir, { recursive: true });
-            await db.query(
-              `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
-              [chainId, mergedOutputDir],
-            );
-            emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action");
-            executeRunner.abort(chainId);
-            await deleteTaskWorktree({ workspacePaths, taskId: chainId });
-          }
+          const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
+          await completeChainTasks(db, workspacePaths, chainTaskIds, emitTaskStatus, executeRunner, workspaceName, "review_chain_action");
           return c.json({
             ok: true,
             status: "completed",
@@ -1892,18 +2012,7 @@ WHERE id = $1
         }
 
         const workspacePaths = getWorkspacePaths(workspaceName);
-
-        // Walk the predecessor chain to collect all task IDs
-        const chainTaskIds: string[] = [taskId];
-        let currentPredecessorId = task.predecessor_task_id;
-        while (currentPredecessorId) {
-          chainTaskIds.push(currentPredecessorId);
-          const predResult = await db.query<{ predecessor_task_id: string | null }>(
-            `SELECT predecessor_task_id FROM tasks WHERE id = $1 LIMIT 1`,
-            [currentPredecessorId],
-          );
-          currentPredecessorId = predResult.rows[0]?.predecessor_task_id ?? null;
-        }
+        const chainTaskIds = await walkPredecessorChain(db, taskId, task.predecessor_task_id);
 
         // Merge only the current (last) task's branch — it has all cumulative commits
         const mergeResult = await mergeApprovedTask({
@@ -1924,27 +2033,15 @@ WHERE id = $1
             emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action");
           }
 
-          // Save diff snapshot for the current task
           await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
 
-          // Delete worktrees for all chain tasks
           for (const chainId of chainTaskIds) {
             executeRunner.abort(chainId);
             await deleteTaskWorktree({ workspacePaths, taskId: chainId });
           }
 
           if (pushAfterMerge) {
-            for (const repo of gitState.repos) {
-              const repoPath = repo.relative_path === "."
-                ? workspacePaths.workspaceDir
-                : join(workspacePaths.workspaceDir, repo.relative_path);
-              await runCommand({
-                command: "git",
-                args: ["push", "origin", repo.base_branch],
-                cwd: repoPath,
-                env: process.env,
-              });
-            }
+            await pushReposToOrigin(gitState, workspacePaths);
           }
 
           return c.json({
@@ -1957,64 +2054,12 @@ WHERE id = $1
         }
 
         // Merge conflicts — use same retry logic as normal approve
-        const retryCount = Number.isInteger(task.merge_retry_count) ? (task.merge_retry_count as number) : 0;
-        if (retryCount < 1) {
-          await db.query(
-            `UPDATE tasks SET status = 'merging', merge_retry_count = COALESCE(merge_retry_count, 0) + 1, push_after_merge = $2 WHERE id = $1`,
-            [taskId, pushAfterMerge],
-          );
-          emitTaskStatus(workspaceName, taskId, "merging", "review_chain_conflict_retry");
-
-          const thread = await getThreadByTaskId(db, taskId);
-          const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
-          if (thread && latestExecuteTurn && latestExecuteTurn.user_message.trim()) {
-            const taskWorkspaceDir = join(workspacePaths.worktreesDir, taskId, "workspace");
-            const enrichedConflicts = await Promise.all(
-              mergeResult.conflicts.map(async (conflict) => {
-                const repo = gitState.repos.find((r) => r.relative_path === conflict.repo_path);
-                const sourceRepoPath = resolveRepoPath(workspacePaths.workspaceDir, conflict.repo_path);
-                const taskRepoPath = resolveRepoPath(taskWorkspaceDir, conflict.repo_path);
-                const mainChangesSummary = repo
-                  ? await getMainChangesSummary({
-                      sourceRepoPath,
-                      baseCommit: repo.base_commit,
-                      baseBranch: repo.base_branch,
-                      files: conflict.files,
-                    })
-                  : "";
-                return {
-                  repo_path: conflict.repo_path,
-                  files: conflict.files,
-                  taskRepoPath,
-                  branchName: gitState.branch_name,
-                  baseBranch: repo?.base_branch ?? "main",
-                  mainChangesSummary,
-                };
-              }),
-            );
-            const retryPrompt = buildConflictRetryPrompt({
-              originalTask: latestExecuteTurn.user_message,
-              conflicts: enrichedConflicts,
-            });
-            executeRunner.execute({
-              workspaceName,
-              taskId,
-              threadId: thread.id,
-              prompt: retryPrompt,
-              requestedRecipientAgentId: task.assigned_to ?? undefined,
-              reasoningEffort: requireReasoningEffort(
-                latestExecuteTurn.reasoning_effort,
-                `latest execute turn for chain conflict retry task ${taskId}`,
-              ),
-            });
-
-            return c.json({
-              ok: true,
-              status: "merging",
-              merge_state: "conflict_retry_enqueued",
-              conflicts: mergeResult.conflicts,
-            });
-          }
+        const retryResult = await handleMergeConflictRetry({
+          db, workspacePaths, taskId, gitState, task, mergeConflicts: mergeResult.conflicts,
+          pushAfterMerge, workspaceName, emitTaskStatus, executeRunner, statusSource: "review_chain_conflict_retry",
+        });
+        if (retryResult.outcome === "retried") {
+          return c.json(retryResult.response);
         }
 
         await db.query(`UPDATE tasks SET status = 'needs_fix' WHERE id = $1`, [taskId]);
@@ -2080,17 +2125,7 @@ WHERE id = $1
         await deleteTaskWorktree({ workspacePaths, taskId });
 
         if (pushAfterMerge) {
-          for (const repo of gitState.repos) {
-            const repoPath = repo.relative_path === "."
-              ? workspacePaths.workspaceDir
-              : join(workspacePaths.workspaceDir, repo.relative_path);
-            await runCommand({
-              command: "git",
-              args: ["push", "origin", repo.base_branch],
-              cwd: repoPath,
-              env: process.env,
-            });
-          }
+          await pushReposToOrigin(gitState, workspacePaths);
         }
 
         return c.json({
@@ -2101,78 +2136,17 @@ WHERE id = $1
         });
       }
 
-      const retryCount = Number.isInteger(task.merge_retry_count) ? (task.merge_retry_count as number) : 0;
-      if (retryCount < 1) {
+      const retryResult = await handleMergeConflictRetry({
+        db, workspacePaths, taskId, gitState, task, mergeConflicts: mergeResult.conflicts,
+        pushAfterMerge, workspaceName, emitTaskStatus, executeRunner, statusSource: "review_conflict_retry",
+      });
+      if (retryResult.outcome === "retried") {
+        return c.json(retryResult.response);
+      }
+
+      if (retryResult.outcome === "missing_context") {
         await db.query(
-          `
-UPDATE tasks
-SET status = 'merging',
-    merge_retry_count = COALESCE(merge_retry_count, 0) + 1,
-    push_after_merge = $2
-WHERE id = $1
-`,
-          [taskId, pushAfterMerge],
-        );
-        emitTaskStatus(workspaceName, taskId, "merging", "review_conflict_retry");
-
-        const thread = await getThreadByTaskId(db, taskId);
-        const latestExecuteTurn = thread ? await getLatestExecuteTurn(db, thread.id) : null;
-        if (thread && latestExecuteTurn && latestExecuteTurn.user_message.trim()) {
-          const taskWorkspaceDir = join(workspacePaths.worktreesDir, taskId, "workspace");
-          const enrichedConflicts = await Promise.all(
-            mergeResult.conflicts.map(async (conflict) => {
-              const repo = gitState.repos.find((r) => r.relative_path === conflict.repo_path);
-              const sourceRepoPath = resolveRepoPath(workspacePaths.workspaceDir, conflict.repo_path);
-              const taskRepoPath = resolveRepoPath(taskWorkspaceDir, conflict.repo_path);
-              const mainChangesSummary = repo
-                ? await getMainChangesSummary({
-                    sourceRepoPath,
-                    baseCommit: repo.base_commit,
-                    baseBranch: repo.base_branch,
-                    files: conflict.files,
-                  })
-                : "";
-              return {
-                repo_path: conflict.repo_path,
-                files: conflict.files,
-                taskRepoPath,
-                branchName: gitState.branch_name,
-                baseBranch: repo?.base_branch ?? "main",
-                mainChangesSummary,
-              };
-            }),
-          );
-          const retryPrompt = buildConflictRetryPrompt({
-            originalTask: latestExecuteTurn.user_message,
-            conflicts: enrichedConflicts,
-          });
-          executeRunner.execute({
-            workspaceName,
-            taskId,
-            threadId: thread.id,
-            prompt: retryPrompt,
-            requestedRecipientAgentId: task.assigned_to ?? undefined,
-            reasoningEffort: requireReasoningEffort(
-              latestExecuteTurn.reasoning_effort,
-              `latest execute turn for conflict retry task ${taskId}`,
-            ),
-          });
-
-          return c.json({
-            ok: true,
-            status: "merging",
-            merge_state: "conflict_retry_enqueued",
-            conflicts: mergeResult.conflicts,
-          });
-        }
-
-        await db.query(
-          `
-UPDATE tasks
-SET status = 'needs_fix',
-    push_after_merge = FALSE
-WHERE id = $1
-`,
+          `UPDATE tasks SET status = 'needs_fix', push_after_merge = FALSE WHERE id = $1`,
           [taskId],
         );
         emitTaskStatus(workspaceName, taskId, "needs_fix", "review_conflict_missing_retry_context");
@@ -2185,11 +2159,7 @@ WHERE id = $1
       }
 
       await db.query(
-        `
-UPDATE tasks
-SET status = 'needs_fix'
-WHERE id = $1
-`,
+        `UPDATE tasks SET status = 'needs_fix' WHERE id = $1`,
         [taskId],
       );
       emitTaskStatus(workspaceName, taskId, "needs_fix", "review_conflict_manual");
