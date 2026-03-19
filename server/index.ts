@@ -126,6 +126,22 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#x27;");
 }
 
+/**
+ * Returns true when the Origin (or Referer) header comes from a trusted
+ * loopback address (127.0.0.1 / localhost).  Requests with no Origin header
+ * (e.g. same-origin navigations, curl) are also accepted since the CORS
+ * policy already blocks cross-origin preflights from untrusted origins.
+ */
+function isLoopbackOrigin(headerValue: string | undefined): boolean {
+  if (!headerValue) return true; // same-origin / non-browser
+  try {
+    const url = new URL(headerValue);
+    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  } catch {
+    return false;
+  }
+}
+
 type StartServerOptions = {
   port: number;
 };
@@ -530,7 +546,25 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   });
 
   const app = new Hono();
-  app.use("*", cors());
+
+  // Only allow requests from localhost / 127.0.0.1 origins (the Pragma UI).
+  app.use(
+    "*",
+    cors({
+      origin: (origin) => {
+        if (!origin) return "";
+        try {
+          const url = new URL(origin);
+          if (url.hostname === "127.0.0.1" || url.hostname === "localhost") {
+            return origin;
+          }
+        } catch {
+          // invalid origin
+        }
+        return "";
+      },
+    }),
+  );
   const emitTaskStatus = (
     workspaceName: string,
     taskId: string,
@@ -4759,6 +4793,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   // In-memory OAuth state store (state string -> { connectorId, expiresAt })
   const oauthStateStore = new Map<string, { connectorId: string; expiresAt: number }>();
 
+  // Track pending proxy-OAuth flows so /connectors/proxy-callback only accepts
+  // callbacks that correlate with a flow this server actually initiated.
+  // Key = connectorId, value = { expiresAt }.
+  const pendingProxyOAuthFlows = new Map<string, { expiresAt: number }>();
+
   async function seedConnectors(db: Awaited<ReturnType<typeof openDatabase>>): Promise<void> {
     // Ensure display_name column exists for older databases
     await db.exec(`ALTER TABLE connectors ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)`);
@@ -4918,6 +4957,10 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
   // PUT /connectors/:id/config — set client_id/secret or api_key
   app.put("/connectors/:id/config", validateJson(configureConnectorSchema), async (c) => {
+    const origin = c.req.header("origin") ?? c.req.header("referer");
+    if (!isLoopbackOrigin(origin)) {
+      throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
+    }
     const workspaceName = await requireActiveWorkspaceName();
     const connectorId = c.req.param("id");
     const body = c.req.valid("json");
@@ -5007,6 +5050,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       const registryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
       const hasCustomCredentials = !!connector.oauth_client_id && !!connector.oauth_client_secret;
       if (registryDef?.proxyProvider && !hasCustomCredentials) {
+        // Record that we initiated a proxy OAuth flow for this connector so the
+        // proxy-callback endpoint can verify the callback is expected.
+        pendingProxyOAuthFlows.set(connectorId, {
+          expiresAt: Date.now() + 10 * 60 * 1000, // 10 min
+        });
         const proxyUrl = `${OAUTH_PROXY_URL}/auth/${registryDef.proxyProvider}?connector_id=${connectorId}&port=${options.port}`;
         return c.json({ url: proxyUrl });
       }
@@ -5056,6 +5104,8 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     const error = typeof body.error === "string" ? body.error : undefined;
 
     if (error) {
+      // Still consume the pending flow on errors so it doesn't linger.
+      if (connectorId) pendingProxyOAuthFlows.delete(connectorId);
       return c.html(
         `<html><body><h2>Error</h2><p>${escapeHtml(error)}</p><button onclick="window.close()">Close</button></body></html>`,
         400,
@@ -5068,6 +5118,17 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         400,
       );
     }
+
+    // Verify this callback correlates to a proxy OAuth flow this server initiated.
+    const pendingFlow = pendingProxyOAuthFlows.get(connectorId);
+    if (!pendingFlow || pendingFlow.expiresAt < Date.now()) {
+      pendingProxyOAuthFlows.delete(connectorId);
+      return c.html(
+        "<html><body><h2>Error</h2><p>No pending OAuth flow for this connector. Please try connecting again.</p></body></html>",
+        403,
+      );
+    }
+    pendingProxyOAuthFlows.delete(connectorId);
 
     const workspaceName = await requireActiveWorkspaceName();
     const db = await openDatabase(workspaceName);
@@ -5193,6 +5254,10 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
   // DELETE /connectors/:id/auth — disconnect
   app.delete("/connectors/:id/auth", async (c) => {
+    const origin = c.req.header("origin") ?? c.req.header("referer");
+    if (!isLoopbackOrigin(origin)) {
+      throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
+    }
     const workspaceName = await requireActiveWorkspaceName();
     const connectorId = c.req.param("id");
 
@@ -5213,6 +5278,10 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
   // POST /connectors/:id/ensure-binary — download binary on demand
   app.post("/connectors/:id/ensure-binary", async (c) => {
+    const origin = c.req.header("origin") ?? c.req.header("referer");
+    if (!isLoopbackOrigin(origin)) {
+      throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
+    }
     const workspaceName = await requireActiveWorkspaceName();
     const connectorId = c.req.param("id");
 
