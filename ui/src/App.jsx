@@ -544,54 +544,29 @@ function buildEntriesFromThreadData(data, agentById) {
   return groupConsecutiveToolEntries(timeline.map((item) => item.entry))
 }
 
-function summarizeStatusEvent(name, payload) {
-  if (!name) {
-    return ''
-  }
-
-  if (name === 'orchestrator_started') {
-    return 'Orchestrator started.'
-  }
-  if (name === 'recipient_requested') {
-    return `Manual recipient requested: ${requireEventString(payload?.recipient_agent_id, 'recipient_agent_id')}`
-  }
-  if (name === 'recipient_selected') {
-    const id = requireEventString(payload?.selected_agent_id, 'selected_agent_id')
-    return `Recipient selected: ${id}`
-  }
-  if (name === 'plan_recipient_selected') {
-    const id = requireEventString(payload?.selected_agent_id, 'selected_agent_id')
-    return `Plan recipient selected: ${id}`
-  }
-  if (name === 'plan_proposal_submitted') {
-    const count = Array.isArray(payload?.tasks) ? payload.tasks.length : 0
+const EVENT_DESCRIPTIONS = {
+  orchestrator_started: () => 'Orchestrator started.',
+  recipient_requested: (p) => `Manual recipient requested: ${requireEventString(p?.recipient_agent_id, 'recipient_agent_id')}`,
+  recipient_selected: (p) => `Recipient selected: ${requireEventString(p?.selected_agent_id, 'selected_agent_id')}`,
+  plan_recipient_selected: (p) => `Plan recipient selected: ${requireEventString(p?.selected_agent_id, 'selected_agent_id')}`,
+  plan_proposal_submitted: (p) => {
+    const count = Array.isArray(p?.tasks) ? p.tasks.length : 0
     return `Plan proposal submitted with ${count} task${count !== 1 ? 's' : ''}.`
-  }
-  if (name === 'recipient_selected_via_cli') {
-    return ''
-  }
-  if (name === 'worker_started') {
-    return `Worker started: ${requireEventString(payload?.worker_agent_id, 'worker_agent_id')}`
-  }
-  if (name === 'recipient_required') {
-    return requireEventString(payload?.reason, 'reason')
-  }
-  if (name === 'worker_question_requested') {
-    return requireEventString(payload?.question, 'question')
-  }
-  if (name === 'worker_help_requested') {
-    return requireEventString(payload?.summary, 'summary')
-  }
-  if (name === 'human_response_received') {
-    return 'Human response received. Resuming worker.'
-  }
-  if (name === 'worker_completed') {
-    return 'Worker completed.'
-  }
-  if (name === 'task_reopened') {
-    return 'Task reopened. Send a follow-up message to continue.'
-  }
-  return ''
+  },
+  recipient_selected_via_cli: () => '',
+  worker_started: (p) => `Worker started: ${requireEventString(p?.worker_agent_id, 'worker_agent_id')}`,
+  recipient_required: (p) => requireEventString(p?.reason, 'reason'),
+  worker_question_requested: (p) => requireEventString(p?.question, 'question'),
+  worker_help_requested: (p) => requireEventString(p?.summary, 'summary'),
+  human_response_received: () => 'Human response received. Resuming worker.',
+  worker_completed: () => 'Worker completed.',
+  task_reopened: () => 'Task reopened. Send a follow-up message to continue.',
+}
+
+function summarizeStatusEvent(name, payload) {
+  if (!name) return ''
+  const fn = EVENT_DESCRIPTIONS[name]
+  return fn ? fn(payload) : ''
 }
 
 function requireEventString(value, fieldName) {
