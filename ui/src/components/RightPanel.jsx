@@ -241,7 +241,6 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
   const [harness, setHarness] = useState('claude_code')
   const [modelLabel, setModelLabel] = useState('Opus 4.6')
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   // CLI / harness data fetched from backend
@@ -501,24 +500,19 @@ function AgentProfileModal({ open, loading, error, title, subtitle, agent, onClo
         <div className="agent-profile-actions">
           {onDelete && (
             <button
-              className={`agent-profile-delete${confirmDelete ? ' agent-profile-delete--confirm' : ''}`}
+              className="agent-profile-delete"
               onClick={async () => {
-                if (!confirmDelete) {
-                  setConfirmDelete(true)
-                  return
-                }
                 setDeleting(true)
                 try {
                   await onDelete()
                 } catch {
                   setDeleting(false)
-                  setConfirmDelete(false)
                 }
               }}
               disabled={loading || deleting}
             >
               <Trash2 size={13} strokeWidth={2} />
-              {deleting ? 'Deleting...' : confirmDelete ? 'Confirm' : 'Delete'}
+              {deleting ? 'Deleting...' : 'Delete'}
             </button>
           )}
           <div className="agent-profile-actions-right">

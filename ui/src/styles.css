@@ -3995,11 +3995,6 @@ select { cursor: pointer; }
   color: #dc3545;
   background: rgba(220, 53, 69, 0.06);
 }
-.agent-profile-delete--confirm {
-  color: #dc3545;
-  background: rgba(220, 53, 69, 0.06);
-  font-weight: 600;
-}
 .agent-profile-delete:disabled {
   opacity: 0.5;
   cursor: default;
