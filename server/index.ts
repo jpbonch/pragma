@@ -853,6 +853,12 @@ WHERE id = $1
     const db = await openDatabase(workspaceName);
 
     try {
+      // Unassign tasks referencing this agent to avoid foreign key violation
+      await db.query(
+        `UPDATE tasks SET assigned_to = NULL WHERE assigned_to = $1`,
+        [id],
+      );
+
       const deleted = await db.query(
         `DELETE FROM agents WHERE id = $1`,
         [id],
