@@ -16,13 +16,17 @@ import {
   PragmaError,
   createWorkspace,
   deleteWorkspace,
+  deleteJunctionOrThrow,
+  deleteOrThrow,
   closeOpenDatabases,
+  findOrThrow,
   getActiveWorkspaceName,
   getWorkspacePaths,
   listWorkspaceNames,
   openDatabase,
   setActiveWorkspaceName,
   setupPragma,
+  updateOrThrow,
   updateTaskTitle,
 } from "./db";
 import { generateTitle } from "./conversation/titleGenerator";
@@ -962,33 +966,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     const db = await openDatabase(workspaceName);
     try {
       const modelId = resolveModelId(body.harness, body.model_label);
-      const updated = await db.query(
-        `
-UPDATE agents
-SET name = $2,
-    description = $3,
-    agent_file = $4,
-    emoji = $5,
-    harness = $6,
-    model_label = $7,
-    model_id = $8
-WHERE id = $1
-`,
-        [
-          id,
-          body.name,
-          body.description ?? null,
-          body.agent_file,
-          body.emoji,
-          body.harness,
-          body.model_label,
-          modelId,
-        ],
+      await updateOrThrow(
+        db,
+        `UPDATE agents
+SET name = $2, description = $3, agent_file = $4, emoji = $5,
+    harness = $6, model_label = $7, model_id = $8
+WHERE id = $1`,
+        [id, body.name, body.description ?? null, body.agent_file, body.emoji, body.harness, body.model_label, modelId],
+        "AGENT_NOT_FOUND", "Agent", id,
       );
-
-      if ((updated.affectedRows ?? 0) === 0) {
-        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${id}`);
-      }
 
       return c.json({ ok: true });
     } finally {
@@ -1008,14 +994,7 @@ WHERE id = $1
         [id],
       );
 
-      const deleted = await db.query(
-        `DELETE FROM agents WHERE id = $1`,
-        [id],
-      );
-
-      if ((deleted.affectedRows ?? 0) === 0) {
-        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${id}`);
-      }
+      await deleteOrThrow(db, "agents", id, "AGENT_NOT_FOUND", "Agent");
 
       return c.json({ ok: true });
     } finally {
@@ -1164,14 +1143,12 @@ WHERE id = $1
     const db = await openDatabase(workspaceName);
 
     try {
-      const updated = await db.query(
+      await updateOrThrow(
+        db,
         `UPDATE humans SET emoji = $2 WHERE id = $1`,
         [id, body.emoji],
+        "HUMAN_NOT_FOUND", "Human", id,
       );
-
-      if ((updated.affectedRows ?? 0) === 0) {
-        throw new PragmaError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
-      }
 
       return c.json({ ok: true });
     } finally {
@@ -1185,14 +1162,7 @@ WHERE id = $1
     const db = await openDatabase(workspaceName);
 
     try {
-      const deleted = await db.query(
-        `DELETE FROM humans WHERE id = $1`,
-        [id],
-      );
-
-      if ((deleted.affectedRows ?? 0) === 0) {
-        throw new PragmaError("HUMAN_NOT_FOUND", 404, `Human not found: ${id}`);
-      }
+      await deleteOrThrow(db, "humans", id, "HUMAN_NOT_FOUND", "Human");
 
       return c.json({ ok: true });
     } finally {
@@ -4929,17 +4899,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const existing = await db.query<{
-        id: string;
-        name: string;
-        auth_type: string;
-      }>(`SELECT id, name, auth_type FROM connectors WHERE id = $1 LIMIT 1`, [connectorId]);
-
-      if (existing.rows.length === 0) {
-        throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
-      }
-
-      const connector = existing.rows[0];
+      const connector = await findOrThrow<{ id: string; name: string; auth_type: string }>(
+        db, "connectors", connectorId, "CONNECTOR_NOT_FOUND", "Connector", "id, name, auth_type",
+      );
 
       if (connector.auth_type === "api_key" && body.access_token) {
         // For api_key connectors, setting the token directly connects
@@ -4982,7 +4944,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const result = await db.query<{
+      const connector = await findOrThrow<{
         id: string;
         name: string;
         oauth_client_id: string | null;
@@ -4992,17 +4954,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         redirect_uri: string;
         auth_type: string;
       }>(
-        `SELECT id, name, oauth_client_id, oauth_client_secret, oauth_auth_url,
-                scopes, redirect_uri, auth_type
-         FROM connectors WHERE id = $1 LIMIT 1`,
-        [connectorId],
+        db, "connectors", connectorId, "CONNECTOR_NOT_FOUND", "Connector",
+        "id, name, oauth_client_id, oauth_client_secret, oauth_auth_url, scopes, redirect_uri, auth_type",
       );
-
-      if (result.rows.length === 0) {
-        throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
-      }
-
-      const connector = result.rows[0];
 
       if (connector.auth_type !== "oauth2") {
         throw new PragmaError("INVALID_AUTH_TYPE", 400, "This connector does not use OAuth2");
@@ -5249,16 +5203,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const result = await db.query<{ name: string }>(
-        `SELECT name FROM connectors WHERE id = $1 LIMIT 1`,
-        [connectorId],
+      const row = await findOrThrow<{ name: string }>(
+        db, "connectors", connectorId, "CONNECTOR_NOT_FOUND", "Connector", "name",
       );
 
-      if (result.rows.length === 0) {
-        throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
-      }
-
-      const def = CONNECTOR_REGISTRY.find((d) => d.name === result.rows[0].name);
+      const def = CONNECTOR_REGISTRY.find((d) => d.name === row.name);
       if (!def) {
         throw new PragmaError("CONNECTOR_DEF_NOT_FOUND", 404, "Connector definition not found in registry");
       }
@@ -5283,13 +5232,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const agent = await db.query<{ id: string }>(
-        `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
-        [agentId],
-      );
-      if (agent.rows.length === 0) {
-        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
-      }
+      await findOrThrow(db, "agents", agentId, "AGENT_NOT_FOUND", "Agent");
 
       const result = await db.query<{
         id: string;
@@ -5319,21 +5262,8 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const agent = await db.query<{ id: string }>(
-        `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
-        [agentId],
-      );
-      if (agent.rows.length === 0) {
-        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
-      }
-
-      const connector = await db.query<{ id: string }>(
-        `SELECT id FROM connectors WHERE id = $1 LIMIT 1`,
-        [body.connector_id],
-      );
-      if (connector.rows.length === 0) {
-        throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${body.connector_id}`);
-      }
+      await findOrThrow(db, "agents", agentId, "AGENT_NOT_FOUND", "Agent");
+      await findOrThrow(db, "connectors", body.connector_id, "CONNECTOR_NOT_FOUND", "Connector");
 
       await db.query(
         `INSERT INTO agent_connectors (agent_id, connector_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
@@ -5354,17 +5284,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const result = await db.query(
-        `DELETE FROM agent_connectors WHERE agent_id = $1 AND connector_id = $2`,
-        [agentId, connId],
+      await deleteJunctionOrThrow(
+        db, "agent_connectors", "agent_id", agentId, "connector_id", connId,
+        "AGENT_CONNECTOR_NOT_FOUND",
+        `Connector assignment not found for agent ${agentId} and connector ${connId}`,
       );
-      if ((result.affectedRows ?? 0) === 0) {
-        throw new PragmaError(
-          "AGENT_CONNECTOR_NOT_FOUND",
-          404,
-          `Connector assignment not found for agent ${agentId} and connector ${connId}`,
-        );
-      }
 
       return c.json({ ok: true });
     } finally {
@@ -5454,13 +5378,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const existing = await db.query<{ id: string }>(
-        `SELECT id FROM skills WHERE id = $1 LIMIT 1`,
-        [id],
-      );
-      if (existing.rows.length === 0) {
-        throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${id}`);
-      }
+      await findOrThrow(db, "skills", id, "SKILL_NOT_FOUND", "Skill");
 
       const sets: string[] = [];
       const params: unknown[] = [id];
@@ -5495,10 +5413,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const result = await db.query(`DELETE FROM skills WHERE id = $1`, [id]);
-      if ((result.affectedRows ?? 0) === 0) {
-        throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${id}`);
-      }
+      await deleteOrThrow(db, "skills", id, "SKILL_NOT_FOUND", "Skill");
 
       return c.json({ ok: true });
     } finally {
@@ -5514,13 +5429,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const agent = await db.query<{ id: string }>(
-        `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
-        [agentId],
-      );
-      if (agent.rows.length === 0) {
-        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
-      }
+      await findOrThrow(db, "agents", agentId, "AGENT_NOT_FOUND", "Agent");
 
       const result = await db.query<{
         id: string;
@@ -5548,21 +5457,8 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const agent = await db.query<{ id: string }>(
-        `SELECT id FROM agents WHERE id = $1 LIMIT 1`,
-        [agentId],
-      );
-      if (agent.rows.length === 0) {
-        throw new PragmaError("AGENT_NOT_FOUND", 404, `Agent not found: ${agentId}`);
-      }
-
-      const skill = await db.query<{ id: string }>(
-        `SELECT id FROM skills WHERE id = $1 LIMIT 1`,
-        [body.skill_id],
-      );
-      if (skill.rows.length === 0) {
-        throw new PragmaError("SKILL_NOT_FOUND", 404, `Skill not found: ${body.skill_id}`);
-      }
+      await findOrThrow(db, "agents", agentId, "AGENT_NOT_FOUND", "Agent");
+      await findOrThrow(db, "skills", body.skill_id, "SKILL_NOT_FOUND", "Skill");
 
       await db.query(
         `INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
@@ -5582,17 +5478,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const db = await openDatabase(workspaceName);
     try {
-      const result = await db.query(
-        `DELETE FROM agent_skills WHERE agent_id = $1 AND skill_id = $2`,
-        [agentId, skillId],
+      await deleteJunctionOrThrow(
+        db, "agent_skills", "agent_id", agentId, "skill_id", skillId,
+        "AGENT_SKILL_NOT_FOUND",
+        `Skill assignment not found for agent ${agentId} and skill ${skillId}`,
       );
-      if ((result.affectedRows ?? 0) === 0) {
-        throw new PragmaError(
-          "AGENT_SKILL_NOT_FOUND",
-          404,
-          `Skill assignment not found for agent ${agentId} and skill ${skillId}`,
-        );
-      }
 
       return c.json({ ok: true });
     } finally {

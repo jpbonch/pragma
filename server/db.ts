@@ -170,6 +170,79 @@ export class PragmaError extends Error {
   }
 }
 
+/**
+ * Query a single row by ID and throw a PragmaError(404) if it doesn't exist.
+ */
+export async function findOrThrow<T extends Record<string, unknown>>(
+  db: PGlite,
+  table: string,
+  id: string,
+  errorCode: string,
+  label: string = table.replace(/_/g, " "),
+  columns: string = "id",
+): Promise<T> {
+  const result = await db.query<T>(`SELECT ${columns} FROM ${table} WHERE id = $1 LIMIT 1`, [id]);
+  if (result.rows.length === 0) {
+    throw new PragmaError(errorCode, 404, `${label} not found: ${id}`);
+  }
+  return result.rows[0];
+}
+
+/**
+ * Delete a row by ID and throw a PragmaError(404) if no row was affected.
+ */
+export async function deleteOrThrow(
+  db: PGlite,
+  table: string,
+  id: string,
+  errorCode: string,
+  label: string = table.replace(/_/g, " "),
+): Promise<void> {
+  const result = await db.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+  if ((result.affectedRows ?? 0) === 0) {
+    throw new PragmaError(errorCode, 404, `${label} not found: ${id}`);
+  }
+}
+
+/**
+ * Run an UPDATE and throw a PragmaError(404) if no row was affected.
+ */
+export async function updateOrThrow(
+  db: PGlite,
+  sql: string,
+  params: unknown[],
+  errorCode: string,
+  label: string,
+  id: string,
+): Promise<void> {
+  const result = await db.query(sql, params);
+  if ((result.affectedRows ?? 0) === 0) {
+    throw new PragmaError(errorCode, 404, `${label} not found: ${id}`);
+  }
+}
+
+/**
+ * Delete a junction-table row by two composite-key columns and throw 404 if not found.
+ */
+export async function deleteJunctionOrThrow(
+  db: PGlite,
+  table: string,
+  col1: string,
+  val1: string,
+  col2: string,
+  val2: string,
+  errorCode: string,
+  message: string,
+): Promise<void> {
+  const result = await db.query(
+    `DELETE FROM ${table} WHERE ${col1} = $1 AND ${col2} = $2`,
+    [val1, val2],
+  );
+  if ((result.affectedRows ?? 0) === 0) {
+    throw new PragmaError(errorCode, 404, message);
+  }
+}
+
 export function getPragmaRoot(): string {
   return PRAGMA_DIR;
 }
