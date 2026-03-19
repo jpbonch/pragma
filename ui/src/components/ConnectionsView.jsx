@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Download, Trash2, Plus, X, Link, Unlink, Settings, Key, ChevronRight } from 'lucide-react'
+import { AlertCircle, Download, Trash2, Plus, X, Link, Unlink, Settings, Key } from 'lucide-react'
 import {
   fetchSkillRegistry,
   fetchInstalledSkills,
@@ -80,7 +80,7 @@ export function ConnectionsView() {
   const [createForm, setCreateForm] = useState({ name: '', description: '', content: '' })
   const [creating, setCreating] = useState(false)
 
-  const [expandedSkillId, setExpandedSkillId] = useState(null)
+  const [viewingSkill, setViewingSkill] = useState(null)
 
   // Connector state
   const [connectors, setConnectors] = useState([])
@@ -655,19 +655,16 @@ export function ConnectionsView() {
                   </div>
                   <p className="cn-section-desc">Saved prompts that teach your agents new abilities. Install a skill from the catalog or create your own to give agents specialized knowledge and behaviors.</p>
                   <div className="cn-list">
-                    {installed.map((skill) => {
-                      const isExpanded = expandedSkillId === skill.id
-                      return (
-                        <div key={skill.id} className={`cn-skill-block ${isExpanded ? 'cn-skill-block--expanded' : ''}`}>
+                    {installed.map((skill) => (
+                        <div key={skill.id} className="cn-skill-block">
                           <div
                             className="cn-row cn-row--installed cn-row--clickable"
-                            onClick={() => setExpandedSkillId(isExpanded ? null : skill.id)}
+                            onClick={() => setViewingSkill(skill)}
                           >
                             <div className="cn-row-left">
-                              <ChevronRight size={13} className={`cn-skill-chevron ${isExpanded ? 'cn-skill-chevron--open' : ''}`} />
                               <span className="cn-row-name">{skill.name}</span>
                               <span className="cn-badge cn-badge--installed">Installed</span>
-                              {!isExpanded && skill.description && (
+                              {skill.description && (
                                 <span className="cn-row-desc">{skill.description}</span>
                               )}
                             </div>
@@ -686,33 +683,20 @@ export function ConnectionsView() {
                               </button>
                             </div>
                           </div>
-                          {isExpanded && (
-                            <div className="cn-skill-detail">
-                              {skill.description && (
-                                <div className="cn-skill-detail-desc">{skill.description}</div>
-                              )}
-                              {skill.content && (
-                                <pre className="cn-skill-detail-content">{skill.content}</pre>
-                              )}
-                            </div>
-                          )}
                         </div>
-                      )
-                    })}
+                    ))}
 
                     {catalogSkills.filter((s) => !installedNames.has(s.name)).map((skill) => {
                       const catalogKey = `catalog-${skill.provider}-${skill.name}`
-                      const isExpanded = expandedSkillId === catalogKey
                       return (
-                        <div key={catalogKey} className={`cn-skill-block ${isExpanded ? 'cn-skill-block--expanded' : ''}`}>
+                        <div key={catalogKey} className="cn-skill-block">
                           <div
-                            className={`cn-row cn-row--clickable`}
-                            onClick={() => setExpandedSkillId(isExpanded ? null : catalogKey)}
+                            className="cn-row cn-row--clickable"
+                            onClick={() => setViewingSkill(skill)}
                           >
                             <div className="cn-row-left">
-                              <ChevronRight size={13} className={`cn-skill-chevron ${isExpanded ? 'cn-skill-chevron--open' : ''}`} />
                               <span className="cn-row-name">{skill.name}</span>
-                              {!isExpanded && skill.description && (
+                              {skill.description && (
                                 <span className="cn-row-desc">{skill.description}</span>
                               )}
                             </div>
@@ -731,11 +715,6 @@ export function ConnectionsView() {
                               </button>
                             </div>
                           </div>
-                          {isExpanded && skill.description && (
-                            <div className="cn-skill-detail">
-                              <div className="cn-skill-detail-desc">{skill.description}</div>
-                            </div>
-                          )}
                         </div>
                       )
                     })}
@@ -867,6 +846,25 @@ export function ConnectionsView() {
           </>
         )}
       </div>
+
+      {viewingSkill && (
+        <div className="modal-backdrop" onClick={() => setViewingSkill(null)}>
+          <div className="modal-card cn-skill-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="cn-skill-modal-header">
+              <h2>{viewingSkill.name}</h2>
+              <button className="cn-skill-modal-close" onClick={() => setViewingSkill(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            {viewingSkill.description && (
+              <p className="cn-skill-modal-desc">{viewingSkill.description}</p>
+            )}
+            {viewingSkill.content && (
+              <pre className="cn-skill-modal-content">{viewingSkill.content}</pre>
+            )}
+          </div>
+        </div>
+      )}
 
       {showCreateModal && (
         <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>

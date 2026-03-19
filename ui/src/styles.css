@@ -5808,42 +5808,62 @@ select { cursor: pointer; }
 .cn-row--installed:hover { background: #f4f5f6; }
 .cn-row--connected { background: #f9fafb; }
 
-/* Skill expand/collapse block */
+/* Skill block */
 .cn-skill-block { background: #fff; }
 .cn-skill-block:not(:last-child) { border-bottom: 1px solid #f0efec; }
 .cn-skill-block .cn-row { border-bottom: none; }
-.cn-skill-block--expanded { background: #f9fafb; }
-.cn-skill-block--expanded .cn-row { background: transparent; }
-.cn-skill-block--expanded .cn-row:hover { background: transparent; }
 
-.cn-skill-chevron {
+/* Skill detail modal */
+.cn-skill-modal {
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+.cn-skill-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cn-skill-modal-header h2 {
+  margin-bottom: 0;
+}
+.cn-skill-modal-close {
+  background: none;
+  border: none;
   color: #9b9a97;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  transition: transform 0.15s ease;
+  transition: background 0.1s, color 0.1s;
 }
-.cn-skill-chevron--open { transform: rotate(90deg); }
-
-.cn-skill-detail {
-  padding: 0 14px 12px 40px;
+.cn-skill-modal-close:hover {
+  background: #f0efec;
+  color: #37352f;
 }
-.cn-skill-detail-desc {
-  font-size: 12.5px;
+.cn-skill-modal-desc {
+  font-size: 13px;
   color: #55534e;
-  line-height: 1.5;
-  margin-bottom: 8px;
+  line-height: 1.55;
+  margin: 8px 0 0;
 }
-.cn-skill-detail-content {
+.cn-skill-modal-content {
   font-size: 12px;
   line-height: 1.55;
   color: #37352f;
-  background: #fff;
+  background: #f9fafb;
   border: 1px solid #e8e7e4;
   border-radius: 6px;
-  padding: 10px 12px;
-  margin: 0;
+  padding: 12px 14px;
+  margin: 14px 0 0;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 320px;
+  max-height: 50vh;
   overflow-y: auto;
   font-family: 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', monospace;
 }
