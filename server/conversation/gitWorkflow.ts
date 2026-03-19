@@ -1,4 +1,15 @@
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  cp,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { runCommand } from "../process/runCommand";
 
@@ -257,6 +268,15 @@ export async function mergeApprovedTask(input: {
   }
 
   if (conflicts.length === 0) {
+    for (const repo of input.gitState.repos) {
+      const sourceRepoPath = resolveRepoPath(input.workspacePaths.workspaceDir, repo.relative_path);
+      const taskRepoPath = resolveRepoPath(taskWorkspaceDir, repo.relative_path);
+      await syncGitignoredFilesBackToSource({
+        sourceRepoPath,
+        worktreePath: taskRepoPath,
+      });
+    }
+
     await syncNonRepoCodeBackToWorkspace({
       sourceCodeDir: join(taskWorkspaceDir, "code"),
       targetCodeDir: input.workspacePaths.codeDir,
@@ -380,6 +400,8 @@ async function createFreshTaskWorktrees(input: {
       startPoint: baseCommit,
     });
 
+    await symlinkOrCopyGitignoredFiles({ sourceRepoPath, worktreePath: taskRepoPath });
+
     repos.push({
       relative_path: relativePath,
       base_branch: baseBranch,
@@ -420,6 +442,8 @@ async function createFollowupTaskWorktrees(input: {
       startPoint: predecessorHead,
     });
 
+    await symlinkOrCopyGitignoredFiles({ sourceRepoPath, worktreePath: taskRepoPath });
+
     repos.push({
       relative_path: relativePath,
       // base_branch stays the same as predecessor's (e.g., main) for final merge
@@ -452,6 +476,9 @@ async function ensureExistingTaskWorktrees(input: {
       branchName: input.gitState.branch_name,
       startPoint: repo.base_commit,
     });
+
+    await symlinkOrCopyGitignoredFiles({ sourceRepoPath, worktreePath: taskRepoPath });
+
     repos.push({
       relative_path: relativePath,
       base_branch: repo.base_branch,
@@ -483,6 +510,99 @@ async function ensureWorktree(input: {
     ? ["worktree", "add", "--force", input.worktreePath, input.branchName]
     : ["worktree", "add", "--force", "-b", input.branchName, input.worktreePath, input.startPoint];
   await runGit(input.sourceRepoPath, args);
+}
+
+async function getTopLevelGitignoredEntries(repoPath: string): Promise<string[]> {
+  let output: string;
+  try {
+    output = await runGitCapture(repoPath, [
+      "ls-files",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+      "--directory",
+    ]);
+  } catch {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const entries: string[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Extract top-level segment only (e.g. "node_modules/" from "node_modules/foo/bar")
+    const firstSlash = trimmed.indexOf("/");
+    const topLevel = firstSlash === -1 ? trimmed : trimmed.slice(0, firstSlash + 1);
+    const name = topLevel.replace(/\/$/, "");
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    entries.push(name);
+  }
+
+  return entries;
+}
+
+async function symlinkOrCopyGitignoredFiles(input: {
+  sourceRepoPath: string;
+  worktreePath: string;
+}): Promise<void> {
+  const entries = await getTopLevelGitignoredEntries(input.sourceRepoPath);
+
+  for (const entry of entries) {
+    const sourcePath = join(input.sourceRepoPath, entry);
+    const targetPath = join(input.worktreePath, entry);
+
+    try {
+      // Skip if already exists in worktree (tracked file or previously created)
+      const existing = await lstat(targetPath).catch(() => null);
+      if (existing) continue;
+
+      const sourceStat = await lstat(sourcePath).catch(() => null);
+      if (!sourceStat) continue;
+
+      if (sourceStat.isDirectory()) {
+        // Large directories → symlink
+        await symlink(sourcePath, targetPath);
+      } else if (sourceStat.isFile()) {
+        // Small files → copy (avoids shared-mutation for .env etc.)
+        await copyFile(sourcePath, targetPath);
+      }
+    } catch {
+      // Silently continue on individual failures (race conditions, permissions, etc.)
+    }
+  }
+}
+
+async function syncGitignoredFilesBackToSource(input: {
+  sourceRepoPath: string;
+  worktreePath: string;
+}): Promise<void> {
+  const entries = await getTopLevelGitignoredEntries(input.sourceRepoPath);
+
+  for (const entry of entries) {
+    const worktreeEntryPath = join(input.worktreePath, entry);
+    const sourceEntryPath = join(input.sourceRepoPath, entry);
+
+    try {
+      const worktreeStat = await lstat(worktreeEntryPath).catch(() => null);
+      if (!worktreeStat) continue;
+
+      // If it's still a symlink, source already has the content — nothing to do
+      if (worktreeStat.isSymbolicLink()) continue;
+
+      if (worktreeStat.isFile()) {
+        // Agent replaced copied file — copy it back to source
+        await copyFile(worktreeEntryPath, sourceEntryPath);
+      } else if (worktreeStat.isDirectory()) {
+        // Agent replaced symlink with real directory — copy back to source
+        await rm(sourceEntryPath, { recursive: true, force: true });
+        await cp(worktreeEntryPath, sourceEntryPath, { recursive: true });
+      }
+    } catch {
+      // Silently continue on individual failures
+    }
+  }
 }
 
 async function discoverFlatRepoPaths(paths: WorkspacePathsLike): Promise<string[]> {
