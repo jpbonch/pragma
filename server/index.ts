@@ -634,6 +634,27 @@ function listRuntimeServices(workspaceName: string): RuntimeServiceSummary[] {
     .map((service) => toRuntimeServiceSummary(service));
 }
 
+function getPreferredRuntimeServiceByProcessId(
+  workspaceName: string,
+  processId: string,
+): RuntimeServiceRecord | null {
+  const store = getWorkspaceServiceStore(workspaceName);
+  const matches = [...store.values()].filter((service) => service.process_db_id === processId);
+  if (matches.length === 0) {
+    return null;
+  }
+
+  matches.sort((a, b) => {
+    const aLive = a.status === "running" || a.status === "ready";
+    const bLive = b.status === "running" || b.status === "ready";
+    if (aLive && !bLive) return -1;
+    if (!aLive && bLive) return 1;
+    return b.started_at.localeCompare(a.started_at);
+  });
+
+  return matches[0] ?? null;
+}
+
 function getRuntimeService(workspaceName: string, serviceId: string): RuntimeServiceRecord | null {
   const store = getWorkspaceServiceStore(workspaceName);
   return store.get(serviceId) ?? null;
@@ -1465,7 +1486,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     const runtimeServices = listRuntimeServices(workspaceName);
     const runtimeByDbId = new Map<string, RuntimeServiceSummary>();
     for (const svc of runtimeServices) {
-      if (svc.process_db_id) {
+      if (svc.process_db_id && !runtimeByDbId.has(svc.process_db_id)) {
         runtimeByDbId.set(svc.process_db_id, svc);
       }
     }
@@ -1603,12 +1624,9 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
     // Stop if running
     if (existing.rows[0].status === "running") {
-      const store = getWorkspaceServiceStore(workspaceName);
-      for (const service of store.values()) {
-        if (service.process_db_id === processId) {
-          stopRuntimeService(service);
-          break;
-        }
+      const service = getPreferredRuntimeServiceByProcessId(workspaceName, processId);
+      if (service) {
+        stopRuntimeService(service);
       }
     }
 
@@ -1634,14 +1652,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     }
 
     const proc = result.rows[0];
-    const store = getWorkspaceServiceStore(workspaceName);
-    let liveService: RuntimeServiceRecord | null = null;
-    for (const service of store.values()) {
-      if (service.process_db_id === processId) {
-        liveService = service;
-        break;
-      }
-    }
+    const liveService = getPreferredRuntimeServiceByProcessId(workspaceName, processId);
 
     const liveRunning =
       liveService &&
@@ -1715,12 +1726,10 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       throw new PragmaError("PROCESS_NOT_FOUND", 404, `Process not found: ${processId}`);
     }
 
-    const store = getWorkspaceServiceStore(workspaceName);
-    for (const service of store.values()) {
-      if (service.process_db_id === processId) {
-        stopRuntimeService(service);
-        return c.json({ ok: true, service: toRuntimeServiceSummary(service) });
-      }
+    const service = getPreferredRuntimeServiceByProcessId(workspaceName, processId);
+    if (service) {
+      stopRuntimeService(service);
+      return c.json({ ok: true, service: toRuntimeServiceSummary(service) });
     }
 
     // Not in memory — just update DB

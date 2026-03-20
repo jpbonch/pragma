@@ -39,7 +39,7 @@ function SidebarProcesses({ processes, services, activeServiceId, onOpenService,
   const runtimeByDbId = useMemo(() => {
     const map = new Map()
     for (const svc of services) {
-      if (svc.process_db_id) map.set(svc.process_db_id, svc)
+      if (svc.process_db_id && !map.has(svc.process_db_id)) map.set(svc.process_db_id, svc)
     }
     return map
   }, [services])
