@@ -633,11 +633,32 @@ async function getRandomFreePort(): Promise<number> {
   });
 }
 
+async function tryPort(port: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.listen(port, "127.0.0.1", () => {
+      srv.close(() => resolve(port));
+    });
+    srv.on("error", () => resolve(null));
+  });
+}
+
 async function runAll(): Promise<void> {
-  const apiUrl = DEFAULT_API_URL;
-  const uiUrl = DEFAULT_UI_URL;
-  const serverPort = parsePort(new URL(apiUrl).port || "3000");
-  const uiPort = parsePort(new URL(uiUrl).port || "5173");
+  const preferredServerPort = parsePort(new URL(DEFAULT_API_URL).port || "3000");
+  const preferredUiPort = parsePort(new URL(DEFAULT_UI_URL).port || "5173");
+
+  const serverPort = (await tryPort(preferredServerPort)) ?? (await getRandomFreePort());
+  const uiPort = (await tryPort(preferredUiPort)) ?? (await getRandomFreePort());
+
+  const apiUrl = `http://127.0.0.1:${serverPort}`;
+  const uiUrl = `http://127.0.0.1:${uiPort}`;
+
+  if (serverPort !== preferredServerPort) {
+    console.log(`Port ${preferredServerPort} in use, API server using port ${serverPort}`);
+  }
+  if (uiPort !== preferredUiPort) {
+    console.log(`Port ${preferredUiPort} in use, UI using port ${uiPort}`);
+  }
 
   const serverProcess = spawnSelfCommand(["server", "--port", String(serverPort)]);
   const serverExit = waitForExit(serverProcess, "server");
@@ -652,6 +673,9 @@ async function runAll(): Promise<void> {
     apiUrl,
   ]);
   const uiExit = waitForExit(uiProcess, "ui");
+
+  console.log(`Pragma API: ${apiUrl}`);
+  console.log(`Pragma UI:  ${uiUrl}`);
 
   try {
     await open(uiUrl, { wait: false });
