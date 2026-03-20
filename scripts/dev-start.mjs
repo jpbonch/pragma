@@ -1,13 +1,18 @@
 import { cp, mkdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 const sourcePragmaDir = resolve(process.env.PRAGMA_DEV_SOURCE_DIR || join(homedir(), ".pragma"));
-const targetPragmaDir = resolve(process.env.PRAGMA_DIR || join(repoRoot, ".pragma-dev"));
+const repoLivesInSourcePragmaDir =
+  repoRoot === sourcePragmaDir || repoRoot.startsWith(`${sourcePragmaDir}${sep}`);
+const defaultTargetPragmaDir = repoLivesInSourcePragmaDir
+  ? resolve(join(homedir(), ".pragma-dev", basename(repoRoot)))
+  : resolve(join(repoRoot, ".pragma-dev"));
+const targetPragmaDir = resolve(process.env.PRAGMA_DIR || defaultTargetPragmaDir);
 const shouldRefresh = process.env.PRAGMA_DEV_REFRESH !== "0";
 
 async function pathExists(path) {
@@ -43,6 +48,12 @@ function runCommand(command, args, env) {
 }
 
 async function preparePragmaDir() {
+  if (targetPragmaDir === sourcePragmaDir || targetPragmaDir.startsWith(`${sourcePragmaDir}${sep}`)) {
+    throw new Error(
+      `PRAGMA_DIR must not live inside the source Pragma dir. source=${sourcePragmaDir} target=${targetPragmaDir}`,
+    );
+  }
+
   if (!(await pathExists(sourcePragmaDir))) {
     await mkdir(targetPragmaDir, { recursive: true });
     console.log(`[dev] source Pragma dir not found, using empty state: ${targetPragmaDir}`);
