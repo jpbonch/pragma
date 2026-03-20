@@ -8,7 +8,6 @@
   },
   "scripts": {
     "build": "tsc && npm run ui:build",
-    "dev": "node scripts/dev-start.mjs",
     "prepack": "npm run build",
     "start": "node dist/cli/index.js",
     "ui:dev": "vite --config ui/vite.config.mjs ui",
