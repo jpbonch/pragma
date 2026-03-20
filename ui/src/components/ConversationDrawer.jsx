@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ArrowLeft, X, Sparkles, User, Info, Square, ChevronRight, Plus, ArrowLeftRight } from 'lucide-react'
+import { ArrowUp, ArrowLeft, X, Sparkles, User, Info, Square, ChevronRight, Plus, ArrowLeftRight, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
@@ -512,6 +512,17 @@ export function ConversationDrawer({
           {loading && <span className="conv-streaming-dot" />}
         </div>
         <div className="conv-header-right">
+          {mode === 'plan' && (
+            <button
+              className="conv-header-delete-plan-btn"
+              onClick={onDeletePlan}
+              disabled={loading}
+              title="Delete Plan"
+            >
+              <Trash2 size={14} strokeWidth={2} />
+              <span>Delete Plan</span>
+            </button>
+          )}
           {displayHeaderAgentName && (
             <div className="conv-header-agent" title={displayHeaderAgentName}>
               <span className="conv-header-agent-avatar">{displayHeaderAgentEmoji}</span>
@@ -643,9 +654,6 @@ export function ConversationDrawer({
                   disabled={loading}
                 />
                 <div className="conv-plan-actions">
-                  <button className="conv-delete-plan-btn" onClick={onDeletePlan} disabled={loading}>
-                    Delete Plan
-                  </button>
                   <button className="conv-execute-btn" onClick={onExecute} disabled={executeDisabled || loading}>
                     Execute →
                   </button>

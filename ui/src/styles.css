@@ -1558,6 +1558,32 @@ select { cursor: pointer; }
   min-width: 0;
 }
 
+.conv-header-delete-plan-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e8d5d5;
+  background: transparent;
+  color: #c4443a;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+.conv-header-delete-plan-btn:hover {
+  background: #fdf0f0;
+  border-color: #e0a8a5;
+  color: #b83830;
+}
+.conv-header-delete-plan-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .conv-mode-indicator {
   width: 8px;
   height: 8px;
