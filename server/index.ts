@@ -1592,14 +1592,32 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       throw new PragmaError("PROCESS_CWD_NOT_FOUND", 400, `Working directory not found: ${absoluteCwd}`);
     }
 
+    const port = await getRandomFreePort();
+
+    const env = {
+      ...process.env,
+      PORT: String(port),
+      PRAGMA_WORKSPACE_NAME: workspaceName,
+    };
+
+    // Rewrite command for frameworks that don't read PORT
+    let command = proc.command;
+    if (/\bvite\b|webpack-dev-server/.test(command)) {
+      command += ` --port ${port}`;
+    }
+    if (/\bvite\b|\bnext\b/.test(command)) {
+      command += ` --host 127.0.0.1`;
+    }
+
     const service = startRuntimeService({
       workspaceName,
       taskId: "",
       label: proc.label,
-      command: proc.command,
+      command,
       requestedCwd: proc.cwd,
       absoluteCwd,
-      env: { ...process.env, PRAGMA_WORKSPACE_NAME: workspaceName },
+      env,
+      port,
     });
     service.process_db_id = processId;
 
