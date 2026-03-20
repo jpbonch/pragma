@@ -9,9 +9,7 @@ export function WebPreviewPanel({ panel, services, config, processStatuses }) {
   const svcStatus = svc?.id ? (processStatuses[svc.id] || svc.status) : null
   const isReady = svcStatus === 'ready'
 
-  const processes = Array.isArray(config?.processes) ? config.processes : []
-  const processConfig = processes.find(p => p.name === processName)
-  const port = processConfig?.port || 3000
+  const port = svc?.port || 3000
   const path = panel.path || '/'
   const url = `http://localhost:${port}${path}`
 

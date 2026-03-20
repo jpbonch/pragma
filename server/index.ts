@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import net from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -401,6 +402,7 @@ type RuntimeServiceSummary = {
   cwd: string;
   status: RuntimeServiceStatus;
   pid: number | null;
+  port: number | null;
   exit_code: number | null;
   started_at: string;
   ended_at: string | null;
@@ -571,6 +573,17 @@ function createSSEStream(
   });
 }
 
+async function getRandomFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const port = (srv.address() as net.AddressInfo).port;
+      srv.close(() => resolve(port));
+    });
+    srv.on("error", reject);
+  });
+}
+
 function getWorkspaceServiceStore(
   workspaceName: string,
   createIfMissing = false,
@@ -597,6 +610,7 @@ function toRuntimeServiceSummary(service: RuntimeServiceRecord): RuntimeServiceS
     cwd: service.cwd,
     status: service.status,
     pid: service.pid,
+    port: service.port,
     exit_code: service.exit_code,
     started_at: service.started_at,
     ended_at: service.ended_at,
@@ -688,6 +702,7 @@ function startRuntimeService(input: {
     cwd: input.requestedCwd,
     status: "running",
     pid: null,
+    port: input.port ?? null,
     exit_code: null,
     started_at: startedAt,
     ended_at: null,
@@ -2673,20 +2688,34 @@ LIMIT 1
         ? await resolveTaskCommandCwd(runRoot, proc.cwd)
         : runRoot;
 
+      const port = await getRandomFreePort();
+
+      const env = {
+        ...process.env,
+        PORT: String(port),
+        PRAGMA_WORKSPACE_NAME: workspaceName,
+        PRAGMA_TASK_ID: taskId,
+      };
+
+      // Rewrite command for frameworks that don't read PORT
+      let command = proc.command;
+      if (/\bvite\b|webpack-dev-server/.test(command)) {
+        command += ` --port ${port}`;
+      }
+      if (/\bvite\b|\bnext\b/.test(command)) {
+        command += ` --host 127.0.0.1`;
+      }
+
       const service = startRuntimeService({
         workspaceName,
         taskId,
         label: proc.name,
-        command: proc.command,
+        command,
         requestedCwd: proc.cwd || ".",
         absoluteCwd: processCwd,
-        env: {
-          ...process.env,
-          PRAGMA_WORKSPACE_NAME: workspaceName,
-          PRAGMA_TASK_ID: taskId,
-        },
+        env,
         readyPattern: proc.ready_pattern,
-        port: proc.port,
+        port,
         healthcheck: proc.healthcheck,
       });
       services[proc.name] = toRuntimeServiceSummary(service);
@@ -2713,36 +2742,28 @@ LIMIT 1
     "/tasks/:taskId/testing/proxy",
     validateJson(testingProxyRequestSchema),
     async (c) => {
+      const workspaceName = c.get("workspace");
       const taskId = c.req.param("taskId");
       const body = c.req.valid("json");
-      const db = c.get("db");
 
-      const result = await db.query<{ id: string; testing_config_json: string | null }>(
-        `SELECT id, testing_config_json FROM tasks WHERE id = $1 LIMIT 1`,
-        [taskId],
-      );
-      const row = result.rows[0];
-      if (!row || !row.testing_config_json) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task or testing config not found: ${taskId}`);
+      let servicePort: number | null = null;
+      const store = getWorkspaceServiceStore(workspaceName);
+      for (const service of store.values()) {
+        if (service.task_id === taskId && service.label === body.process_name && service.port) {
+          servicePort = service.port;
+          break;
+        }
       }
 
-      let config: { processes: Array<{ name: string; port?: number }> };
-      try {
-        config = JSON.parse(row.testing_config_json);
-      } catch {
-        throw new PragmaError("INVALID_TESTING_CONFIG", 400, "Testing config JSON is invalid.");
-      }
-
-      const proc = config.processes.find((p) => p.name === body.process_name);
-      if (!proc || !proc.port) {
+      if (!servicePort) {
         throw new PragmaError(
           "PROCESS_NOT_FOUND",
           404,
-          `Process "${body.process_name}" not found or has no port configured.`,
+          `Process "${body.process_name}" not found or has no port assigned.`,
         );
       }
 
-      const targetUrl = `http://localhost:${proc.port}${body.path}`;
+      const targetUrl = `http://127.0.0.1:${servicePort}${body.path}`;
       const startTime = Date.now();
       try {
         const fetchResponse = await fetch(targetUrl, {

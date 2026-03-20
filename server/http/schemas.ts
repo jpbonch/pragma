@@ -280,7 +280,7 @@ const testingProcessSchema = z.object({
   name: nonEmptyString,
   command: nonEmptyString,
   cwd: nonEmptyString.optional(),
-  port: z.number().int().positive().optional(),
+  port: z.number().int().positive().optional(), // Ignored — server assigns ports automatically
   healthcheck: z.string().optional(),
   ready_pattern: z.string().optional(),
 }).strict();
