@@ -843,7 +843,6 @@ export function ConnectionsView() {
                       const needsConfig = isOAuth && !hasProxy && !hasCustomCreds
                       const canConnect = isOAuth && (hasProxy || hasCustomCreds) && connector.status !== 'connected'
                       const isConnected = connector.status === 'connected'
-                      const showManualLink = isOAuth && hasProxy && !hasCustomCreds && !isConnected
                       const isCustom = !!connector.is_custom
 
                       return (
@@ -859,9 +858,11 @@ export function ConnectionsView() {
                             <div className="cn-conn-details">
                               <div className="cn-conn-name-row">
                                 <span className="cn-conn-name">{connectorDisplayName(connector)}</span>
-                                <span className={`cn-badge ${statusInfo.className}`}>
-                                  {statusInfo.label}
-                                </span>
+                                {isConnected && (
+                                  <span className={`cn-badge ${statusInfo.className}`}>
+                                    {statusInfo.label}
+                                  </span>
+                                )}
                                 {isCustom && (
                                   <span className="cn-badge cn-badge--custom">Custom</span>
                                 )}
@@ -891,18 +892,28 @@ export function ConnectionsView() {
                               </button>
                             )}
                             {canConnect && (
-                              <button
-                                className="cn-connect-btn"
-                                onClick={() => handleConnect(connector)}
-                                disabled={connecting === connector.id}
-                              >
-                                {connecting === connector.id ? (
-                                  <div className="cn-spinner-sm" />
-                                ) : (
-                                  <Link size={13} />
+                              <div className="cn-connect-stack">
+                                <button
+                                  className="cn-connect-btn"
+                                  onClick={() => handleConnect(connector)}
+                                  disabled={connecting === connector.id}
+                                >
+                                  {connecting === connector.id ? (
+                                    <div className="cn-spinner-sm" />
+                                  ) : (
+                                    <Link size={13} />
+                                  )}
+                                  <span>{connecting === connector.id ? 'Connecting...' : 'Connect'}</span>
+                                </button>
+                                {isOAuth && (
+                                  <button
+                                    className="cn-manual-config-link"
+                                    onClick={() => handleOpenConfig(connector)}
+                                  >
+                                    Configure manually
+                                  </button>
                                 )}
-                                <span>{connecting === connector.id ? 'Connecting...' : 'Connect'}</span>
-                              </button>
+                              </div>
                             )}
                             {isConnected && (
                               <button
@@ -911,14 +922,6 @@ export function ConnectionsView() {
                               >
                                 <Unlink size={13} />
                                 <span>Disconnect</span>
-                              </button>
-                            )}
-                            {showManualLink && (
-                              <button
-                                className="cn-manual-config-link"
-                                onClick={() => handleOpenConfig(connector)}
-                              >
-                                Configure manually
                               </button>
                             )}
                             {hasProxy && hasCustomCreds && !isConnected && (
