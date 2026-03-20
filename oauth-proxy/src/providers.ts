@@ -4,6 +4,10 @@ export interface OAuthProvider {
   scopes: string;
   clientIdEnvKey: string;
   clientSecretEnvKey: string;
+  /** When true, send client credentials via HTTP Basic Auth header instead of form body */
+  useBasicAuth?: boolean;
+  /** Notion-specific: include owner=user param in auth URL */
+  authExtraParams?: Record<string, string>;
 }
 
 export const PROVIDERS: Record<string, OAuthProvider> = {
@@ -21,5 +25,14 @@ export const PROVIDERS: Record<string, OAuthProvider> = {
     scopes: 'chat:write channels:read channels:history groups:read im:read',
     clientIdEnvKey: 'SLACK_CLIENT_ID',
     clientSecretEnvKey: 'SLACK_CLIENT_SECRET',
+  },
+  notion: {
+    authUrl: 'https://api.notion.com/v1/oauth/authorize',
+    tokenUrl: 'https://api.notion.com/v1/oauth/token',
+    scopes: '',
+    clientIdEnvKey: 'NOTION_CLIENT_ID',
+    clientSecretEnvKey: 'NOTION_CLIENT_SECRET',
+    useBasicAuth: true,
+    authExtraParams: { owner: 'user' },
   },
 };

@@ -120,6 +120,7 @@ app.get('/auth/:provider', (c) => {
     response_type: 'code',
     access_type: 'offline',
     prompt: 'consent',
+    ...provider.authExtraParams,
   });
 
   return c.redirect(`${provider.authUrl}?${params.toString()}`);
@@ -169,22 +170,40 @@ app.get('/callback/:provider', async (c) => {
 
   const redirectUri = `${proxyPublicUrl}/callback/${providerName}`;
 
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    client_id: clientId,
-    client_secret: clientSecret,
-    redirect_uri: redirectUri,
-  });
-
   const callbackUrl = `http://127.0.0.1:${state.port}/connectors/proxy-callback`;
 
   try {
-    const resp = await fetch(provider.tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
+    let resp: Response;
+
+    if (provider.useBasicAuth) {
+      const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      const body = JSON.stringify({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+      });
+      resp = await fetch(provider.tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${basicAuth}`,
+        },
+        body,
+      });
+    } else {
+      const body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+      });
+      resp = await fetch(provider.tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+    }
 
     if (!resp.ok) {
       const errText = await resp.text();
@@ -271,19 +290,36 @@ app.post('/refresh/:provider', async (c) => {
     return c.json({ error: 'Missing refresh_token' }, 400);
   }
 
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: clientId,
-    client_secret: clientSecret,
-  });
-
   try {
-    const resp = await fetch(provider.tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
+    let resp: Response;
+
+    if (provider.useBasicAuth) {
+      const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      const body = JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      });
+      resp = await fetch(provider.tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${basicAuth}`,
+        },
+        body,
+      });
+    } else {
+      const body = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
+      });
+      resp = await fetch(provider.tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+    }
 
     if (!resp.ok) {
       const errText = await resp.text();

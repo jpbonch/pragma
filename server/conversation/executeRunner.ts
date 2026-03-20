@@ -1025,6 +1025,19 @@ async function refreshConnectorTokenForRunner(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: connector.refresh_token }),
     });
+  } else if (registryDef?.useBasicAuth) {
+    const basicAuth = Buffer.from(`${connector.oauth_client_id}:${connector.oauth_client_secret}`).toString("base64");
+    response = await fetch(connector.oauth_token_url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${basicAuth}`,
+      },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: connector.refresh_token,
+      }),
+    });
   } else {
     response = await fetch(connector.oauth_token_url, {
       method: "POST",

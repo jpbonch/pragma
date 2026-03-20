@@ -5131,6 +5131,19 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: connector.refresh_token }),
       });
+    } else if (registryDef?.useBasicAuth) {
+      const basicAuth = Buffer.from(`${connector.oauth_client_id}:${connector.oauth_client_secret}`).toString("base64");
+      response = await fetch(connector.oauth_token_url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${basicAuth}`,
+        },
+        body: JSON.stringify({
+          grant_type: "refresh_token",
+          refresh_token: connector.refresh_token,
+        }),
+      });
     } else {
       response = await fetch(connector.oauth_token_url, {
         method: "POST",
@@ -5476,6 +5489,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       prompt: "consent",
     });
 
+    // Notion requires owner=user for user-level OAuth tokens
+    if (connector.name === "notion") {
+      params.set("owner", "user");
+    }
+
     const url = `${connector.oauth_auth_url}?${params.toString()}`;
 
     return c.json({ url });
@@ -5569,12 +5587,13 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     const result = await db.query<{
       id: string;
+      name: string;
       oauth_client_id: string;
       oauth_client_secret: string;
       oauth_token_url: string;
       redirect_uri: string;
     }>(
-      `SELECT id, oauth_client_id, oauth_client_secret, oauth_token_url, redirect_uri
+      `SELECT id, name, oauth_client_id, oauth_client_secret, oauth_token_url, redirect_uri
        FROM connectors WHERE id = $1 LIMIT 1`,
       [stateEntry.connectorId],
     );
@@ -5584,19 +5603,37 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
 
     const connector = result.rows[0];
+    const connRegistryDef = CONNECTOR_REGISTRY.find((d) => d.name === connector.name);
 
     // Exchange code for tokens
-    const tokenResponse = await fetch(connector.oauth_token_url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        client_id: connector.oauth_client_id,
-        client_secret: connector.oauth_client_secret,
-        redirect_uri: connector.redirect_uri,
-      }),
-    });
+    let tokenResponse: Response;
+    if (connRegistryDef?.useBasicAuth) {
+      const basicAuth = Buffer.from(`${connector.oauth_client_id}:${connector.oauth_client_secret}`).toString("base64");
+      tokenResponse = await fetch(connector.oauth_token_url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${basicAuth}`,
+        },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: connector.redirect_uri,
+        }),
+      });
+    } else {
+      tokenResponse = await fetch(connector.oauth_token_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: connector.oauth_client_id,
+          client_secret: connector.oauth_client_secret,
+          redirect_uri: connector.redirect_uri,
+        }),
+      });
+    }
 
     if (!tokenResponse.ok) {
       const errorBody = await tokenResponse.text().catch(() => "");
