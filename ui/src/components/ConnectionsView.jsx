@@ -627,26 +627,6 @@ export function ConnectionsView() {
                               ))}
                             </div>
                           )}
-                          {(agentGlobalSkills.length > 0 || agentMcpServers.length > 0) && (
-                            <div className="cn-agent-skills-section">
-                              <span className="cn-agent-skills-section-label">Runtime</span>
-                              {agentGlobalSkills.map((skill) => (
-                                <span key={`global-${skill.name}`} className="cn-agent-skill-item cn-agent-skill-item--global">
-                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--global" />
-                                  <span className="cn-agent-skill-name">{skill.name}</span>
-                                </span>
-                              ))}
-                              {agentMcpServers.map((server) => (
-                                <span key={`mcp-${server.name}`} className="cn-agent-skill-item cn-agent-skill-item--mcp">
-                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--mcp" />
-                                  <span className="cn-agent-skill-name">{server.name}</span>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {totalSkills === 0 && (
-                            <span className="cn-agent-card-empty">No skills assigned</span>
-                          )}
                           {(availableSkills.length > 0 || availableConns.length > 0) && (
                             <div className="cn-agent-add-wrap">
                               <button
@@ -660,7 +640,7 @@ export function ConnectionsView() {
                                 title="Add skill or connector"
                               >
                                 <Plus size={11} />
-                                <span>Add</span>
+                                <span>Add Skills</span>
                               </button>
                               {addingSkillToAgent === `skill-${agent.id}` && (
                                 <div className="cn-skill-dropdown cn-agent-dropdown">
@@ -693,6 +673,26 @@ export function ConnectionsView() {
                                 </div>
                               )}
                             </div>
+                          )}
+                          {(agentGlobalSkills.length > 0 || agentMcpServers.length > 0) && (
+                            <div className="cn-agent-skills-section">
+                              <span className="cn-agent-skills-section-label">{harnessLabel ? `${harnessLabel} Skills` : 'Runtime Skills'}</span>
+                              {agentGlobalSkills.map((skill) => (
+                                <span key={`global-${skill.name}`} className="cn-agent-skill-item cn-agent-skill-item--global">
+                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--global" />
+                                  <span className="cn-agent-skill-name">{skill.name}</span>
+                                </span>
+                              ))}
+                              {agentMcpServers.map((server) => (
+                                <span key={`mcp-${server.name}`} className="cn-agent-skill-item cn-agent-skill-item--mcp">
+                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--mcp" />
+                                  <span className="cn-agent-skill-name">{server.name}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {totalSkills === 0 && (
+                            <span className="cn-agent-card-empty">No skills assigned</span>
                           )}
                         </div>
                       </div>
