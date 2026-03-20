@@ -531,8 +531,6 @@ export function ConnectionsView() {
     setShowCreateConnectorModal(true)
   }
 
-  const connectedConnectors = connectors.filter((c) => c.status === 'connected')
-
   return (
     <section className="cn">
       <div className="cn-header">
@@ -577,7 +575,7 @@ export function ConnectionsView() {
                     const availableSkills = installed.filter((s) => !assignedSkillIds.has(s.id))
                     const assignedConns = agentConnectorsMap[agent.id] || []
                     const assignedConnIds = new Set(assignedConns.map((c) => c.id))
-                    const availableConns = connectedConnectors.filter((c) => !assignedConnIds.has(c.id))
+                    const availableConns = connectors.filter((c) => !assignedConnIds.has(c.id))
                     const agentGlobalSkills = (agent.harness && harnessGlobalSkills[agent.harness]) || []
                     const agentMcpServers = (agent.harness && harnessMcpServers[agent.harness]) || []
                     const harnessLabel = HARNESS_LABELS[agent.harness] || agent.harness
