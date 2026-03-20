@@ -634,18 +634,10 @@ async function getRandomFreePort(): Promise<number> {
 }
 
 async function runAll(): Promise<void> {
-  const hasApiOverride = !!process.env.PRAGMA_API_URL;
-  const hasUiOverride = !!process.env.PRAGMA_UI_URL;
-
-  const serverPort = hasApiOverride
-    ? parsePort(new URL(DEFAULT_API_URL).port || "3000")
-    : await getRandomFreePort();
-  const uiPort = hasUiOverride
-    ? parsePort(new URL(DEFAULT_UI_URL).port || "5173")
-    : await getRandomFreePort();
-
-  const apiUrl = hasApiOverride ? DEFAULT_API_URL : `http://127.0.0.1:${serverPort}`;
-  const uiUrl = hasUiOverride ? DEFAULT_UI_URL : `http://127.0.0.1:${uiPort}`;
+  const apiUrl = DEFAULT_API_URL;
+  const uiUrl = DEFAULT_UI_URL;
+  const serverPort = parsePort(new URL(apiUrl).port || "3000");
+  const uiPort = parsePort(new URL(uiUrl).port || "5173");
 
   const serverProcess = spawnSelfCommand(["server", "--port", String(serverPort)]);
   const serverExit = waitForExit(serverProcess, "server");
