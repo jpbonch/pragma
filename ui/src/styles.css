@@ -6454,6 +6454,45 @@ select { cursor: pointer; }
   cursor: not-allowed;
 }
 
+.modal-card--wide {
+  max-width: 620px;
+}
+
+/* ─── Custom Connector Auth Type Toggle ─────────── */
+.cn-auth-type-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.cn-auth-type-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: 1px solid #e0dfdb;
+  border-radius: 8px;
+  background: #fff;
+  color: #6f6e69;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cn-auth-type-btn:hover {
+  border-color: #c4c3bf;
+  color: #37352f;
+}
+.cn-auth-type-btn--active {
+  background: #37352f;
+  color: #fff;
+  border-color: #37352f;
+}
+.cn-auth-type-btn--active:hover {
+  background: #1a1917;
+  border-color: #1a1917;
+  color: #fff;
+}
+
 /* ─── Orchestrator Config ─────────────────────────── */
 .orchestrator-config-section {
   margin-top: 4px;
@@ -6977,6 +7016,7 @@ select { cursor: pointer; }
 .cn-badge--connected { background: #ecfdf5; color: #059669; }
 .cn-badge--disconnected { background: #fefce8; color: #ca8a04; }
 .cn-badge--needs-config { background: #f3f4f6; color: #6b7280; }
+.cn-badge--custom { background: #f0f0ff; color: #6366f1; }
 .cn-badge--global { background: #eff6ff; color: #2563eb; }
 
 .cn-global-source {

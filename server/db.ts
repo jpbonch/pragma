@@ -676,20 +676,21 @@ CREATE TABLE IF NOT EXISTS connectors (
   display_name VARCHAR(255),
   description TEXT,
   content TEXT NOT NULL,
-  provider VARCHAR(64) NOT NULL,
-  binary_name VARCHAR(64) NOT NULL,
-  env_var VARCHAR(128) NOT NULL,
+  provider VARCHAR(64) NOT NULL DEFAULT '',
+  binary_name VARCHAR(64) NOT NULL DEFAULT '',
+  env_var VARCHAR(128) NOT NULL DEFAULT '',
   auth_type VARCHAR(32) NOT NULL DEFAULT 'oauth2',
   oauth_client_id TEXT,
   oauth_client_secret TEXT,
-  oauth_auth_url TEXT NOT NULL,
-  oauth_token_url TEXT NOT NULL,
+  oauth_auth_url TEXT NOT NULL DEFAULT '',
+  oauth_token_url TEXT NOT NULL DEFAULT '',
   scopes TEXT NOT NULL DEFAULT '',
   redirect_uri TEXT NOT NULL DEFAULT 'http://127.0.0.1:3000/connectors/callback',
   status VARCHAR(32) NOT NULL DEFAULT 'disconnected',
   access_token TEXT,
   refresh_token TEXT,
-  token_expires_at TIMESTAMPTZ
+  token_expires_at TIMESTAMPTZ,
+  is_custom BOOLEAN NOT NULL DEFAULT false
 );
 `);
 

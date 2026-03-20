@@ -412,6 +412,38 @@ export const configureConnectorSchema = z
   })
   .strict();
 
+export const createCustomConnectorSchema = z
+  .object({
+    name: nonEmptyString,
+    description: z.string().optional(),
+    content: nonEmptyString,
+    auth_type: z.enum(["oauth2", "api_key"]),
+    // OAuth fields (required when auth_type is oauth2)
+    oauth_client_id: z.string().optional(),
+    oauth_client_secret: z.string().optional(),
+    oauth_auth_url: z.string().optional(),
+    oauth_token_url: z.string().optional(),
+    scopes: z.string().optional(),
+    // API key field (required when auth_type is api_key)
+    access_token: z.string().optional(),
+  })
+  .strict();
+
+export const updateCustomConnectorSchema = z
+  .object({
+    name: nonEmptyString.optional(),
+    description: z.string().optional(),
+    content: nonEmptyString.optional(),
+    auth_type: z.enum(["oauth2", "api_key"]).optional(),
+    oauth_client_id: z.string().optional(),
+    oauth_client_secret: z.string().optional(),
+    oauth_auth_url: z.string().optional(),
+    oauth_token_url: z.string().optional(),
+    scopes: z.string().optional(),
+    access_token: z.string().optional(),
+  })
+  .strict();
+
 export const assignAgentConnectorSchema = z
   .object({
     connector_id: nonEmptyString,

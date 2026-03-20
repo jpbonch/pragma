@@ -13,6 +13,9 @@ import {
   assignAgentSkill,
   unassignAgentSkill,
   fetchConnectors,
+  createCustomConnector,
+  updateCustomConnector,
+  deleteCustomConnector,
   configureConnector,
   startConnectorAuth,
   disconnectConnector,
@@ -90,6 +93,18 @@ export function ConnectionsView() {
   const [configuring, setConfiguring] = useState(false)
   const [connecting, setConnecting] = useState(null)
   const [addingConnectorToAgent, setAddingConnectorToAgent] = useState(null)
+
+  // Custom connector state
+  const [showCreateConnectorModal, setShowCreateConnectorModal] = useState(false)
+  const [editingConnector, setEditingConnector] = useState(null)
+  const [removingConnector, setRemovingConnector] = useState(null)
+  const [creatingConnector, setCreatingConnector] = useState(false)
+  const emptyConnectorForm = {
+    name: '', description: '', content: '', auth_type: 'api_key',
+    oauth_client_id: '', oauth_client_secret: '', oauth_auth_url: '', oauth_token_url: '', scopes: '',
+    access_token: '',
+  }
+  const [connectorForm, setConnectorForm] = useState(emptyConnectorForm)
 
   const agentSkillsMap = useMemo(() => {
     const map = {}
@@ -396,7 +411,9 @@ export function ConnectionsView() {
     setConnecting(connector.id)
     setActionError('')
     try {
-      await ensureConnectorBinary(connector.id)
+      if (!connector.is_custom) {
+        await ensureConnectorBinary(connector.id)
+      }
       const { url } = await startConnectorAuth(connector.id)
       window.open(url, '_blank')
 
@@ -467,6 +484,85 @@ export function ConnectionsView() {
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err))
     }
+  }
+
+  async function handleCreateConnector(e) {
+    e.preventDefault()
+    if (creatingConnector) return
+    setCreatingConnector(true)
+    setActionError('')
+    try {
+      const payload = {
+        name: connectorForm.name.trim(),
+        description: connectorForm.description.trim() || undefined,
+        content: connectorForm.content,
+        auth_type: connectorForm.auth_type,
+      }
+      if (connectorForm.auth_type === 'api_key') {
+        if (connectorForm.access_token.trim()) {
+          payload.access_token = connectorForm.access_token.trim()
+        }
+      } else {
+        if (connectorForm.oauth_client_id.trim()) payload.oauth_client_id = connectorForm.oauth_client_id.trim()
+        if (connectorForm.oauth_client_secret.trim()) payload.oauth_client_secret = connectorForm.oauth_client_secret.trim()
+        if (connectorForm.oauth_auth_url.trim()) payload.oauth_auth_url = connectorForm.oauth_auth_url.trim()
+        if (connectorForm.oauth_token_url.trim()) payload.oauth_token_url = connectorForm.oauth_token_url.trim()
+        if (connectorForm.scopes.trim()) payload.scopes = connectorForm.scopes.trim()
+      }
+
+      if (editingConnector) {
+        await updateCustomConnector(editingConnector.id, payload)
+      } else {
+        await createCustomConnector(payload)
+      }
+
+      const [connList, agentList] = await Promise.all([fetchConnectors(), fetchAgents()])
+      setConnectors(connList)
+      setAgents(agentList)
+      const connMap = await loadConnectorAgentMap(agentList, connList)
+      setConnectorAgents(connMap)
+      setShowCreateConnectorModal(false)
+      setEditingConnector(null)
+      setConnectorForm(emptyConnectorForm)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCreatingConnector(false)
+    }
+  }
+
+  async function handleRemoveConnector(connector) {
+    if (removingConnector) return
+    setRemovingConnector(connector.id)
+    setActionError('')
+    try {
+      await deleteCustomConnector(connector.id)
+      const connList = await fetchConnectors()
+      setConnectors(connList)
+      setConnectorAgents((prev) => {
+        const next = { ...prev }
+        delete next[connector.id]
+        return next
+      })
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRemovingConnector(null)
+    }
+  }
+
+  function handleEditConnector(connector) {
+    setEditingConnector(connector)
+    setConnectorForm({
+      name: connector.name || '',
+      description: connector.description || '',
+      content: '', // content will be filled if needed; start blank for now
+      auth_type: connector.auth_type || 'api_key',
+      oauth_client_id: '', oauth_client_secret: '',
+      oauth_auth_url: '', oauth_token_url: '', scopes: '',
+      access_token: '',
+    })
+    setShowCreateConnectorModal(true)
   }
 
   const connectedConnectors = connectors.filter((c) => c.status === 'connected')
@@ -722,8 +818,21 @@ export function ConnectionsView() {
               {/* Right column: Connector Skills */}
               <div className="cn-col">
                 <div className="cn-section">
-                  <h2 className="cn-section-title">Connector Skills</h2>
-                  <p className="cn-section-desc">Connect your agents to external services. When you authenticate, Pragma handles the connection. Your credentials are sent back to your computer and never stored on Pragma's servers. You can also provide your own credentials by clicking ‘Configure manually’.</p>
+                  <div className="cn-section-header">
+                    <h2 className="cn-section-title">Connector Skills</h2>
+                    <button
+                      className="cn-create-skill-btn"
+                      onClick={() => {
+                        setEditingConnector(null)
+                        setConnectorForm(emptyConnectorForm)
+                        setShowCreateConnectorModal(true)
+                      }}
+                    >
+                      <Plus size={14} strokeWidth={2} />
+                      <span>New Connector</span>
+                    </button>
+                  </div>
+                  <p className="cn-section-desc">Connect your agents to external services. When you authenticate, Pragma handles the connection. Your credentials are sent back to your computer and never stored on Pragma's servers. You can also provide your own credentials by clicking 'Configure manually'.</p>
                   <div className="cn-list">
                     {connectors.map((connector) => {
                       const statusInfo = CONNECTOR_STATUS_STYLES[connector.status] ||
@@ -735,6 +844,7 @@ export function ConnectionsView() {
                       const canConnect = isOAuth && (hasProxy || hasCustomCreds) && connector.status !== 'connected'
                       const isConnected = connector.status === 'connected'
                       const showManualLink = isOAuth && hasProxy && !hasCustomCreds && !isConnected
+                      const isCustom = !!connector.is_custom
 
                       return (
                         <div key={connector.id} className={`cn-conn-row ${isConnected ? 'cn-conn-row--connected' : ''}`}>
@@ -752,6 +862,9 @@ export function ConnectionsView() {
                                 <span className={`cn-badge ${statusInfo.className}`}>
                                   {statusInfo.label}
                                 </span>
+                                {isCustom && (
+                                  <span className="cn-badge cn-badge--custom">Custom</span>
+                                )}
                               </div>
                               {connector.description && (
                                 <span className="cn-conn-desc">{connector.description}</span>
@@ -815,6 +928,30 @@ export function ConnectionsView() {
                               >
                                 Use default
                               </button>
+                            )}
+                            {isCustom && (
+                              <>
+                                <button
+                                  className="cn-config-btn"
+                                  onClick={() => handleEditConnector(connector)}
+                                  title="Edit connector"
+                                >
+                                  <Settings size={13} />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  className="cn-remove-btn"
+                                  onClick={() => handleRemoveConnector(connector)}
+                                  disabled={removingConnector === connector.id}
+                                >
+                                  {removingConnector === connector.id ? (
+                                    <div className="cn-spinner-sm" />
+                                  ) : (
+                                    <Trash2 size={13} />
+                                  )}
+                                  <span>{removingConnector === connector.id ? 'Removing...' : 'Remove'}</span>
+                                </button>
+                              </>
                             )}
                           </div>
                         </div>
@@ -987,6 +1124,141 @@ export function ConnectionsView() {
                 )}
               >
                 {configuring ? 'Saving...' : (showConfigModal.auth_type === 'api_key' ? 'Connect' : 'Save')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Create / Edit Custom Connector Modal */}
+      {showCreateConnectorModal && (
+        <div className="modal-backdrop" onClick={() => { setShowCreateConnectorModal(false); setEditingConnector(null) }}>
+          <form
+            className="modal-card modal-card--wide"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleCreateConnector}
+          >
+            <h2>{editingConnector ? 'Edit Custom Connector' : 'New Custom Connector'}</h2>
+            <p>Create a connector that teaches your agents how to use an external API. Provide either an API key or OAuth credentials along with a skill file.</p>
+
+            <label className="modal-label">Name</label>
+            <input
+              className="modal-input"
+              placeholder="e.g. my-crm-api"
+              value={connectorForm.name}
+              onChange={(e) => setConnectorForm({ ...connectorForm, name: e.target.value })}
+              required
+              autoFocus
+            />
+
+            <label className="modal-label">Description</label>
+            <input
+              className="modal-input"
+              placeholder="Brief description (optional)"
+              value={connectorForm.description}
+              onChange={(e) => setConnectorForm({ ...connectorForm, description: e.target.value })}
+            />
+
+            <label className="modal-label">Auth Type</label>
+            <div className="cn-auth-type-toggle">
+              <button
+                type="button"
+                className={`cn-auth-type-btn ${connectorForm.auth_type === 'api_key' ? 'cn-auth-type-btn--active' : ''}`}
+                onClick={() => setConnectorForm({ ...connectorForm, auth_type: 'api_key' })}
+              >
+                <Key size={13} />
+                <span>API Key</span>
+              </button>
+              <button
+                type="button"
+                className={`cn-auth-type-btn ${connectorForm.auth_type === 'oauth2' ? 'cn-auth-type-btn--active' : ''}`}
+                onClick={() => setConnectorForm({ ...connectorForm, auth_type: 'oauth2' })}
+              >
+                <Link size={13} />
+                <span>OAuth 2.0</span>
+              </button>
+            </div>
+
+            {connectorForm.auth_type === 'api_key' ? (
+              <>
+                <label className="modal-label">API Key / Token</label>
+                <input
+                  className="modal-input"
+                  type="password"
+                  placeholder="Paste your API key or token"
+                  value={connectorForm.access_token}
+                  onChange={(e) => setConnectorForm({ ...connectorForm, access_token: e.target.value })}
+                />
+              </>
+            ) : (
+              <>
+                <label className="modal-label">Authorization URL</label>
+                <input
+                  className="modal-input"
+                  placeholder="e.g. https://provider.com/oauth/authorize"
+                  value={connectorForm.oauth_auth_url}
+                  onChange={(e) => setConnectorForm({ ...connectorForm, oauth_auth_url: e.target.value })}
+                />
+
+                <label className="modal-label">Token URL</label>
+                <input
+                  className="modal-input"
+                  placeholder="e.g. https://provider.com/oauth/token"
+                  value={connectorForm.oauth_token_url}
+                  onChange={(e) => setConnectorForm({ ...connectorForm, oauth_token_url: e.target.value })}
+                />
+
+                <label className="modal-label">Client ID</label>
+                <input
+                  className="modal-input"
+                  placeholder="Your OAuth client ID"
+                  value={connectorForm.oauth_client_id}
+                  onChange={(e) => setConnectorForm({ ...connectorForm, oauth_client_id: e.target.value })}
+                />
+
+                <label className="modal-label">Client Secret</label>
+                <input
+                  className="modal-input"
+                  type="password"
+                  placeholder="Your OAuth client secret"
+                  value={connectorForm.oauth_client_secret}
+                  onChange={(e) => setConnectorForm({ ...connectorForm, oauth_client_secret: e.target.value })}
+                />
+
+                <label className="modal-label">Scopes</label>
+                <input
+                  className="modal-input"
+                  placeholder="e.g. read write (space-separated)"
+                  value={connectorForm.scopes}
+                  onChange={(e) => setConnectorForm({ ...connectorForm, scopes: e.target.value })}
+                />
+              </>
+            )}
+
+            <label className="modal-label">Skill File (Instructions)</label>
+            <textarea
+              className="modal-textarea"
+              placeholder="Markdown instructions teaching the agent how to use this API. Include example commands, endpoints, and usage patterns."
+              value={connectorForm.content}
+              onChange={(e) => setConnectorForm({ ...connectorForm, content: e.target.value })}
+              required={!editingConnector}
+              rows={8}
+            />
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-cancel"
+                onClick={() => { setShowCreateConnectorModal(false); setEditingConnector(null) }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="modal-create"
+                disabled={!connectorForm.name.trim() || (!editingConnector && !connectorForm.content.trim()) || creatingConnector}
+              >
+                {creatingConnector ? 'Saving...' : (editingConnector ? 'Update Connector' : 'Create Connector')}
               </button>
             </div>
           </form>

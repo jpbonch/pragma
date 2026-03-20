@@ -871,6 +871,26 @@ export async function fetchConnectors() {
   return data.connectors
 }
 
+export async function createCustomConnector(data) {
+  return fetchJson('/connectors', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateCustomConnector(id, data) {
+  return fetchJson(`/connectors/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteCustomConnector(id) {
+  return fetchJson(`/connectors/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export async function configureConnector(id, config) {
   return fetchJson(`/connectors/${encodeURIComponent(id)}/config`, {
     method: 'PUT',

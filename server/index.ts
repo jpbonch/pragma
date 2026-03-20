@@ -117,6 +117,8 @@ import {
   updateSkillSchema,
   assignAgentSkillSchema,
   configureConnectorSchema,
+  createCustomConnectorSchema,
+  updateCustomConnectorSchema,
   assignAgentConnectorSchema,
   dbQuerySchema,
   createProcessSchema,
@@ -5116,6 +5118,13 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   async function seedConnectors(db: Awaited<ReturnType<typeof openDatabase>>): Promise<void> {
     // Ensure display_name column exists for older databases
     await db.exec(`ALTER TABLE connectors ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)`);
+    await db.exec(`ALTER TABLE connectors ADD COLUMN IF NOT EXISTS is_custom BOOLEAN NOT NULL DEFAULT false`);
+    // Relax NOT NULL constraints for custom connectors (older DBs may have stricter columns)
+    await db.exec(`ALTER TABLE connectors ALTER COLUMN provider SET DEFAULT ''`);
+    await db.exec(`ALTER TABLE connectors ALTER COLUMN binary_name SET DEFAULT ''`);
+    await db.exec(`ALTER TABLE connectors ALTER COLUMN env_var SET DEFAULT ''`);
+    await db.exec(`ALTER TABLE connectors ALTER COLUMN oauth_auth_url SET DEFAULT ''`);
+    await db.exec(`ALTER TABLE connectors ALTER COLUMN oauth_token_url SET DEFAULT ''`);
     for (const def of CONNECTOR_REGISTRY) {
       await db.query(
         `INSERT INTO connectors (id, name, display_name, description, content, provider, binary_name,
@@ -5241,9 +5250,10 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       auth_type: string;
       oauth_client_id: string | null;
       oauth_client_secret: string | null;
+      is_custom: boolean;
     }>(
       `SELECT id, name, display_name, description, provider, status, auth_type,
-              oauth_client_id, oauth_client_secret
+              oauth_client_id, oauth_client_secret, is_custom
        FROM connectors ORDER BY name ASC`,
     );
 
@@ -5260,10 +5270,144 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
         has_proxy: !!registryDef?.proxyProvider,
         has_client_id: !!row.oauth_client_id,
         has_client_secret: !!row.oauth_client_secret,
+        is_custom: !!row.is_custom,
       };
     });
 
     return c.json({ connectors });
+  });
+
+  // POST /connectors — create custom connector
+  app.post("/connectors", validateJson(createCustomConnectorSchema), async (c) => {
+    const origin = c.req.header("origin") ?? c.req.header("referer");
+    if (!isLoopbackOrigin(origin)) {
+      throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
+    }
+    const db = c.get("db");
+    const body = c.req.valid("json");
+
+    const id = `conn_${randomUUID().slice(0, 12)}`;
+    const redirectUri = `http://127.0.0.1:${options.port}/connectors/callback`;
+
+    if (body.auth_type === "api_key") {
+      await db.query(
+        `INSERT INTO connectors (id, name, display_name, description, content, provider, binary_name,
+         env_var, auth_type, oauth_auth_url, oauth_token_url, scopes, redirect_uri,
+         access_token, status, is_custom)
+         VALUES ($1, $2, $3, $4, $5, '', '', '', 'api_key', '', '', '', $6, $7, $8, true)`,
+        [
+          id,
+          body.name,
+          body.name,
+          body.description ?? null,
+          body.content,
+          redirectUri,
+          body.access_token ?? null,
+          body.access_token ? "connected" : "disconnected",
+        ],
+      );
+    } else {
+      await db.query(
+        `INSERT INTO connectors (id, name, display_name, description, content, provider, binary_name,
+         env_var, auth_type, oauth_client_id, oauth_client_secret, oauth_auth_url, oauth_token_url,
+         scopes, redirect_uri, status, is_custom)
+         VALUES ($1, $2, $3, $4, $5, '', '', '', 'oauth2', $6, $7, $8, $9, $10, $11, 'disconnected', true)`,
+        [
+          id,
+          body.name,
+          body.name,
+          body.description ?? null,
+          body.content,
+          body.oauth_client_id ?? null,
+          body.oauth_client_secret ?? null,
+          body.oauth_auth_url ?? "",
+          body.oauth_token_url ?? "",
+          body.scopes ?? "",
+          redirectUri,
+        ],
+      );
+    }
+
+    return c.json({ id, name: body.name }, 201);
+  });
+
+  // PUT /connectors/:id — update custom connector
+  app.put("/connectors/:id", validateJson(updateCustomConnectorSchema), async (c) => {
+    const origin = c.req.header("origin") ?? c.req.header("referer");
+    if (!isLoopbackOrigin(origin)) {
+      throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
+    }
+    const db = c.get("db");
+    const connectorId = c.req.param("id");
+    const body = c.req.valid("json");
+
+    const existing = await db.query<{ id: string; is_custom: boolean }>(
+      `SELECT id, is_custom FROM connectors WHERE id = $1 LIMIT 1`,
+      [connectorId],
+    );
+    if (existing.rows.length === 0) {
+      throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
+    }
+    if (!existing.rows[0].is_custom) {
+      throw new PragmaError("CONNECTOR_NOT_CUSTOM", 400, "Only custom connectors can be edited");
+    }
+
+    const sets: string[] = [];
+    const params: unknown[] = [connectorId];
+    let idx = 2;
+    const addField = (col: string, val: unknown) => {
+      sets.push(`${col} = $${idx++}`);
+      params.push(val);
+    };
+
+    if (body.name !== undefined) {
+      addField("name", body.name);
+      addField("display_name", body.name);
+    }
+    if (body.description !== undefined) addField("description", body.description || null);
+    if (body.content !== undefined) addField("content", body.content);
+    if (body.auth_type !== undefined) addField("auth_type", body.auth_type);
+    if (body.oauth_client_id !== undefined) addField("oauth_client_id", body.oauth_client_id || null);
+    if (body.oauth_client_secret !== undefined) addField("oauth_client_secret", body.oauth_client_secret || null);
+    if (body.oauth_auth_url !== undefined) addField("oauth_auth_url", body.oauth_auth_url);
+    if (body.oauth_token_url !== undefined) addField("oauth_token_url", body.oauth_token_url);
+    if (body.scopes !== undefined) addField("scopes", body.scopes);
+    if (body.access_token !== undefined) {
+      addField("access_token", body.access_token || null);
+      if (body.access_token) {
+        addField("status", "connected");
+      }
+    }
+
+    if (sets.length > 0) {
+      await db.query(`UPDATE connectors SET ${sets.join(", ")} WHERE id = $1`, params);
+    }
+
+    return c.json({ ok: true });
+  });
+
+  // DELETE /connectors/:id — delete custom connector
+  app.delete("/connectors/:id", async (c) => {
+    const origin = c.req.header("origin") ?? c.req.header("referer");
+    if (!isLoopbackOrigin(origin)) {
+      throw new PragmaError("FORBIDDEN_ORIGIN", 403, "Request origin is not allowed");
+    }
+    const db = c.get("db");
+    const connectorId = c.req.param("id");
+
+    const existing = await db.query<{ id: string; is_custom: boolean }>(
+      `SELECT id, is_custom FROM connectors WHERE id = $1 LIMIT 1`,
+      [connectorId],
+    );
+    if (existing.rows.length === 0) {
+      throw new PragmaError("CONNECTOR_NOT_FOUND", 404, `Connector not found: ${connectorId}`);
+    }
+    if (!existing.rows[0].is_custom) {
+      throw new PragmaError("CONNECTOR_NOT_CUSTOM", 400, "Only custom connectors can be deleted");
+    }
+
+    await db.query(`DELETE FROM connectors WHERE id = $1`, [connectorId]);
+    return c.json({ ok: true });
   });
 
   // PUT /connectors/:id/config — set client_id/secret or api_key
