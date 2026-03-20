@@ -13,7 +13,7 @@ function timeAgo(value) {
   return parsed.toLocaleDateString()
 }
 
-function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onAddProcess, onDeleteProcess, onDetectProcesses }) {
+function ProcessList({ processes, folders, onStartProcess, onStopProcess, onAddWorkspaceProcess, onDeleteProcess, onDetectProcesses }) {
   const [showAddForm, setShowAddForm] = useState(false)
   const [addLabel, setAddLabel] = useState('')
   const [addCommand, setAddCommand] = useState('')
@@ -23,11 +23,12 @@ function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onA
   const [addError, setAddError] = useState('')
   const [actionLoading, setActionLoading] = useState('')
   const [detectLoading, setDetectLoading] = useState(false)
+  const [detectFolder, setDetectFolder] = useState('')
 
-  const folderProcesses = useMemo(() => {
+  const workspaceProcesses = useMemo(() => {
     if (!Array.isArray(processes)) return []
-    return processes.filter((p) => p && p.folder_name === folderName && !p.task_id)
-  }, [processes, folderName])
+    return processes.filter((p) => p && !p.task_id)
+  }, [processes])
 
   async function handleAdd(event) {
     event.preventDefault()
@@ -35,7 +36,7 @@ function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onA
     setAddLoading(true)
     setAddError('')
     try {
-      await onAddProcess(folderName, { label: addLabel.trim(), command: addCommand.trim(), cwd: addCwd.trim() || '.', type: addType })
+      await onAddWorkspaceProcess({ label: addLabel.trim(), command: addCommand.trim(), cwd: addCwd.trim() || '.', type: addType })
       setAddLabel('')
       setAddCommand('')
       setAddCwd('.')
@@ -66,10 +67,11 @@ function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onA
     try { await onDeleteProcess(processId) } catch {} finally { setActionLoading('') }
   }
 
-  async function handleDetect() {
+  async function handleDetect(folderName) {
     if (detectLoading) return
     setDetectLoading(true)
-    try { await onDetectProcesses(folderName) } catch {} finally { setDetectLoading(false) }
+    setDetectFolder(folderName)
+    try { await onDetectProcesses(folderName) } catch {} finally { setDetectLoading(false); setDetectFolder('') }
   }
 
   return (
@@ -78,10 +80,29 @@ function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onA
         <TerminalSquare size={13} />
         <span className="cv-processes-title">Processes</span>
         <div className="cv-processes-actions">
-          <button className="cv-proc-btn cv-proc-btn-ghost" onClick={handleDetect} disabled={detectLoading} title="Auto-detect start commands">
-            <Search size={12} />
-            <span>{detectLoading ? 'Detecting...' : 'Detect'}</span>
-          </button>
+          {Array.isArray(folders) && folders.length > 0 && (
+            folders.length === 1 ? (
+              <button className="cv-proc-btn cv-proc-btn-ghost" onClick={() => handleDetect(folders[0].name)} disabled={detectLoading} title="Auto-detect start commands">
+                <Search size={12} />
+                <span>{detectLoading ? 'Detecting...' : 'Detect'}</span>
+              </button>
+            ) : (
+              <div className="cv-proc-detect-group">
+                <span className="cv-proc-detect-label"><Search size={12} /> Detect in:</span>
+                {folders.map((f) => (
+                  <button
+                    key={f.name}
+                    className="cv-proc-btn cv-proc-btn-ghost"
+                    onClick={() => handleDetect(f.name)}
+                    disabled={detectLoading}
+                    title={`Auto-detect in ${f.name}`}
+                  >
+                    <span>{detectLoading && detectFolder === f.name ? 'Detecting...' : f.name}</span>
+                  </button>
+                ))}
+              </div>
+            )
+          )}
           <button className="cv-proc-btn cv-proc-btn-ghost" onClick={() => setShowAddForm(!showAddForm)} title="Add process">
             <Plus size={12} />
             <span>Add</span>
@@ -89,11 +110,11 @@ function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onA
         </div>
       </div>
 
-      {folderProcesses.length === 0 && !showAddForm && (
+      {workspaceProcesses.length === 0 && !showAddForm && (
         <div className="cv-processes-empty">No processes configured</div>
       )}
 
-      {folderProcesses.map((proc) => {
+      {workspaceProcesses.map((proc) => {
         const isRunning = proc.status === 'running'
         const isExited = proc.status === 'exited'
         const isBusy = actionLoading === proc.id
@@ -134,7 +155,7 @@ function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onA
           </div>
           <input className="cv-input cv-proc-add-input" placeholder="Command (e.g. npm run dev)" value={addCommand} onChange={(e) => setAddCommand(e.target.value)} disabled={addLoading} />
           <div className="cv-proc-add-row">
-            <input className="cv-input cv-proc-add-input" placeholder="cwd (relative, default .)" value={addCwd} onChange={(e) => setAddCwd(e.target.value)} disabled={addLoading} />
+            <input className="cv-input cv-proc-add-input" placeholder="cwd (relative to code/, default .)" value={addCwd} onChange={(e) => setAddCwd(e.target.value)} disabled={addLoading} />
             <button className="cv-btn cv-btn-primary cv-proc-add-submit" type="submit" disabled={addLoading || !addLabel.trim() || !addCommand.trim()}>
               {addLoading ? 'Adding...' : 'Add'}
             </button>
@@ -165,6 +186,7 @@ export function CodeView({
   onStartProcess,
   onStopProcess,
   onAddProcess,
+  onAddWorkspaceProcess,
   onUpdateProcess,
   onDeleteProcess,
   onDetectProcesses,
@@ -302,6 +324,16 @@ export function CodeView({
               </div>
             )}
 
+            <ProcessList
+              processes={processes}
+              folders={folderItems}
+              onStartProcess={onStartProcess}
+              onStopProcess={onStopProcess}
+              onAddWorkspaceProcess={onAddWorkspaceProcess}
+              onDeleteProcess={onDeleteProcess}
+              onDetectProcesses={onDetectProcesses}
+            />
+
             {folderItems.length === 0 ? (
               <div className="cv-empty">
                 <FolderGit2 size={40} strokeWidth={1.5} />
@@ -392,16 +424,6 @@ export function CodeView({
                         )}
                       </div>
                     )}
-
-                    <ProcessList
-                      folderName={folder.name}
-                      processes={processes}
-                      onStartProcess={onStartProcess}
-                      onStopProcess={onStopProcess}
-                      onAddProcess={onAddProcess}
-                      onDeleteProcess={onDeleteProcess}
-                      onDetectProcesses={onDetectProcesses}
-                    />
                   </div>
                 ))}
               </div>

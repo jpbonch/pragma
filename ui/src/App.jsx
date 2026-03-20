@@ -28,6 +28,7 @@ import {
   stopTask,
   stopRuntimeService as stopRuntimeServiceApi,
   createProcess as createProcessApi,
+  createWorkspaceProcess as createWorkspaceProcessApi,
   updateProcess as updateProcessApi,
   deleteProcess as deleteProcessApi,
   startProcess as startProcessApi,
@@ -156,12 +157,6 @@ export default function App() {
       ? selectedRuntimeService
       : null
 
-  const visibleRuntimeServices = useMemo(() => {
-    return runtimeServices.filter((service) => {
-      if (service?.status === 'running') return true
-      return service?.id === selectedServiceId
-    })
-  }, [runtimeServices, selectedServiceId])
 
   const visibleSidebarChats = useMemo(() => {
     const hiddenIds = new Set(hiddenChatsByWorkspace[activeWorkspaceName] || [])
@@ -442,6 +437,11 @@ export default function App() {
 
   async function handleAddProcess(folderName, config) {
     await createProcessApi(folderName, config)
+    await loadProcesses()
+  }
+
+  async function handleAddWorkspaceProcess(config) {
+    await createWorkspaceProcessApi(config)
     await loadProcesses()
   }
 
@@ -1198,11 +1198,13 @@ export default function App() {
         thinkingChatIds={thinkingChatIds}
         unreadChatIds={unreadChatIds}
         activeChatId={activeTab === 'active-chat' && conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''}
-        services={visibleRuntimeServices}
+        services={runtimeServices}
+        processes={processes}
         activeServiceId={selectedServiceId}
         onOpenChat={(threadId) => { void handleOpenChat(threadId) }}
         onOpenService={(service) => { void handleOpenRuntimeService(service) }}
         onStopService={(serviceId) => { void handleStopRuntimeService(serviceId) }}
+        onStartProcess={(processId) => { void handleStartProcess(processId) }}
         onHideChat={handleHideChat}
         onNewChat={handleNewChat}
         onSelectWorkspace={handleSelectWorkspace}
@@ -1338,6 +1340,7 @@ export default function App() {
             onStartProcess={handleStartProcess}
             onStopProcess={handleStopProcess}
             onAddProcess={handleAddProcess}
+            onAddWorkspaceProcess={handleAddWorkspaceProcess}
             onUpdateProcess={handleUpdateProcess}
             onDeleteProcess={handleDeleteProcess}
             onDetectProcesses={handleDetectProcesses}

@@ -410,6 +410,7 @@ type RuntimeServiceSummary = {
   exit_code: number | null;
   started_at: string;
   ended_at: string | null;
+  process_db_id?: string;
 };
 
 type RuntimeServiceStreamEvent =
@@ -618,6 +619,7 @@ function toRuntimeServiceSummary(service: RuntimeServiceRecord): RuntimeServiceS
     exit_code: service.exit_code,
     started_at: service.started_at,
     ended_at: service.ended_at,
+    process_db_id: service.process_db_id,
   };
 }
 
@@ -1485,6 +1487,27 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         `INSERT INTO processes (id, workspace, folder_name, label, command, cwd, type, status)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'stopped')`,
         [processId, workspaceName, folderName, body.label, body.command, body.cwd, body.type],
+      );
+
+      const result = await db.query(`SELECT * FROM processes WHERE id = $1`, [processId]);
+      return c.json({ ok: true, process: result.rows[0] }, 201);
+    },
+  );
+
+  // Workspace-level process creation (no folder required)
+  app.post(
+    "/processes",
+    validateJson(createProcessSchema),
+    async (c) => {
+      const workspaceName = c.get("workspace");
+      const db = c.get("db");
+      const body = c.req.valid("json");
+
+      const processId = `proc_${randomUUID().slice(0, 12)}`;
+      await db.query(
+        `INSERT INTO processes (id, workspace, folder_name, label, command, cwd, type, status)
+         VALUES ($1, $2, '', $3, $4, $5, $6, 'stopped')`,
+        [processId, workspaceName, body.label, body.command, body.cwd, body.type],
       );
 
       const result = await db.query(`SELECT * FROM processes WHERE id = $1`, [processId]);

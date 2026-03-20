@@ -11,7 +11,6 @@ import {
   X,
   Code2,
   Folder,
-  FolderGit2,
   TerminalSquare,
   Loader2,
   MessageSquare,
@@ -40,15 +39,39 @@ export function Sidebar({
   onOpenChat,
   onHideChat,
   services = [],
+  processes = [],
   activeServiceId = '',
   onOpenService,
   onStopService,
+  onStartProcess,
   onNewChat,
   onSelectWorkspace,
   onCreateWorkspace,
 }) {
   const [wsOpen, setWsOpen] = useState(false)
   const workspaceMenuRef = useRef(null)
+
+  // Merge DB processes with runtime services to get live status
+  const sidebarProcesses = useMemo(() => {
+    if (!Array.isArray(processes)) return []
+    // Filter out task-level processes (those belong to tasks, not user-created)
+    const userProcesses = processes.filter((p) => p && !p.task_id)
+    // Build a lookup from process_db_id to runtime service
+    const dbIdToService = new Map()
+    if (Array.isArray(services)) {
+      for (const svc of services) {
+        if (svc?.process_db_id) {
+          dbIdToService.set(svc.process_db_id, svc)
+        }
+      }
+    }
+    return userProcesses.map((proc) => {
+      const runtimeService = dbIdToService.get(proc.id) || null
+      // Use runtime service status if available (more up to date)
+      const status = runtimeService ? (runtimeService.status || proc.status) : proc.status
+      return { ...proc, status, _runtimeService: runtimeService }
+    })
+  }, [processes, services])
 
   const activeWorkspace = useMemo(() => {
     return workspaces.find((workspace) => workspace.name === activeWorkspaceName) ?? null
@@ -148,26 +171,32 @@ export function Sidebar({
       <section className="sidebar-services">
         <div className="sidebar-services-title">Processes</div>
         <div className="sidebar-services-list">
-          {services.length === 0 && (
-            <div className="sidebar-chat-empty">No running processes</div>
+          {sidebarProcesses.length === 0 && (
+            <div className="sidebar-chat-empty">No processes</div>
           )}
-          {services.map((service) => {
-            const isActive = activeServiceId === service.id
-            const status = typeof service.status === 'string' ? service.status : ''
-            const isRepoLevel = !service.task_id
-            const IconComponent = isRepoLevel ? FolderGit2 : TerminalSquare
+          {sidebarProcesses.map((proc) => {
+            const runtimeService = proc._runtimeService
+            const isActive = runtimeService ? activeServiceId === runtimeService.id : false
+            const status = typeof proc.status === 'string' ? proc.status : 'stopped'
+            const isRunning = status === 'running' || status === 'ready'
             return (
-              <div key={service.id} className="sidebar-service-row">
+              <div key={proc.id} className="sidebar-service-row">
                 <button
                   className={`sidebar-service-item ${isActive ? 'active' : ''}`}
-                  onClick={() => onOpenService?.(service)}
-                  title={`${service.label || service.command} (${status})`}
+                  onClick={() => {
+                    if (runtimeService) {
+                      onOpenService?.(runtimeService)
+                    } else if (!isRunning) {
+                      onStartProcess?.(proc.id)
+                    }
+                  }}
+                  title={`${proc.label || proc.command} (${status})`}
                 >
                   <span className={`sidebar-service-dot ${status === 'running' ? 'running' : ''} ${status === 'exited' ? 'exited' : ''}`} />
-                  <IconComponent size={12} />
-                  <span className="sidebar-service-title">{service.label || service.command}</span>
+                  <TerminalSquare size={12} />
+                  <span className="sidebar-service-title">{proc.label || proc.command}</span>
                 </button>
-                {(status === 'running' || status === 'ready') && (
+                {isRunning && runtimeService && (
                   <button
                     className="sidebar-service-stop"
                     aria-label="Stop process"
@@ -175,7 +204,7 @@ export function Sidebar({
                     onClick={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
-                      onStopService?.(service.id)
+                      onStopService?.(runtimeService.id)
                     }}
                   >
                     <X size={11} />
