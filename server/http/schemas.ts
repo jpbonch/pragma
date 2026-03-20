@@ -425,6 +425,26 @@ export const dbQuerySchema = z
   })
   .strict();
 
+const processTypeSchema = z.enum(["service", "script"]);
+
+export const createProcessSchema = z
+  .object({
+    label: nonEmptyString,
+    command: nonEmptyString,
+    cwd: nonEmptyString,
+    type: processTypeSchema,
+  })
+  .strict();
+
+export const updateProcessSchema = z
+  .object({
+    label: nonEmptyString.optional(),
+    command: nonEmptyString.optional(),
+    cwd: nonEmptyString.optional(),
+    type: processTypeSchema.optional(),
+  })
+  .strict();
+
 export type Harness = z.infer<typeof harnessSchema>;
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;

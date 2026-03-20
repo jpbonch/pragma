@@ -700,6 +700,25 @@ CREATE TABLE IF NOT EXISTS agent_connectors (
   PRIMARY KEY (agent_id, connector_id)
 );
 `);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS processes (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace VARCHAR(255) NOT NULL,
+  folder_name VARCHAR(255) NOT NULL,
+  label VARCHAR(255) NOT NULL,
+  command TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  type VARCHAR(16) NOT NULL DEFAULT 'service',
+  status VARCHAR(32) NOT NULL DEFAULT 'stopped',
+  pid INTEGER,
+  exit_code INTEGER,
+  task_id VARCHAR(64),
+  started_at TIMESTAMPTZ,
+  stopped_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
 }
 
 async function ensureTaskStatusEnumType(db: PGlite): Promise<void> {

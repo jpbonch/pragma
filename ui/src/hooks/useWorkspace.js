@@ -6,6 +6,7 @@ import {
   fetchCodeFolders,
   fetchRuntimeServices,
   openRuntimeServiceStream,
+  fetchProcesses,
 } from '../api'
 import { errorText } from '../lib/conversationUtils'
 
@@ -33,6 +34,8 @@ export function useWorkspace() {
   const [selectedServiceId, setSelectedServiceId] = useState('')
   const [runtimeServiceLogsById, setRuntimeServiceLogsById] = useState(() => ({}))
   const [runtimeServiceStreamError, setRuntimeServiceStreamError] = useState('')
+  const [processes, setProcesses] = useState([])
+  const [processesLoading, setProcessesLoading] = useState(false)
 
   const runtimeServicesPollTimerRef = useRef(null)
   const runtimeServiceStreamCloseRef = useRef(null)
@@ -81,6 +84,21 @@ export function useWorkspace() {
     }
   }
 
+  async function loadProcesses() {
+    setProcessesLoading(true)
+    try {
+      const next = await fetchProcesses()
+      setProcesses(next)
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'NO_ACTIVE_WORKSPACE') {
+        setProcesses([])
+        return
+      }
+    } finally {
+      setProcessesLoading(false)
+    }
+  }
+
   async function loadRuntimeServices() {
     try {
       const next = await fetchRuntimeServices()
@@ -126,6 +144,8 @@ export function useWorkspace() {
     setSelectedServiceId('')
     setRuntimeServiceLogsById({})
     setRuntimeServiceStreamError('')
+    setProcesses([])
+    setProcessesLoading(false)
     runtimeServiceStreamCloseRef.current?.()
     runtimeServiceStreamCloseRef.current = null
     if (runtimeServicesPollTimerRef.current) {
@@ -252,7 +272,8 @@ export function useWorkspace() {
     codeFolders, setCodeFolders, codeLoading, setCodeLoading, codeError, setCodeError,
     runtimeServices, selectedServiceId, setSelectedServiceId,
     runtimeServiceLogsById, runtimeServiceStreamError, setRuntimeServiceStreamError,
-    refreshWorkspaces, loadContext, loadCode, loadRuntimeServices,
+    processes, processesLoading,
+    refreshWorkspaces, loadContext, loadCode, loadProcesses, loadRuntimeServices,
     upsertRuntimeService, clearWorkspaceData,
     runtimeServicesPollTimerRef,
   }

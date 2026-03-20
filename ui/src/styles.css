@@ -5906,6 +5906,219 @@ select { cursor: pointer; }
   color: #dc2626;
 }
 
+/* ─── Process Management ────────────────────────────── */
+.cv-processes {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #F0EFEC;
+}
+
+.cv-processes-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6f6e69;
+  margin-bottom: 8px;
+}
+
+.cv-processes-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex: 1;
+}
+
+.cv-processes-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.cv-processes-empty {
+  font-size: 12px;
+  color: #B0AFA8;
+  padding: 4px 0;
+}
+
+.cv-proc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  margin-bottom: 2px;
+}
+
+.cv-proc-row:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.cv-proc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #B0AFA8;
+  flex-shrink: 0;
+}
+
+.cv-proc-dot.running {
+  background: #2FA67E;
+}
+
+.cv-proc-dot.exited {
+  background: #dc2626;
+}
+
+.cv-proc-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cv-proc-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #37352F;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-proc-command {
+  font-size: 11px;
+  color: #9B9A97;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-proc-type-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.cv-proc-type-service {
+  background: #E8F5E9;
+  color: #2E7D32;
+}
+
+.cv-proc-type-script {
+  background: #E3F2FD;
+  color: #1565C0;
+}
+
+.cv-proc-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.cv-proc-row:hover .cv-proc-actions {
+  opacity: 1;
+}
+
+.cv-proc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: #6f6e69;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.cv-proc-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+  color: #37352F;
+}
+
+.cv-proc-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cv-proc-btn-ghost {
+  color: #9B9A97;
+}
+
+.cv-proc-btn-ghost:hover:not(:disabled) {
+  color: #37352F;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.cv-proc-btn-start {
+  color: #2FA67E;
+}
+
+.cv-proc-btn-start:hover:not(:disabled) {
+  background: rgba(47, 166, 126, 0.1);
+}
+
+.cv-proc-btn-stop {
+  color: #E67E22;
+}
+
+.cv-proc-btn-stop:hover:not(:disabled) {
+  background: rgba(230, 126, 34, 0.1);
+}
+
+.cv-proc-btn-delete {
+  color: #dc2626;
+}
+
+.cv-proc-btn-delete:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.cv-proc-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  margin-top: 6px;
+  border: 1px solid #E8E7E4;
+  border-radius: 8px;
+  background: #fafaf8;
+}
+
+.cv-proc-add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.cv-proc-add-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.cv-proc-add-select {
+  width: 90px;
+  flex-shrink: 0;
+}
+
+.cv-proc-add-submit {
+  flex-shrink: 0;
+}
+
+.sidebar-service-dot.exited {
+  background: #dc2626;
+}
+
 
 /* ─── Empty Pane ────────────────────────────────────── */
 .empty-pane {

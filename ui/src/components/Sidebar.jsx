@@ -11,6 +11,7 @@ import {
   X,
   Code2,
   Folder,
+  FolderGit2,
   TerminalSquare,
   Loader2,
   MessageSquare,
@@ -153,6 +154,8 @@ export function Sidebar({
           {services.map((service) => {
             const isActive = activeServiceId === service.id
             const status = typeof service.status === 'string' ? service.status : ''
+            const isRepoLevel = !service.task_id
+            const IconComponent = isRepoLevel ? FolderGit2 : TerminalSquare
             return (
               <div key={service.id} className="sidebar-service-row">
                 <button
@@ -160,11 +163,11 @@ export function Sidebar({
                   onClick={() => onOpenService?.(service)}
                   title={`${service.label || service.command} (${status})`}
                 >
-                  <span className={`sidebar-service-dot ${status === 'running' ? 'running' : ''}`} />
-                  <TerminalSquare size={12} />
+                  <span className={`sidebar-service-dot ${status === 'running' ? 'running' : ''} ${status === 'exited' ? 'exited' : ''}`} />
+                  <IconComponent size={12} />
                   <span className="sidebar-service-title">{service.label || service.command}</span>
                 </button>
-                {status === 'running' && (
+                {(status === 'running' || status === 'ready') && (
                   <button
                     className="sidebar-service-stop"
                     aria-label="Stop process"

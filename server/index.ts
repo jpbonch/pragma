@@ -119,6 +119,8 @@ import {
   configureConnectorSchema,
   assignAgentConnectorSchema,
   dbQuerySchema,
+  createProcessSchema,
+  updateProcessSchema,
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { workspaceMiddleware, type WorkspaceEnv } from "./http/middleware";
@@ -421,12 +423,12 @@ type RuntimeServiceRecord = RuntimeServiceSummary & {
   logs: RuntimeServiceLogEntry[];
   listeners: Set<RuntimeServiceListener>;
   _child: import("execa").ExecaChildProcess<string> | null;
+  process_db_id?: string;
 };
 
 const TASK_STATUS_LISTENERS = new Map<string, Set<TaskStatusListener>>();
 const THREAD_UPDATE_LISTENERS = new Map<string, Set<ThreadUpdateListener>>();
 const RUNTIME_SERVICES_BY_WORKSPACE = new Map<string, Map<string, RuntimeServiceRecord>>();
-const MAX_RUNTIME_SERVICE_LOG_ENTRIES = 2000;
 
 function threadListenerKey(workspaceName: string, threadId: string): string {
   return `${workspaceName}:${threadId}`;
@@ -659,9 +661,6 @@ function appendRuntimeServiceLog(
   };
   service.next_seq += 1;
   service.logs.push(entry);
-  if (service.logs.length > MAX_RUNTIME_SERVICE_LOG_ENTRIES) {
-    service.logs.splice(0, service.logs.length - MAX_RUNTIME_SERVICE_LOG_ENTRIES);
-  }
   publishRuntimeServiceEvent(service, { type: "log", entry });
 }
 
@@ -677,6 +676,28 @@ function updateRuntimeServiceStatus(
     type: "status",
     service: toRuntimeServiceSummary(service),
   });
+
+  if (service.process_db_id) {
+    void updateProcessDbStatus(service.workspace, service.process_db_id, status, exitCode);
+  }
+}
+
+async function updateProcessDbStatus(
+  workspaceName: string,
+  processDbId: string,
+  status: RuntimeServiceStatus,
+  exitCode: number | null,
+): Promise<void> {
+  try {
+    const db = await openDatabase(workspaceName);
+    const dbStatus = status === "ready" ? "running" : status;
+    await db.query(
+      `UPDATE processes SET status = $1, exit_code = $2, stopped_at = CASE WHEN $1 IN ('stopped', 'exited') THEN CURRENT_TIMESTAMP ELSE stopped_at END WHERE id = $3`,
+      [dbStatus, exitCode, processDbId],
+    );
+  } catch {
+    // Best-effort DB update
+  }
 }
 
 function startRuntimeService(input: {
@@ -851,9 +872,61 @@ async function recoverOrphanedTasks(): Promise<void> {
   }
 }
 
+async function recoverOrphanedProcesses(): Promise<void> {
+  const workspaces = await listWorkspaceNames();
+  for (const workspaceName of workspaces) {
+    const db = await openDatabase(workspaceName);
+    const running = await db.query<{ id: string; pid: number | null }>(
+      `SELECT id, pid FROM processes WHERE status = 'running'`,
+    );
+
+    for (const row of running.rows) {
+      const pid = row.pid;
+      let alive = false;
+      if (pid && pid > 0) {
+        try {
+          process.kill(pid, 0);
+          alive = true;
+        } catch {
+          alive = false;
+        }
+      }
+
+      if (alive && pid) {
+        try {
+          process.kill(pid, "SIGTERM");
+        } catch {
+          // already dead
+        }
+        // Give it a moment, then SIGKILL
+        setTimeout(() => {
+          try {
+            process.kill(pid, 0);
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // already dead
+          }
+        }, 3000);
+      }
+
+      await db.query(
+        `UPDATE processes SET status = 'exited', stopped_at = CURRENT_TIMESTAMP, exit_code = -1 WHERE id = $1`,
+        [row.id],
+      );
+    }
+
+    if (running.rows.length > 0) {
+      console.log(
+        `[recovery] ${workspaceName}: cleaned up ${running.rows.length} orphaned process(es)`,
+      );
+    }
+  }
+}
+
 export async function startServer(options: StartServerOptions): Promise<void> {
   await setupPragma();
   await recoverOrphanedTasks();
+  await recoverOrphanedProcesses();
   const apiUrl = process.env.PRAGMA_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
   const pragmaCliCommand = resolvePragmaCliCommand(__dirname);
   const executeRunner = new ExecuteRunner({
@@ -1370,6 +1443,214 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         return () => service.listeners.delete(listener);
       },
     });
+  });
+
+  // ── Process Management ─────────────────────────────────────────
+  app.get("/processes", async (c) => {
+    const workspaceName = c.get("workspace");
+    const db = c.get("db");
+    const result = await db.query(
+      `SELECT * FROM processes WHERE workspace = $1 ORDER BY created_at DESC`,
+      [workspaceName],
+    );
+    return c.json({ processes: result.rows });
+  });
+
+  app.get("/code/folders/:folderName/processes", async (c) => {
+    const workspaceName = c.get("workspace");
+    const folderName = c.req.param("folderName");
+    const db = c.get("db");
+    const result = await db.query(
+      `SELECT * FROM processes WHERE workspace = $1 AND folder_name = $2 ORDER BY created_at DESC`,
+      [workspaceName, folderName],
+    );
+    return c.json({ processes: result.rows });
+  });
+
+  app.post(
+    "/code/folders/:folderName/processes",
+    validateJson(createProcessSchema),
+    async (c) => {
+      const workspaceName = c.get("workspace");
+      const folderName = c.req.param("folderName");
+      const db = c.get("db");
+      const body = c.req.valid("json");
+
+      const processId = `proc_${randomUUID().slice(0, 12)}`;
+      await db.query(
+        `INSERT INTO processes (id, workspace, folder_name, label, command, cwd, type, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'stopped')`,
+        [processId, workspaceName, folderName, body.label, body.command, body.cwd, body.type],
+      );
+
+      const result = await db.query(`SELECT * FROM processes WHERE id = $1`, [processId]);
+      return c.json({ ok: true, process: result.rows[0] }, 201);
+    },
+  );
+
+  app.put(
+    "/processes/:processId",
+    validateJson(updateProcessSchema),
+    async (c) => {
+      const db = c.get("db");
+      const processId = c.req.param("processId");
+      const body = c.req.valid("json");
+
+      const existing = await db.query<{ status: string }>(
+        `SELECT status FROM processes WHERE id = $1`,
+        [processId],
+      );
+      if (existing.rows.length === 0) {
+        throw new PragmaError("PROCESS_NOT_FOUND", 404, `Process not found: ${processId}`);
+      }
+      if (existing.rows[0].status === "running") {
+        throw new PragmaError("PROCESS_RUNNING", 400, "Cannot update a running process.");
+      }
+
+      const updates: string[] = [];
+      const params: unknown[] = [];
+      let paramIndex = 1;
+
+      if (body.label !== undefined) { updates.push(`label = $${paramIndex++}`); params.push(body.label); }
+      if (body.command !== undefined) { updates.push(`command = $${paramIndex++}`); params.push(body.command); }
+      if (body.cwd !== undefined) { updates.push(`cwd = $${paramIndex++}`); params.push(body.cwd); }
+      if (body.type !== undefined) { updates.push(`type = $${paramIndex++}`); params.push(body.type); }
+
+      if (updates.length === 0) {
+        const result = await db.query(`SELECT * FROM processes WHERE id = $1`, [processId]);
+        return c.json({ ok: true, process: result.rows[0] });
+      }
+
+      params.push(processId);
+      await db.query(
+        `UPDATE processes SET ${updates.join(", ")} WHERE id = $${paramIndex}`,
+        params,
+      );
+
+      const result = await db.query(`SELECT * FROM processes WHERE id = $1`, [processId]);
+      return c.json({ ok: true, process: result.rows[0] });
+    },
+  );
+
+  app.delete("/processes/:processId", async (c) => {
+    const workspaceName = c.get("workspace");
+    const db = c.get("db");
+    const processId = c.req.param("processId");
+
+    const existing = await db.query<{ status: string }>(
+      `SELECT status FROM processes WHERE id = $1`,
+      [processId],
+    );
+    if (existing.rows.length === 0) {
+      throw new PragmaError("PROCESS_NOT_FOUND", 404, `Process not found: ${processId}`);
+    }
+
+    // Stop if running
+    if (existing.rows[0].status === "running") {
+      const store = getWorkspaceServiceStore(workspaceName);
+      for (const service of store.values()) {
+        if (service.process_db_id === processId) {
+          stopRuntimeService(service);
+          break;
+        }
+      }
+    }
+
+    await db.query(`DELETE FROM processes WHERE id = $1`, [processId]);
+    return c.json({ ok: true });
+  });
+
+  app.post("/processes/:processId/start", async (c) => {
+    const workspaceName = c.get("workspace");
+    const db = c.get("db");
+    const processId = c.req.param("processId");
+    const workspacePaths = getWorkspacePaths(workspaceName);
+
+    const result = await db.query<{
+      id: string; folder_name: string; label: string; command: string;
+      cwd: string; type: string; status: string;
+    }>(
+      `SELECT * FROM processes WHERE id = $1`,
+      [processId],
+    );
+    if (result.rows.length === 0) {
+      throw new PragmaError("PROCESS_NOT_FOUND", 404, `Process not found: ${processId}`);
+    }
+
+    const proc = result.rows[0];
+    if (proc.status === "running") {
+      throw new PragmaError("PROCESS_ALREADY_RUNNING", 400, "Process is already running.");
+    }
+
+    const absoluteCwd = join(workspacePaths.codeDir, proc.folder_name, proc.cwd === "." ? "" : proc.cwd);
+    const cwdInfo = await stat(absoluteCwd).catch(() => null);
+    if (!cwdInfo?.isDirectory()) {
+      throw new PragmaError("PROCESS_CWD_NOT_FOUND", 400, `Working directory not found: ${absoluteCwd}`);
+    }
+
+    const service = startRuntimeService({
+      workspaceName,
+      taskId: "",
+      label: proc.label,
+      command: proc.command,
+      requestedCwd: proc.cwd,
+      absoluteCwd,
+      env: { ...process.env, PRAGMA_WORKSPACE_NAME: workspaceName },
+    });
+    service.process_db_id = processId;
+
+    await db.query(
+      `UPDATE processes SET status = 'running', pid = $1, started_at = CURRENT_TIMESTAMP, stopped_at = NULL, exit_code = NULL WHERE id = $2`,
+      [service.pid, processId],
+    );
+
+    return c.json({ ok: true, service: toRuntimeServiceSummary(service) });
+  });
+
+  app.post("/processes/:processId/stop", async (c) => {
+    const workspaceName = c.get("workspace");
+    const db = c.get("db");
+    const processId = c.req.param("processId");
+
+    const result = await db.query<{ id: string; status: string }>(
+      `SELECT id, status FROM processes WHERE id = $1`,
+      [processId],
+    );
+    if (result.rows.length === 0) {
+      throw new PragmaError("PROCESS_NOT_FOUND", 404, `Process not found: ${processId}`);
+    }
+
+    const store = getWorkspaceServiceStore(workspaceName);
+    for (const service of store.values()) {
+      if (service.process_db_id === processId) {
+        stopRuntimeService(service);
+        return c.json({ ok: true, service: toRuntimeServiceSummary(service) });
+      }
+    }
+
+    // Not in memory — just update DB
+    await db.query(
+      `UPDATE processes SET status = 'stopped', stopped_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [processId],
+    );
+    return c.json({ ok: true });
+  });
+
+  app.post("/code/folders/:folderName/processes/detect", async (c) => {
+    const workspaceName = c.get("workspace");
+    const folderName = c.req.param("folderName");
+    const db = c.get("db");
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const folderPath = join(workspacePaths.codeDir, folderName);
+
+    const folderInfo = await stat(folderPath).catch(() => null);
+    if (!folderInfo?.isDirectory()) {
+      throw new PragmaError("CODE_FOLDER_NOT_FOUND", 404, `Code folder not found: ${folderName}`);
+    }
+
+    // Run detection async
+    void detectProcessCommands(workspaceName, folderName, workspacePaths, db);
+    return c.json({ ok: true, detecting: true });
   });
 
   // Read-only SSE event stream for a conversation thread.
@@ -2718,6 +2999,16 @@ LIMIT 1
         port,
         healthcheck: proc.healthcheck,
       });
+
+      // Track task-level processes in the processes table
+      const taskProcessId = `proc_${randomUUID().slice(0, 12)}`;
+      service.process_db_id = taskProcessId;
+      void db.query(
+        `INSERT INTO processes (id, workspace, folder_name, label, command, cwd, type, status, pid, task_id, started_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'service', 'running', $7, $8, CURRENT_TIMESTAMP)`,
+        [taskProcessId, workspaceName, "", proc.name, command, proc.cwd || ".", service.pid, taskId],
+      );
+
       services[proc.name] = toRuntimeServiceSummary(service);
     }
 
@@ -2727,6 +3018,7 @@ LIMIT 1
   app.post("/tasks/:taskId/testing/stop", async (c) => {
     const workspaceName = c.get("workspace");
     const taskId = c.req.param("taskId");
+    const db = c.get("db");
 
     const store = getWorkspaceServiceStore(workspaceName);
     for (const service of store.values()) {
@@ -2734,6 +3026,12 @@ LIMIT 1
         stopRuntimeService(service);
       }
     }
+
+    // Update task processes in DB
+    void db.query(
+      `UPDATE processes SET status = 'stopped', stopped_at = CURRENT_TIMESTAMP WHERE task_id = $1 AND status = 'running'`,
+      [taskId],
+    );
 
     return c.json({ ok: true });
   });
@@ -4181,6 +4479,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
 
     const folders = await listCodeFolders(paths.codeDir);
+
+    // Trigger process detection in the background
+    const db = c.get("db");
+    void detectProcessCommands(workspaceName, folderName, paths, db);
+
     return c.json({ ok: true, folder: { name: folderName }, folders }, 201);
   });
 
@@ -4255,6 +4558,11 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
 
     const folders = await listCodeFolders(paths.codeDir);
+
+    // Trigger process detection in the background
+    const db = c.get("db");
+    void detectProcessCommands(workspaceName, folderName, paths, db);
+
     return c.json({ ok: true, folder: { name: folderName }, folders }, 201);
   });
 
@@ -5618,6 +5926,20 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   const shutdown = () => {
+    for (const [, store] of RUNTIME_SERVICES_BY_WORKSPACE) {
+      for (const service of store.values()) {
+        if (service.status === "running" || service.status === "ready") {
+          try {
+            if (service.pid && service.pid > 0) {
+              process.kill(service.pid, "SIGTERM");
+            }
+          } catch {
+            // Process may already be dead
+          }
+        }
+      }
+    }
+
     server.close();
     void closeOpenDatabases().finally(() => {
       process.exit(0);
@@ -5628,6 +5950,96 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   process.once("SIGTERM", shutdown);
 }
 
+
+async function detectProcessCommands(
+  workspaceName: string,
+  folderName: string,
+  workspacePaths: ReturnType<typeof getWorkspacePaths>,
+  db: PGlite,
+): Promise<void> {
+  try {
+    const folderPath = join(workspacePaths.codeDir, folderName);
+
+    // Read key files to detect commands
+    const detectedProcesses: Array<{ label: string; command: string; cwd: string; type: string }> = [];
+
+    // Check for package.json
+    try {
+      const pkgJson = JSON.parse(await readFile(join(folderPath, "package.json"), "utf8"));
+      const scripts = pkgJson.scripts || {};
+      for (const [name, cmd] of Object.entries(scripts)) {
+        if (typeof cmd !== "string") continue;
+        if (name === "dev" || name === "start" || name === "serve") {
+          detectedProcesses.push({ label: `${name} (npm)`, command: `npm run ${name}`, cwd: ".", type: "service" });
+        } else if (name === "build" || name === "test" || name === "lint") {
+          detectedProcesses.push({ label: `${name} (npm)`, command: `npm run ${name}`, cwd: ".", type: "script" });
+        }
+      }
+    } catch { /* no package.json */ }
+
+    // Check for Makefile
+    try {
+      const makefile = await readFile(join(folderPath, "Makefile"), "utf8");
+      const targets = makefile.match(/^([a-zA-Z_][a-zA-Z0-9_-]*):/gm);
+      if (targets) {
+        for (const target of targets.slice(0, 5)) {
+          const name = target.replace(":", "");
+          if (["run", "serve", "dev", "start"].includes(name)) {
+            detectedProcesses.push({ label: `make ${name}`, command: `make ${name}`, cwd: ".", type: "service" });
+          } else if (["build", "test", "lint", "clean"].includes(name)) {
+            detectedProcesses.push({ label: `make ${name}`, command: `make ${name}`, cwd: ".", type: "script" });
+          }
+        }
+      }
+    } catch { /* no Makefile */ }
+
+    // Check for pyproject.toml
+    try {
+      await stat(join(folderPath, "pyproject.toml"));
+      detectedProcesses.push({ label: "Python Dev", command: "python -m uvicorn main:app --reload", cwd: ".", type: "service" });
+    } catch { /* no pyproject.toml */ }
+
+    // Check for Cargo.toml
+    try {
+      await stat(join(folderPath, "Cargo.toml"));
+      detectedProcesses.push({ label: "Cargo Run", command: "cargo run", cwd: ".", type: "service" });
+      detectedProcesses.push({ label: "Cargo Build", command: "cargo build", cwd: ".", type: "script" });
+    } catch { /* no Cargo.toml */ }
+
+    // Check for docker-compose
+    for (const dcFile of ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]) {
+      try {
+        await stat(join(folderPath, dcFile));
+        detectedProcesses.push({ label: "Docker Compose Up", command: "docker compose up", cwd: ".", type: "service" });
+        break;
+      } catch { /* no docker-compose */ }
+    }
+
+    if (detectedProcesses.length === 0) return;
+
+    // Deduplicate: skip processes that already exist for this folder
+    const existing = await db.query<{ command: string; cwd: string }>(
+      `SELECT command, cwd FROM processes WHERE workspace = $1 AND folder_name = $2`,
+      [workspaceName, folderName],
+    );
+    const existingKeys = new Set(existing.rows.map((r) => `${r.command}::${r.cwd}`));
+
+    for (const proc of detectedProcesses) {
+      const key = `${proc.command}::${proc.cwd}`;
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+
+      const processId = `proc_${randomUUID().slice(0, 12)}`;
+      await db.query(
+        `INSERT INTO processes (id, workspace, folder_name, label, command, cwd, type, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'stopped')`,
+        [processId, workspaceName, folderName, proc.label, proc.command, proc.cwd, proc.type],
+      );
+    }
+  } catch (error) {
+    console.error(`[detect] Failed to detect processes for ${folderName}:`, error);
+  }
+}
 
 async function isDirectoryEmpty(path: string): Promise<boolean> {
   try {

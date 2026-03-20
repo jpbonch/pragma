@@ -27,6 +27,12 @@ import {
   setActiveWorkspace,
   stopTask,
   stopRuntimeService as stopRuntimeServiceApi,
+  createProcess as createProcessApi,
+  updateProcess as updateProcessApi,
+  deleteProcess as deleteProcessApi,
+  startProcess as startProcessApi,
+  stopProcess as stopProcessApi,
+  detectProcesses as detectProcessesApi,
   streamConversationTurn,
   setTaskRecipient,
   updateAgent,
@@ -88,7 +94,8 @@ export default function App() {
     codeFolders, codeLoading, codeError,
     runtimeServices, selectedServiceId, setSelectedServiceId,
     runtimeServiceLogsById, runtimeServiceStreamError,
-    refreshWorkspaces, loadContext, loadCode, loadRuntimeServices,
+    processes, processesLoading,
+    refreshWorkspaces, loadContext, loadCode, loadProcesses, loadRuntimeServices,
     upsertRuntimeService, clearWorkspaceData,
   } = workspace
 
@@ -318,7 +325,7 @@ export default function App() {
   async function loadWorkspaceData() {
     await Promise.all([
       loadTasks(), loadAgents(), loadHumans(),
-      loadContext(), loadCode(), loadPlans(), loadChats(),
+      loadContext(), loadCode(), loadProcesses(), loadPlans(), loadChats(),
       loadRuntimeServices(),
     ])
   }
@@ -411,11 +418,14 @@ export default function App() {
   async function handleCloneCodeRepo(gitUrl) {
     await cloneCodeRepo(gitUrl)
     await loadCode()
+    // Detection runs async on server; poll processes after a delay
+    setTimeout(() => { void loadProcesses() }, 3000)
   }
 
   async function handleCopyCodeFolderFromLocal(localPath) {
     await copyCodeFolderFromLocal(localPath)
     await loadCode()
+    setTimeout(() => { void loadProcesses() }, 3000)
   }
 
   async function handlePickLocalCodeFolder() {
@@ -428,6 +438,41 @@ export default function App() {
   async function handlePushCodeFolder(folderName) {
     await pushCodeFolder(folderName)
     await loadCode()
+  }
+
+  async function handleAddProcess(folderName, config) {
+    await createProcessApi(folderName, config)
+    await loadProcesses()
+  }
+
+  async function handleUpdateProcess(processId, updates) {
+    await updateProcessApi(processId, updates)
+    await loadProcesses()
+  }
+
+  async function handleDeleteProcess(processId) {
+    await deleteProcessApi(processId)
+    await loadProcesses()
+  }
+
+  async function handleStartProcess(processId) {
+    const result = await startProcessApi(processId)
+    await loadProcesses()
+    if (result?.service) {
+      upsertRuntimeService(result.service)
+    }
+  }
+
+  async function handleStopProcess(processId) {
+    await stopProcessApi(processId)
+    await loadProcesses()
+    await loadRuntimeServices()
+  }
+
+  async function handleDetectProcesses(folderName) {
+    await detectProcessesApi(folderName)
+    // Detection is async on server, poll after a delay
+    setTimeout(() => { void loadProcesses() }, 2000)
   }
 
   // --- Agent handlers ---
@@ -477,9 +522,13 @@ export default function App() {
     if (!service || typeof service !== 'object') return
     const serviceId = typeof service.id === 'string' ? service.id : ''
     const taskId = typeof service.task_id === 'string' ? service.task_id : ''
-    if (!serviceId || !taskId) return
+    if (!serviceId) return
 
     setSelectedServiceId(serviceId)
+
+    // Repo-level processes have empty task_id — just select the service for log viewing
+    if (!taskId) return
+
     const existingTask = tasks.find((task) => task?.id === taskId)
     if (existingTask) {
       await handleOpenTaskConversation(existingTask, { serviceId })
@@ -1284,6 +1333,14 @@ export default function App() {
             onCopyLocalFolder={handleCopyCodeFolderFromLocal}
             onPickLocalFolder={handlePickLocalCodeFolder}
             onPushFolder={handlePushCodeFolder}
+            processes={processes}
+            processesLoading={processesLoading}
+            onStartProcess={handleStartProcess}
+            onStopProcess={handleStopProcess}
+            onAddProcess={handleAddProcess}
+            onUpdateProcess={handleUpdateProcess}
+            onDeleteProcess={handleDeleteProcess}
+            onDetectProcesses={handleDetectProcesses}
           />
         )}
         {activeTab === 'files' && <FilesView />}
