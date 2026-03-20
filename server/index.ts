@@ -5934,7 +5934,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   });
 
   const server = serve({ fetch: app.fetch, port: options.port }, (info) => {
-    console.log(`Pragma API listening on http://127.0.0.1:${info.port}`);
+    if (process.env.PRAGMA_SUPPRESS_STARTUP_LOGS !== "1") {
+      console.log(`Pragma API listening on http://127.0.0.1:${info.port}`);
+    }
   });
 
   const shutdown = () => {

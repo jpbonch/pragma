@@ -649,18 +649,12 @@ async function runAll(): Promise<void> {
 
   const serverPort = (await tryPort(preferredServerPort)) ?? (await getRandomFreePort());
   const uiPort = (await tryPort(preferredUiPort)) ?? (await getRandomFreePort());
-
   const apiUrl = `http://127.0.0.1:${serverPort}`;
   const uiUrl = `http://127.0.0.1:${uiPort}`;
 
-  if (serverPort !== preferredServerPort) {
-    console.log(`Port ${preferredServerPort} in use, API server using port ${serverPort}`);
-  }
-  if (uiPort !== preferredUiPort) {
-    console.log(`Port ${preferredUiPort} in use, UI using port ${uiPort}`);
-  }
-
-  const serverProcess = spawnSelfCommand(["server", "--port", String(serverPort)]);
+  const serverProcess = spawnSelfCommand(["server", "--port", String(serverPort)], {
+    PRAGMA_SUPPRESS_STARTUP_LOGS: "1",
+  });
   const serverExit = waitForExit(serverProcess, "server");
 
   await waitForHealth(apiUrl);
@@ -671,7 +665,9 @@ async function runAll(): Promise<void> {
     String(uiPort),
     "--api-url",
     apiUrl,
-  ]);
+  ], {
+    PRAGMA_SUPPRESS_STARTUP_LOGS: "1",
+  });
   const uiExit = waitForExit(uiProcess, "ui");
 
   console.log(`Pragma API: ${apiUrl}`);
@@ -771,7 +767,9 @@ async function serveBuiltUi(options: { port: number; rootDir: string }): Promise
     });
   });
 
-  console.log(`Pragma UI listening on http://127.0.0.1:${options.port}`);
+  if (process.env.PRAGMA_SUPPRESS_STARTUP_LOGS !== "1") {
+    console.log(`Pragma UI listening on http://127.0.0.1:${options.port}`);
+  }
 
   await new Promise<void>((resolvePromise, reject) => {
     server.once("close", () => resolvePromise());
@@ -847,13 +845,16 @@ async function waitForHealth(apiUrl: string): Promise<void> {
   throw new Error("Server did not become ready in time.");
 }
 
-function spawnSelfCommand(args: string[]) {
+function spawnSelfCommand(args: string[], envOverrides: Record<string, string> = {}) {
   return spawnNodeCommand({
     modulePath: __filename,
     args,
     cwd: process.cwd(),
     stdio: "inherit",
-    env: process.env,
+    env: {
+      ...process.env,
+      ...envOverrides,
+    },
   });
 }
 
