@@ -6817,6 +6817,25 @@ select { cursor: pointer; }
   gap: 5px;
   align-items: center;
 }
+.cn-agent-skills-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  width: 100%;
+}
+.cn-agent-skills-section-label {
+  width: 100%;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #999;
+  margin-bottom: 1px;
+}
+.cn-agent-skills-section + .cn-agent-skills-section {
+  margin-top: 6px;
+}
 .cn-agent-skill-item {
   display: inline-flex;
   align-items: center;

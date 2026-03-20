@@ -596,44 +596,54 @@ export function ConnectionsView() {
                           </div>
                         </div>
                         <div className="cn-agent-card-skills">
-                          {assignedSkills.map((skill) => (
-                            <span key={skill.id} className="cn-agent-skill-item">
-                              <span className="cn-agent-skill-dot" />
-                              <span className="cn-agent-skill-name">{skill.name}</span>
-                              <button
-                                className="cn-agent-skill-remove"
-                                title={`Remove ${skill.name}`}
-                                onClick={() => handleUnassignSkill(skill.id, agent.id)}
-                              >
-                                <X size={10} />
-                              </button>
-                            </span>
-                          ))}
-                          {assignedConns.map((conn) => (
-                            <span key={conn.id} className="cn-agent-skill-item cn-agent-skill-item--connector">
-                              <span className="cn-agent-skill-dot cn-agent-skill-dot--connector" />
-                              <span className="cn-agent-skill-name">{conn.name}</span>
-                              <button
-                                className="cn-agent-skill-remove"
-                                title={`Remove ${conn.name}`}
-                                onClick={() => handleUnassignConnector(conn.id, agent.id)}
-                              >
-                                <X size={10} />
-                              </button>
-                            </span>
-                          ))}
-                          {agentGlobalSkills.map((skill) => (
-                            <span key={`global-${skill.name}`} className="cn-agent-skill-item cn-agent-skill-item--global">
-                              <span className="cn-agent-skill-dot cn-agent-skill-dot--global" />
-                              <span className="cn-agent-skill-name">{skill.name}</span>
-                            </span>
-                          ))}
-                          {agentMcpServers.map((server) => (
-                            <span key={`mcp-${server.name}`} className="cn-agent-skill-item cn-agent-skill-item--mcp">
-                              <span className="cn-agent-skill-dot cn-agent-skill-dot--mcp" />
-                              <span className="cn-agent-skill-name">{server.name}</span>
-                            </span>
-                          ))}
+                          {(assignedSkills.length > 0 || assignedConns.length > 0) && (
+                            <div className="cn-agent-skills-section">
+                              <span className="cn-agent-skills-section-label">Pragma</span>
+                              {assignedSkills.map((skill) => (
+                                <span key={skill.id} className="cn-agent-skill-item">
+                                  <span className="cn-agent-skill-dot" />
+                                  <span className="cn-agent-skill-name">{skill.name}</span>
+                                  <button
+                                    className="cn-agent-skill-remove"
+                                    title={`Remove ${skill.name}`}
+                                    onClick={() => handleUnassignSkill(skill.id, agent.id)}
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </span>
+                              ))}
+                              {assignedConns.map((conn) => (
+                                <span key={conn.id} className="cn-agent-skill-item cn-agent-skill-item--connector">
+                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--connector" />
+                                  <span className="cn-agent-skill-name">{conn.name}</span>
+                                  <button
+                                    className="cn-agent-skill-remove"
+                                    title={`Remove ${conn.name}`}
+                                    onClick={() => handleUnassignConnector(conn.id, agent.id)}
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {(agentGlobalSkills.length > 0 || agentMcpServers.length > 0) && (
+                            <div className="cn-agent-skills-section">
+                              <span className="cn-agent-skills-section-label">Runtime</span>
+                              {agentGlobalSkills.map((skill) => (
+                                <span key={`global-${skill.name}`} className="cn-agent-skill-item cn-agent-skill-item--global">
+                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--global" />
+                                  <span className="cn-agent-skill-name">{skill.name}</span>
+                                </span>
+                              ))}
+                              {agentMcpServers.map((server) => (
+                                <span key={`mcp-${server.name}`} className="cn-agent-skill-item cn-agent-skill-item--mcp">
+                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--mcp" />
+                                  <span className="cn-agent-skill-name">{server.name}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           {totalSkills === 0 && (
                             <span className="cn-agent-card-empty">No skills assigned</span>
                           )}
