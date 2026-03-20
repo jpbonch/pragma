@@ -1455,11 +1455,38 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   app.get("/processes", async (c) => {
     const workspaceName = c.get("workspace");
     const db = c.get("db");
-    const result = await db.query(
+    const result = await db.query<Record<string, unknown>>(
       `SELECT * FROM processes WHERE workspace = $1 ORDER BY created_at DESC`,
       [workspaceName],
     );
-    return c.json({ processes: result.rows });
+    // Merge live runtime status into each process row
+    const runtimeServices = listRuntimeServices(workspaceName);
+    const runtimeByDbId = new Map<string, RuntimeServiceSummary>();
+    for (const svc of runtimeServices) {
+      if (svc.process_db_id) {
+        runtimeByDbId.set(svc.process_db_id, svc);
+      }
+    }
+    const enriched = result.rows.map((proc) => {
+      const svc = runtimeByDbId.get(proc.id as string);
+      if (svc) {
+        return {
+          ...proc,
+          status: svc.status === "ready" ? "running" : svc.status,
+          runtime_service_id: svc.id,
+          pid: svc.pid,
+          port: svc.port,
+        };
+      }
+      // No runtime service — ensure status reflects stopped
+      const dbStatus = proc.status as string;
+      return {
+        ...proc,
+        status: dbStatus === "running" ? "stopped" : dbStatus,
+        runtime_service_id: null,
+      };
+    });
+    return c.json({ processes: enriched });
   });
 
   app.get("/code/folders/:folderName/processes", async (c) => {

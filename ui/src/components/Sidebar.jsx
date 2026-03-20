@@ -15,6 +15,9 @@ import {
   TerminalSquare,
   Loader2,
   MessageSquare,
+  Play,
+  RotateCcw,
+  Square,
 } from 'lucide-react'
 
 const ITEMS = [
@@ -24,6 +27,167 @@ const ITEMS = [
   { id: 'context', icon: BookOpen, label: 'Context' },
   { id: 'skills', icon: Puzzle, label: 'Skills' },
 ]
+
+function SidebarProcesses({ processes, services, activeServiceId, onOpenService, onStartProcess, onStopProcess, onAddProcess, onDeleteProcess }) {
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [addLabel, setAddLabel] = useState('')
+  const [addCommand, setAddCommand] = useState('')
+  const [addLoading, setAddLoading] = useState(false)
+  const [actionLoading, setActionLoading] = useState('')
+
+  // Build a map from process_db_id to runtime service for quick lookups
+  const runtimeByDbId = useMemo(() => {
+    const map = new Map()
+    for (const svc of services) {
+      if (svc.process_db_id) map.set(svc.process_db_id, svc)
+    }
+    return map
+  }, [services])
+
+  // Filter out task-level processes (only show workspace/repo-level)
+  const displayProcesses = useMemo(() => {
+    if (!Array.isArray(processes)) return []
+    return processes.filter((p) => p && !p.task_id)
+  }, [processes])
+
+  async function handleAdd(event) {
+    event.preventDefault()
+    if (!addLabel.trim() || !addCommand.trim() || addLoading) return
+    setAddLoading(true)
+    try {
+      await onAddProcess({ label: addLabel.trim(), command: addCommand.trim(), cwd: '.', type: 'service' })
+      setAddLabel('')
+      setAddCommand('')
+      setShowAddForm(false)
+    } catch {
+      // silent
+    } finally {
+      setAddLoading(false)
+    }
+  }
+
+  return (
+    <section className="sidebar-services">
+      <div className="sidebar-services-header">
+        <div className="sidebar-services-title">Processes</div>
+        <button
+          className="sidebar-processes-add-btn"
+          title="Add process"
+          onClick={() => setShowAddForm(!showAddForm)}
+        >
+          <Plus size={12} />
+        </button>
+      </div>
+      {showAddForm && (
+        <form className="sidebar-process-add-form" onSubmit={handleAdd}>
+          <input
+            className="sidebar-process-add-input"
+            placeholder="Label"
+            value={addLabel}
+            onChange={(e) => setAddLabel(e.target.value)}
+            autoFocus
+          />
+          <input
+            className="sidebar-process-add-input"
+            placeholder="Command"
+            value={addCommand}
+            onChange={(e) => setAddCommand(e.target.value)}
+          />
+          <div className="sidebar-process-add-actions">
+            <button type="submit" className="sidebar-process-add-submit" disabled={addLoading || !addLabel.trim() || !addCommand.trim()}>
+              {addLoading ? 'Adding...' : 'Add'}
+            </button>
+            <button type="button" className="sidebar-process-add-cancel" onClick={() => setShowAddForm(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      <div className="sidebar-services-list">
+        {displayProcesses.length === 0 && !showAddForm && (
+          <div className="sidebar-chat-empty">No processes</div>
+        )}
+        {displayProcesses.map((proc) => {
+          const runtimeSvc = runtimeByDbId.get(proc.id)
+          const status = typeof proc.status === 'string' ? proc.status : 'stopped'
+          const isRunning = status === 'running' || status === 'ready'
+          const isExited = status === 'exited'
+          const isStopped = !isRunning && !isExited
+          const isActive = runtimeSvc ? activeServiceId === runtimeSvc.id : false
+          const isLoading = actionLoading === proc.id
+          const isRepoLevel = proc.folder_name && proc.folder_name !== ''
+          const IconComponent = isRepoLevel ? FolderGit2 : TerminalSquare
+
+          return (
+            <div key={proc.id} className="sidebar-service-row">
+              <button
+                className={`sidebar-service-item ${isActive ? 'active' : ''}`}
+                onClick={() => {
+                  if (runtimeSvc) onOpenService?.(runtimeSvc)
+                }}
+                title={`${proc.label || proc.command} (${status})`}
+              >
+                <span className={`sidebar-service-dot ${isRunning ? 'running' : ''} ${isExited ? 'exited' : ''}`} />
+                <IconComponent size={12} />
+                <span className="sidebar-service-title">{proc.label || proc.command}</span>
+              </button>
+              <div className="sidebar-service-actions">
+                {isRunning && (
+                  <button
+                    className="sidebar-service-action-btn"
+                    aria-label="Stop process"
+                    title="Stop process"
+                    disabled={isLoading}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setActionLoading(proc.id)
+                      Promise.resolve(onStopProcess?.(proc.id)).finally(() => setActionLoading(''))
+                    }}
+                  >
+                    <Square size={10} />
+                  </button>
+                )}
+                {isStopped && (
+                  <button
+                    className="sidebar-service-action-btn sidebar-service-play-btn"
+                    aria-label="Start process"
+                    title="Start process"
+                    disabled={isLoading}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setActionLoading(proc.id)
+                      Promise.resolve(onStartProcess?.(proc.id)).finally(() => setActionLoading(''))
+                    }}
+                  >
+                    <Play size={10} />
+                  </button>
+                )}
+                {isExited && (
+                  <button
+                    className="sidebar-service-action-btn sidebar-service-restart-btn"
+                    aria-label="Restart process"
+                    title="Restart process"
+                    disabled={isLoading}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setActionLoading(proc.id)
+                      Promise.resolve(onStartProcess?.(proc.id)).finally(() => setActionLoading(''))
+                    }}
+                  >
+                    <RotateCcw size={10} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
 
 export function Sidebar({
   activeTab,
@@ -43,6 +207,11 @@ export function Sidebar({
   activeServiceId = '',
   onOpenService,
   onStopService,
+  processes = [],
+  onStartProcess,
+  onStopProcess,
+  onAddProcess,
+  onDeleteProcess,
   onNewChat,
   onSelectWorkspace,
   onCreateWorkspace,
@@ -145,47 +314,16 @@ export function Sidebar({
         })}
       </nav>
 
-      <section className="sidebar-services">
-        <div className="sidebar-services-title">Processes</div>
-        <div className="sidebar-services-list">
-          {services.length === 0 && (
-            <div className="sidebar-chat-empty">No running processes</div>
-          )}
-          {services.map((service) => {
-            const isActive = activeServiceId === service.id
-            const status = typeof service.status === 'string' ? service.status : ''
-            const isRepoLevel = !service.task_id
-            const IconComponent = isRepoLevel ? FolderGit2 : TerminalSquare
-            return (
-              <div key={service.id} className="sidebar-service-row">
-                <button
-                  className={`sidebar-service-item ${isActive ? 'active' : ''}`}
-                  onClick={() => onOpenService?.(service)}
-                  title={`${service.label || service.command} (${status})`}
-                >
-                  <span className={`sidebar-service-dot ${status === 'running' ? 'running' : ''} ${status === 'exited' ? 'exited' : ''}`} />
-                  <IconComponent size={12} />
-                  <span className="sidebar-service-title">{service.label || service.command}</span>
-                </button>
-                {(status === 'running' || status === 'ready') && (
-                  <button
-                    className="sidebar-service-stop"
-                    aria-label="Stop process"
-                    title="Stop process"
-                    onClick={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      onStopService?.(service.id)
-                    }}
-                  >
-                    <X size={11} />
-                  </button>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </section>
+      <SidebarProcesses
+        processes={processes}
+        services={services}
+        activeServiceId={activeServiceId}
+        onOpenService={onOpenService}
+        onStartProcess={onStartProcess}
+        onStopProcess={onStopProcess}
+        onAddProcess={onAddProcess}
+        onDeleteProcess={onDeleteProcess}
+      />
 
       <section className="sidebar-chats">
         <div className="sidebar-chats-header">

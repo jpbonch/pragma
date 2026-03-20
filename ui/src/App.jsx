@@ -28,6 +28,7 @@ import {
   stopTask,
   stopRuntimeService as stopRuntimeServiceApi,
   createProcess as createProcessApi,
+  createWorkspaceProcess as createWorkspaceProcessApi,
   updateProcess as updateProcessApi,
   deleteProcess as deleteProcessApi,
   startProcess as startProcessApi,
@@ -442,6 +443,11 @@ export default function App() {
 
   async function handleAddProcess(folderName, config) {
     await createProcessApi(folderName, config)
+    await loadProcesses()
+  }
+
+  async function handleAddWorkspaceProcess(config) {
+    await createWorkspaceProcessApi(config)
     await loadProcesses()
   }
 
@@ -1200,9 +1206,14 @@ export default function App() {
         activeChatId={activeTab === 'active-chat' && conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''}
         services={visibleRuntimeServices}
         activeServiceId={selectedServiceId}
+        processes={processes}
         onOpenChat={(threadId) => { void handleOpenChat(threadId) }}
         onOpenService={(service) => { void handleOpenRuntimeService(service) }}
         onStopService={(serviceId) => { void handleStopRuntimeService(serviceId) }}
+        onStartProcess={(processId) => { void handleStartProcess(processId) }}
+        onStopProcess={(processId) => { void handleStopProcess(processId) }}
+        onAddProcess={(config) => { void handleAddWorkspaceProcess(config) }}
+        onDeleteProcess={(processId) => { void handleDeleteProcess(processId) }}
         onHideChat={handleHideChat}
         onNewChat={handleNewChat}
         onSelectWorkspace={handleSelectWorkspace}

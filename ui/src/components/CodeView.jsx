@@ -26,7 +26,8 @@ function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onA
 
   const folderProcesses = useMemo(() => {
     if (!Array.isArray(processes)) return []
-    return processes.filter((p) => p && p.folder_name === folderName && !p.task_id)
+    // Show only processes explicitly assigned to this folder (not workspace-level with empty folder_name)
+    return processes.filter((p) => p && p.folder_name && p.folder_name === folderName && !p.task_id)
   }, [processes, folderName])
 
   async function handleAdd(event) {

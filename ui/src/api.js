@@ -992,6 +992,14 @@ export async function updateProcess(processId, updates) {
   })
 }
 
+export async function createWorkspaceProcess({ label, command, cwd, type }) {
+  return fetchJson('/processes', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ label, command, cwd, type }),
+  })
+}
+
 export async function deleteProcess(processId) {
   return fetchJson(`/processes/${encodeURIComponent(processId)}`, {
     method: 'DELETE',

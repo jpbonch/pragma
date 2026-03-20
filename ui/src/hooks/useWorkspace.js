@@ -171,6 +171,7 @@ export function useWorkspace() {
     }
     runtimeServicesPollTimerRef.current = setInterval(() => {
       void loadRuntimeServices()
+      void loadProcesses()
     }, 3000)
 
     return () => {

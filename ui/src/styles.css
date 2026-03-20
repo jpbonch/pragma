@@ -284,6 +284,140 @@ select { cursor: pointer; }
   color: #6F6E69;
 }
 
+.sidebar-services-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 10px;
+}
+
+.sidebar-processes-add-btn {
+  border: none;
+  background: transparent;
+  color: #B0AFA8;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-processes-add-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: #37352F;
+}
+
+.sidebar-service-actions {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.sidebar-service-row:hover .sidebar-service-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-service-action-btn {
+  border: none;
+  background: #F7F7F5;
+  color: #9B9A97;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-service-action-btn:hover {
+  background: #ECEBE8;
+  color: #6F6E69;
+}
+
+.sidebar-service-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-service-play-btn:hover {
+  color: #2FA67E;
+}
+
+.sidebar-service-restart-btn:hover {
+  color: #d97706;
+}
+
+.sidebar-process-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 10px 8px;
+}
+
+.sidebar-process-add-input {
+  border: 1px solid #E3E2DE;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.12s ease;
+}
+
+.sidebar-process-add-input:focus {
+  border-color: #2383e2;
+}
+
+.sidebar-process-add-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.sidebar-process-add-submit {
+  border: none;
+  background: #2383e2;
+  color: #fff;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sidebar-process-add-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-process-add-cancel {
+  border: none;
+  background: transparent;
+  color: #9B9A97;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sidebar-process-add-cancel:hover {
+  color: #37352F;
+}
+
 .sidebar-plans-title {
   padding: 4px 10px 6px;
   font-size: 11px;
