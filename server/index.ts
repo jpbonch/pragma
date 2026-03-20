@@ -930,7 +930,9 @@ async function recoverOrphanedProcesses(): Promise<void> {
 export async function startServer(options: StartServerOptions): Promise<void> {
   await setupPragma();
   await recoverOrphanedTasks();
-  await recoverOrphanedProcesses();
+  if (process.env.PRAGMA_SKIP_PROCESS_RECOVERY !== "1") {
+    await recoverOrphanedProcesses();
+  }
   const apiUrl = process.env.PRAGMA_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
   const pragmaCliCommand = resolvePragmaCliCommand(__dirname);
   const executeRunner = new ExecuteRunner({
@@ -1668,6 +1670,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       ...process.env,
       PORT: String(port),
       PRAGMA_WORKSPACE_NAME: workspaceName,
+      PRAGMA_SKIP_PROCESS_RECOVERY: "1",
     };
 
     // Rewrite command for frameworks that don't read PORT
