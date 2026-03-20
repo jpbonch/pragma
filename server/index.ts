@@ -1632,8 +1632,28 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     }
 
     const proc = result.rows[0];
-    if (proc.status === "running") {
+    const store = getWorkspaceServiceStore(workspaceName);
+    let liveService: RuntimeServiceRecord | null = null;
+    for (const service of store.values()) {
+      if (service.process_db_id === processId) {
+        liveService = service;
+        break;
+      }
+    }
+
+    const liveRunning =
+      liveService &&
+      (liveService.status === "running" || liveService.status === "ready");
+
+    if (liveRunning) {
       throw new PragmaError("PROCESS_ALREADY_RUNNING", 400, "Process is already running.");
+    }
+
+    if (proc.status === "running") {
+      await db.query(
+        `UPDATE processes SET status = 'stopped', stopped_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [processId],
+      );
     }
 
     const absoluteCwd = join(workspacePaths.codeDir, proc.folder_name, proc.cwd === "." ? "" : proc.cwd);

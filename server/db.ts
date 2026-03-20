@@ -1,12 +1,15 @@
 import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { initializeWorkspaceGit } from "./conversation/gitWorkflow";
 import { ensureConversationSchema } from "./conversation/store";
 import { BUNDLED_SKILLS } from "./bundledSkills";
 
-export const PRAGMA_DIR = join(homedir(), ".pragma");
+const CONFIGURED_PRAGMA_DIR = process.env.PRAGMA_DIR?.trim();
+export const PRAGMA_DIR = CONFIGURED_PRAGMA_DIR
+  ? resolve(CONFIGURED_PRAGMA_DIR)
+  : join(homedir(), ".pragma");
 const ACTIVE_WORKSPACE_FILE = join(PRAGMA_DIR, "active_workspace");
 const RESERVED_ROOT_NAMES = new Set(["db", "workspace", "worktrees"]);
 export const DEFAULT_AGENT_ID = "pragma-orchestrator";

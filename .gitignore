@@ -4,4 +4,5 @@
 *.db
 node_modules/
 dist/
+.pragma-dev/
 .DS_Store
