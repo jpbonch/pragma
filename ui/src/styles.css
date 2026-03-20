@@ -1578,8 +1578,8 @@ select { cursor: pointer; }
 .conv-body-split {
   padding: 0 14px 12px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 46%);
-  gap: 16px;
+  grid-template-columns: minmax(0, 54%) auto minmax(0, 46%);
+  gap: 0;
 }
 
 .conv-chat-side {
@@ -1596,13 +1596,65 @@ select { cursor: pointer; }
 }
 
 .conv-output-side {
-  border-left: 1px solid #f0efec;
-  padding-left: 16px;
+  padding-left: 0;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Resize handle */
+.conv-resize-handle {
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  position: relative;
+  flex-shrink: 0;
+  z-index: 2;
+}
+.conv-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: #f0efec;
+  transform: translateX(-0.5px);
+}
+.conv-resize-handle::after {
+  content: '';
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #e0dfdb;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  z-index: -1;
+}
+.conv-resize-handle svg {
+  position: relative;
+  z-index: 1;
+  color: #9b9a97;
+  transition: color 0.15s;
+}
+.conv-resize-handle:hover svg {
+  color: #37352f;
+}
+.conv-resize-handle:hover::after {
+  border-color: #c8c7c3;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+}
+.conv-resize-handle:active::after {
+  background: #f7f6f3;
+  border-color: #b0afab;
 }
 .conv-output-side-plan {
   justify-content: space-between;
@@ -6862,14 +6914,16 @@ select { cursor: pointer; }
   }
 
   .conv-body-split {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
     grid-template-rows: minmax(180px, 1fr) minmax(260px, 1fr);
   }
 
+  .conv-resize-handle {
+    display: none;
+  }
+
   .conv-output-side {
-    border-left: none;
     border-top: 1px solid #f0efec;
-    padding-left: 0;
     padding-top: 10px;
   }
 

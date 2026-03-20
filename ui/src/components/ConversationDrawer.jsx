@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ArrowLeft, X, Sparkles, User, Info, Square, ChevronRight, Plus } from 'lucide-react'
+import { ArrowUp, ArrowLeft, X, Sparkles, User, Info, Square, ChevronRight, Plus, ArrowLeftRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
 import { PlanProposalPanel } from './PlanProposalPanel'
 import { fetchTaskPlan, fetchTaskTestCommands, fetchTaskTestingConfig, runTaskTestCommand, updateTaskTestCommands } from '../api'
+import { useSplitPane } from '../hooks/useSplitPane'
 
 const HEADER_STATUS_LABELS = {
   pending_review: 'Review',
@@ -129,6 +130,8 @@ export function ConversationDrawer({
   const [testingConfig, setTestingConfig] = useState(null)
   const showOutputPanel = Boolean(taskId) && (mode === 'chat' || mode === 'execute')
   const showProposalPanel = mode === 'plan' && planProposal != null && Array.isArray(planProposal.tasks) && planProposal.tasks.length > 0
+  const splitStorageKey = showProposalPanel ? 'pragma.layout.planSplitPct' : 'pragma.layout.taskSplitPct'
+  const { leftPct, containerRef: splitContainerRef, handlePointerDown: handleResizePointerDown } = useSplitPane(splitStorageKey, 54)
   const isPendingReview = showOutputPanel && taskStatus === 'pending_review'
   const hasOutputs = hasChanges === true || hasOutputFiles === true
   const canApprove = isPendingReview && hasOutputs
@@ -519,7 +522,11 @@ export function ConversationDrawer({
       </div>
 
         {/* Body */}
-        <div className={`conv-body ${showOutputPanel || showProposalPanel ? 'conv-body-split' : ''}`}>
+        <div
+          className={`conv-body ${showOutputPanel || showProposalPanel ? 'conv-body-split' : ''}`}
+          ref={showOutputPanel || showProposalPanel ? splitContainerRef : undefined}
+          style={showOutputPanel || showProposalPanel ? { gridTemplateColumns: `minmax(0, ${leftPct}%) auto minmax(0, ${100 - leftPct}%)` } : undefined}
+        >
           {showProposalPanel ? (
             <>
               <div className="conv-chat-side">
@@ -624,6 +631,9 @@ export function ConversationDrawer({
                     </div>
                   </div>
                 </div>
+              </div>
+              <div className="conv-resize-handle" onPointerDown={handleResizePointerDown} title="Drag to resize panes">
+                <ArrowLeftRight size={12} strokeWidth={2} />
               </div>
               <div className="conv-output-side conv-output-side-plan">
                 <PlanProposalPanel
@@ -748,6 +758,9 @@ export function ConversationDrawer({
                     </div>
                   </div>
                 </div>
+              </div>
+              <div className="conv-resize-handle" onPointerDown={handleResizePointerDown} title="Drag to resize panes">
+                <ArrowLeftRight size={12} strokeWidth={2} />
               </div>
               <div className="conv-output-side conv-output-side-execute">
                 <OutputPanel
