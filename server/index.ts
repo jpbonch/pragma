@@ -905,6 +905,8 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   app.use("/code/*", workspaceMiddleware);
   app.use("/context/*", workspaceMiddleware);
   app.use("/context", workspaceMiddleware);
+  app.use("/workspace/outputs/*", workspaceMiddleware);
+  app.use("/workspace/outputs/files", workspaceMiddleware);
 
   const turnRunner = new TurnRunner({
     apiUrl,
