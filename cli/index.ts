@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
-import { access } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { access, readFile, stat } from "node:fs/promises";
+import { dirname, join, normalize, resolve, sep } from "node:path";
 import { Command } from "commander";
-import open from "open";
 import type { ExecaChildProcess } from "execa";
+import { lookup as lookupMimeType } from "mime-types";
+import open from "open";
 import { spawnCommand, spawnNodeCommand } from "../server/process/runCommand";
 
 const program = new Command();
@@ -677,6 +679,12 @@ async function runAll(): Promise<void> {
 }
 
 async function startUi(options: { port: number; apiUrl: string }): Promise<void> {
+  const builtUiDir = await resolveBuiltUiDir();
+  if (builtUiDir) {
+    await serveBuiltUi({ port: options.port, rootDir: builtUiDir });
+    return;
+  }
+
   const uiDir = await resolveUiDir();
   const projectRoot = dirname(uiDir);
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -693,6 +701,82 @@ async function startUi(options: { port: number; apiUrl: string }): Promise<void>
   });
 
   await waitForExit(child, "ui");
+}
+
+async function resolveBuiltUiDir(): Promise<string | null> {
+  const candidates = [
+    join(__dirname, "..", "..", "ui", "dist"),
+    join(process.cwd(), "ui", "dist"),
+    join(process.cwd(), "dist", "ui"),
+    join(__dirname, ".."),
+    join(process.cwd(), "dist"),
+  ];
+
+  for (const candidate of candidates) {
+    if (await pathExists(join(candidate, "index.html"))) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function serveBuiltUi(options: { port: number; rootDir: string }): Promise<void> {
+  const rootDir = resolve(options.rootDir);
+  const server = createServer((req, res) => {
+    void handleBuiltUiRequest(req, res, rootDir);
+  });
+
+  await new Promise<void>((resolvePromise, reject) => {
+    server.once("error", reject);
+    server.listen(options.port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolvePromise();
+    });
+  });
+
+  console.log(`Pragma UI listening on http://127.0.0.1:${options.port}`);
+
+  await new Promise<void>((resolvePromise, reject) => {
+    server.once("close", () => resolvePromise());
+    server.once("error", reject);
+  });
+}
+
+async function handleBuiltUiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  rootDir: string,
+): Promise<void> {
+  try {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    const pathname = safeDecodePathname(url.pathname);
+    const requestedPath = pathname === "/" ? "/index.html" : pathname;
+    const candidatePath = resolve(rootDir, `.${requestedPath}`);
+
+    if (!isPathInsideRoot(candidatePath, rootDir)) {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    let filePath = candidatePath;
+    const fileInfo = await stat(filePath).catch(() => null);
+    const isFile = Boolean(fileInfo?.isFile());
+    if (!isFile) {
+      filePath = join(rootDir, "index.html");
+    }
+
+    const content = await readFile(filePath);
+    const mime = lookupMimeType(filePath) || "application/octet-stream";
+    res.statusCode = 200;
+    res.setHeader("content-type", mime);
+    res.setHeader("cache-control", filePath.endsWith("index.html") ? "no-store" : "public, max-age=31536000, immutable");
+    res.end(content);
+  } catch (error) {
+    res.statusCode = 500;
+    res.end(errorMessage(error));
+  }
 }
 
 async function resolveUiDir(): Promise<string> {
@@ -853,6 +937,19 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function safeDecodePathname(pathname: string): string {
+  try {
+    const decoded = decodeURIComponent(pathname);
+    return normalize(decoded.startsWith("/") ? decoded : `/${decoded}`);
+  } catch {
+    return "/";
+  }
+}
+
+function isPathInsideRoot(candidatePath: string, rootDir: string): boolean {
+  return candidatePath === rootDir || candidatePath.startsWith(`${rootDir}${sep}`);
 }
 
 function quoteShellArg(value: string): string {

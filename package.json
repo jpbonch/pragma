@@ -8,11 +8,16 @@
   },
   "scripts": {
     "build": "tsc && npm run ui:build",
+    "prepack": "npm run build",
     "start": "node dist/cli/index.js",
     "ui:dev": "vite --config ui/vite.config.mjs ui",
     "ui:build": "vite build --config ui/vite.config.mjs ui",
     "ui:preview": "vite preview --config ui/vite.config.mjs ui"
   },
+  "files": [
+    "dist",
+    "ui/dist"
+  ],
   "keywords": [
     "cli",
     "commander",
