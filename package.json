@@ -1,5 +1,5 @@
 {
-  "name": "pragma",
+  "name": "pragma-so",
   "version": "0.1.0",
   "description": "Very minimal pragma CLI",
   "main": "dist/cli/index.js",
