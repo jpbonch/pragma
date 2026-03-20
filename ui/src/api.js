@@ -917,4 +917,38 @@ export async function unassignAgentConnector(agentId, connectorId) {
   )
 }
 
+// ── Testing ─────────────────────────────────────────────────────
+
+export async function fetchTaskTestingConfig(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing-config`)
+}
+
+export async function startTaskTesting(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/start`, {
+    method: 'POST',
+  }, 120000)
+}
+
+export async function stopTaskTesting(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/stop`, {
+    method: 'POST',
+  })
+}
+
+export async function proxyTestingRequest(taskId, { process_name, method, path, headers, body }) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/proxy`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ process_name, method, path, headers, body }),
+  }, 60000)
+}
+
+export async function sendServiceStdin(serviceId, text) {
+  return fetchJson(`/services/${encodeURIComponent(serviceId)}/stdin`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+}
+
 export { API_URL }

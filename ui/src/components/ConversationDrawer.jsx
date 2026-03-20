@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
 import { PlanProposalPanel } from './PlanProposalPanel'
-import { fetchTaskPlan, fetchTaskTestCommands, runTaskTestCommand, updateTaskTestCommands } from '../api'
+import { fetchTaskPlan, fetchTaskTestCommands, fetchTaskTestingConfig, runTaskTestCommand, updateTaskTestCommands } from '../api'
 
 const HEADER_STATUS_LABELS = {
   pending_review: 'Review',
@@ -126,6 +126,7 @@ export function ConversationDrawer({
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [hasChanges, setHasChanges] = useState(null)
   const [hasOutputFiles, setHasOutputFiles] = useState(null)
+  const [testingConfig, setTestingConfig] = useState(null)
   const showOutputPanel = Boolean(taskId) && (mode === 'chat' || mode === 'execute')
   const showProposalPanel = mode === 'plan' && planProposal != null && Array.isArray(planProposal.tasks) && planProposal.tasks.length > 0
   const isPendingReview = showOutputPanel && taskStatus === 'pending_review'
@@ -186,8 +187,22 @@ export function ConversationDrawer({
       setDeleteLoading(false)
       setHasChanges(null)
       setHasOutputFiles(null)
+      setTestingConfig(null)
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open || !taskId || !showOutputPanel) return
+    let cancelled = false
+    void fetchTaskTestingConfig(taskId)
+      .then(data => {
+        if (!cancelled) setTestingConfig(data?.config ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setTestingConfig(null)
+      })
+    return () => { cancelled = true }
+  }, [open, taskId, showOutputPanel, entries.length, taskStatus])
 
   useEffect(() => {
     if (!open || !taskId || !showOutputPanel) {
@@ -753,6 +768,7 @@ export function ConversationDrawer({
                   runtimeServiceLogs={runtimeServiceLogs}
                   runtimeServiceError={runtimeServiceError}
                   onStopRuntimeService={onStopRuntimeService}
+                  testingConfig={testingConfig}
                 />
                 <div className="conv-execute-actions">
                   {approveError && <div className="error" style={{ padding: '0 0 4px' }}>Error: {approveError}</div>}

@@ -207,6 +207,7 @@ export function buildWorkerPrompt(input: {
   const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"] [--option "<choice>" --option "<choice>" ...]`;
   const requestHelpCommand = `${cli} task request-help --summary "<short summary>" [--details "<optional context>"]`;
   const submitTestsCommand = `${cli} task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]`;
+  const submitTestingConfigCommand = `${cli} task submit-testing-config --config '<JSON>'`;
   const dbQueryCommand = `${cli} db-query --sql "<SELECT statement>"`;
   const codePathPolicyLine = preferredCodePath
     ? taskWorkspaceDir
@@ -238,6 +239,11 @@ export function buildWorkerPrompt(input: {
     "If you are blocked and need human help, run:",
     requestHelpCommand,
     "If you changed code, submit at least one runnable validation command for the task window.",
+    `For richer testing UIs with multiple processes and panels, use \`submit-testing-config\`:`,
+    submitTestingConfigCommand,
+    `The config JSON has: \`processes\` (array of {name, command, cwd?, port?, ready_pattern?}) and \`panels\` (array of panel objects). Panel types: \`web-preview\` ({type, title, process, path?, devices?}), \`api-tester\` ({type, title, process, endpoints: [{method, path, description?, body?, headers?}]}), \`terminal\` ({type, title, command, cwd?}), \`log-viewer\` ({type, title, process}). Optional: \`setup\` (array of setup commands), \`layout\` ("tabs"|"grid").`,
+    `Example: \`--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","port":3000,"ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'\``,
+    `Fallback: for simple single-command cases, use:`,
     "Include the exact run directory for each command (for example: `--cwd \"code/default/my-app\"`):",
     submitTestsCommand,
     "Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification).",

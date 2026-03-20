@@ -276,6 +276,86 @@ export const runTaskTestCommandSchema = z
   })
   .strict();
 
+const testingProcessSchema = z.object({
+  name: nonEmptyString,
+  command: nonEmptyString,
+  cwd: nonEmptyString.optional(),
+  port: z.number().int().positive().optional(),
+  healthcheck: z.string().optional(),
+  ready_pattern: z.string().optional(),
+}).strict();
+
+const apiEndpointSchema = z.object({
+  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]),
+  path: nonEmptyString,
+  description: z.string().optional(),
+  body: z.unknown().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  query: z.record(z.string(), z.string()).optional(),
+}).strict();
+
+const apiTesterPanelSchema = z.object({
+  type: z.literal("api-tester"),
+  title: nonEmptyString,
+  process: nonEmptyString,
+  base_url: z.string().optional(),
+  endpoints: z.array(apiEndpointSchema).min(1),
+}).strict();
+
+const webPreviewPanelSchema = z.object({
+  type: z.literal("web-preview"),
+  title: nonEmptyString,
+  process: nonEmptyString,
+  path: z.string().optional(),
+  devices: z.array(z.enum(["desktop", "tablet", "mobile"])).optional(),
+}).strict();
+
+const terminalPanelSchema = z.object({
+  type: z.literal("terminal"),
+  title: nonEmptyString,
+  command: nonEmptyString,
+  cwd: nonEmptyString.optional(),
+  suggested_inputs: z.array(z.string()).optional(),
+}).strict();
+
+const logViewerPanelSchema = z.object({
+  type: z.literal("log-viewer"),
+  title: nonEmptyString,
+  process: nonEmptyString,
+}).strict();
+
+const testingPanelSchema = z.discriminatedUnion("type", [
+  apiTesterPanelSchema,
+  webPreviewPanelSchema,
+  terminalPanelSchema,
+  logViewerPanelSchema,
+]);
+
+export const testingConfigSchema = z.object({
+  setup: z.array(z.string()).optional(),
+  processes: z.array(testingProcessSchema).min(1),
+  panels: z.array(testingPanelSchema).min(1),
+  layout: z.enum(["tabs", "grid"]).optional(),
+}).strict();
+
+export const agentSubmitTestingConfigSchema = z.object({
+  config: testingConfigSchema,
+  turn_id: nonEmptyString.optional(),
+  agent_id: nonEmptyString.optional(),
+}).strict();
+
+export const testingProxyRequestSchema = z.object({
+  process_name: nonEmptyString,
+  method: nonEmptyString,
+  path: nonEmptyString,
+  headers: z.record(z.string(), z.string()).optional(),
+  body: z.string().optional(),
+}).strict();
+
+export const serviceStdinSchema = z.object({
+  text: nonEmptyString,
+}).strict();
+
 export const createContextFileSchema = z
   .object({
     name: nonEmptyString,

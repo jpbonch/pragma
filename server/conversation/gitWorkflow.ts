@@ -274,6 +274,7 @@ export async function mergeApprovedTask(input: {
       await syncGitignoredFilesBackToSource({
         sourceRepoPath,
         worktreePath: taskRepoPath,
+        excludedEntries: getManagedIgnoredEntryExcludes(repo.relative_path),
       });
     }
 
@@ -375,6 +376,13 @@ export function resolveRepoPath(rootPath: string, relativeRepoPath: string): str
   return join(rootPath, relativeRepoPath);
 }
 
+function getManagedIgnoredEntryExcludes(relativeRepoPath: string): Set<string> {
+  if (relativeRepoPath !== ".") {
+    return new Set();
+  }
+  return new Set(["code", "outputs"]);
+}
+
 async function createFreshTaskWorktrees(input: {
   workspacePaths: WorkspacePathsLike;
   taskId: string;
@@ -400,7 +408,11 @@ async function createFreshTaskWorktrees(input: {
       startPoint: baseCommit,
     });
 
-    await symlinkOrCopyGitignoredFiles({ sourceRepoPath, worktreePath: taskRepoPath });
+    await symlinkOrCopyGitignoredFiles({
+      sourceRepoPath,
+      worktreePath: taskRepoPath,
+      excludedEntries: getManagedIgnoredEntryExcludes(relativePath),
+    });
 
     repos.push({
       relative_path: relativePath,
@@ -442,7 +454,11 @@ async function createFollowupTaskWorktrees(input: {
       startPoint: predecessorHead,
     });
 
-    await symlinkOrCopyGitignoredFiles({ sourceRepoPath, worktreePath: taskRepoPath });
+    await symlinkOrCopyGitignoredFiles({
+      sourceRepoPath,
+      worktreePath: taskRepoPath,
+      excludedEntries: getManagedIgnoredEntryExcludes(relativePath),
+    });
 
     repos.push({
       relative_path: relativePath,
@@ -477,7 +493,11 @@ async function ensureExistingTaskWorktrees(input: {
       startPoint: repo.base_commit,
     });
 
-    await symlinkOrCopyGitignoredFiles({ sourceRepoPath, worktreePath: taskRepoPath });
+    await symlinkOrCopyGitignoredFiles({
+      sourceRepoPath,
+      worktreePath: taskRepoPath,
+      excludedEntries: getManagedIgnoredEntryExcludes(relativePath),
+    });
 
     repos.push({
       relative_path: relativePath,
@@ -512,7 +532,10 @@ async function ensureWorktree(input: {
   await runGit(input.sourceRepoPath, args);
 }
 
-async function getTopLevelGitignoredEntries(repoPath: string): Promise<string[]> {
+async function getTopLevelGitignoredEntries(
+  repoPath: string,
+  excludedEntries: Set<string> = new Set(),
+): Promise<string[]> {
   let output: string;
   try {
     output = await runGitCapture(repoPath, [
@@ -535,7 +558,7 @@ async function getTopLevelGitignoredEntries(repoPath: string): Promise<string[]>
     const firstSlash = trimmed.indexOf("/");
     const topLevel = firstSlash === -1 ? trimmed : trimmed.slice(0, firstSlash + 1);
     const name = topLevel.replace(/\/$/, "");
-    if (!name || seen.has(name)) continue;
+    if (!name || seen.has(name) || excludedEntries.has(name)) continue;
     seen.add(name);
     entries.push(name);
   }
@@ -546,14 +569,20 @@ async function getTopLevelGitignoredEntries(repoPath: string): Promise<string[]>
 async function symlinkOrCopyGitignoredFiles(input: {
   sourceRepoPath: string;
   worktreePath: string;
+  excludedEntries?: Set<string>;
 }): Promise<void> {
-  const entries = await getTopLevelGitignoredEntries(input.sourceRepoPath);
+  const entries = await getTopLevelGitignoredEntries(
+    input.sourceRepoPath,
+    input.excludedEntries,
+  );
 
   for (const entry of entries) {
     const sourcePath = join(input.sourceRepoPath, entry);
     const targetPath = join(input.worktreePath, entry);
 
     try {
+      if (sourcePath === targetPath) continue;
+
       // Skip if already exists in worktree (tracked file or previously created)
       const existing = await lstat(targetPath).catch(() => null);
       if (existing) continue;
@@ -577,14 +606,20 @@ async function symlinkOrCopyGitignoredFiles(input: {
 async function syncGitignoredFilesBackToSource(input: {
   sourceRepoPath: string;
   worktreePath: string;
+  excludedEntries?: Set<string>;
 }): Promise<void> {
-  const entries = await getTopLevelGitignoredEntries(input.sourceRepoPath);
+  const entries = await getTopLevelGitignoredEntries(
+    input.sourceRepoPath,
+    input.excludedEntries,
+  );
 
   for (const entry of entries) {
     const worktreeEntryPath = join(input.worktreePath, entry);
     const sourceEntryPath = join(input.sourceRepoPath, entry);
 
     try {
+      if (worktreeEntryPath === sourceEntryPath) continue;
+
       const worktreeStat = await lstat(worktreeEntryPath).catch(() => null);
       if (!worktreeStat) continue;
 

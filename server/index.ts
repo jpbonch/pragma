@@ -76,6 +76,7 @@ import {
 import type { HarnessId, TaskStatus, ReasoningEffort } from "./conversation/types";
 import {
   agentSubmitTestCommandsSchema,
+  agentSubmitTestingConfigSchema,
   agentAskQuestionSchema,
   agentRequestHelpSchema,
   agentSelectRecipientSchema,
@@ -104,6 +105,8 @@ import {
   reviewTaskSchema,
   runTaskTestCommandSchema,
   updateTaskTestCommandsSchema,
+  testingProxyRequestSchema,
+  serviceStdinSchema,
   setActiveWorkspaceSchema,
   setTaskRecipientSchema,
   updateAgentSchema,
@@ -118,7 +121,7 @@ import {
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { workspaceMiddleware, type WorkspaceEnv } from "./http/middleware";
-import { runCommand, spawnShellCommand } from "./process/runCommand";
+import { runCommand, runShellCommandDetailed, spawnShellCommand } from "./process/runCommand";
 import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "./connectorRegistry";
 import { ensureConnectorBinary } from "./connectorBinaries";
 import {
@@ -379,7 +382,7 @@ type ThreadUpdateListener = (event: {
   source: string;
 }) => void;
 
-type RuntimeServiceStatus = "running" | "exited" | "stopped";
+type RuntimeServiceStatus = "running" | "ready" | "exited" | "stopped";
 type RuntimeServiceLogStream = "stdout" | "stderr" | "system";
 
 type RuntimeServiceLogEntry = {
@@ -415,6 +418,7 @@ type RuntimeServiceRecord = RuntimeServiceSummary & {
   next_seq: number;
   logs: RuntimeServiceLogEntry[];
   listeners: Set<RuntimeServiceListener>;
+  _child: import("execa").ExecaChildProcess<string> | null;
 };
 
 const TASK_STATUS_LISTENERS = new Map<string, Set<TaskStatusListener>>();
@@ -669,6 +673,9 @@ function startRuntimeService(input: {
   requestedCwd: string;
   absoluteCwd: string;
   env: NodeJS.ProcessEnv;
+  readyPattern?: string;
+  port?: number;
+  healthcheck?: string;
 }): RuntimeServiceRecord {
   const serviceId = `svc_${randomUUID().slice(0, 12)}`;
   const startedAt = new Date().toISOString();
@@ -689,6 +696,7 @@ function startRuntimeService(input: {
     next_seq: 1,
     logs: [],
     listeners: new Set<RuntimeServiceListener>(),
+    _child: null,
   };
 
   const store = getWorkspaceServiceStore(input.workspaceName, true);
@@ -701,21 +709,44 @@ function startRuntimeService(input: {
     stdio: "pipe",
   });
   service.pid = typeof child.pid === "number" ? child.pid : null;
+  service._child = child;
+
+  let readyPatternRegex: RegExp | null = null;
+  if (input.readyPattern) {
+    try {
+      readyPatternRegex = new RegExp(input.readyPattern);
+    } catch {
+      // Invalid regex - ignore.
+    }
+  }
+
+  const checkReadyPattern = (text: string): void => {
+    if (readyPatternRegex && service.status === "running") {
+      if (readyPatternRegex.test(text)) {
+        readyPatternRegex = null;
+        updateRuntimeServiceStatus(service, "ready", null);
+      }
+    }
+  };
 
   child.stdout?.on("data", (chunk) => {
-    appendRuntimeServiceLog(service, "stdout", String(chunk ?? ""));
+    const text = String(chunk ?? "");
+    appendRuntimeServiceLog(service, "stdout", text);
+    checkReadyPattern(text);
   });
   child.stderr?.on("data", (chunk) => {
-    appendRuntimeServiceLog(service, "stderr", String(chunk ?? ""));
+    const text = String(chunk ?? "");
+    appendRuntimeServiceLog(service, "stderr", text);
+    checkReadyPattern(text);
   });
   child.on("error", (error) => {
     appendRuntimeServiceLog(service, "system", `[spawn error] ${errorMessage(error)}\n`);
-    if (service.status === "running") {
+    if (service.status === "running" || service.status === "ready") {
       updateRuntimeServiceStatus(service, service.stop_requested ? "stopped" : "exited", -1);
     }
   });
   child.on("exit", (code) => {
-    if (service.status !== "running") {
+    if (service.status !== "running" && service.status !== "ready") {
       return;
     }
     updateRuntimeServiceStatus(service, service.stop_requested ? "stopped" : "exited", code ?? -1);
@@ -735,7 +766,7 @@ function startRuntimeService(input: {
 }
 
 function stopRuntimeService(service: RuntimeServiceRecord): void {
-  if (service.status !== "running") {
+  if (service.status !== "running" && service.status !== "ready") {
     return;
   }
 
@@ -755,7 +786,7 @@ function stopRuntimeService(service: RuntimeServiceRecord): void {
   }
 
   setTimeout(() => {
-    if (service.status !== "running") {
+    if (service.status !== "running" && service.status !== "ready") {
       return;
     }
     appendRuntimeServiceLog(service, "system", "[stopping] SIGKILL\n");
@@ -2488,6 +2519,281 @@ WHERE id = $1
         ok: true,
         commands: combinedCommands,
       });
+    },
+  );
+
+  app.post(
+    "/tasks/:taskId/agent/testing-config",
+    validateJson(agentSubmitTestingConfigSchema),
+    async (c) => {
+      const workspaceName = c.get("workspace");
+      const taskId = c.req.param("taskId");
+      const body = c.req.valid("json");
+
+      const db = c.get("db");
+      await ensureConversationSchema(db);
+      const taskResult = await db.query<{
+        id: string;
+        status: TaskStatus;
+        assigned_to: string | null;
+      }>(
+        `
+SELECT id, status, assigned_to
+FROM tasks
+WHERE id = $1
+LIMIT 1
+`,
+        [taskId],
+      );
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+      }
+      if (task.status !== "running" && task.status !== "pending_review") {
+        throw new PragmaError(
+          "TASK_NOT_ACCEPTING_TESTING_CONFIG",
+          409,
+          `Task cannot accept testing config in status: ${task.status}`,
+        );
+      }
+
+      await db.query(
+        `UPDATE tasks SET testing_config_json = $2 WHERE id = $1`,
+        [taskId, JSON.stringify(body.config)],
+      );
+
+      const thread = await getThreadByTaskId(db, taskId);
+      if (thread) {
+        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
+        await insertEvent(db, {
+          id: `evt_${randomUUID().slice(0, 12)}`,
+          threadId: thread.id,
+          turnId: body.turn_id || latestExecuteTurn?.id || null,
+          eventName: "worker_testing_config_submitted",
+          payload: {
+            config: body.config,
+            agent_id: body.agent_id ?? task.assigned_to ?? null,
+          },
+        });
+        publishThreadUpdated(workspaceName, thread.id, "worker_testing_config_submitted");
+      }
+
+      return c.json({ ok: true });
+    },
+  );
+
+  app.get("/tasks/:taskId/testing-config", async (c) => {
+    const taskId = c.req.param("taskId");
+    const db = c.get("db");
+
+    const result = await db.query<{ id: string; testing_config_json: string | null }>(
+      `SELECT id, testing_config_json FROM tasks WHERE id = $1 LIMIT 1`,
+      [taskId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+
+    let config: unknown = null;
+    if (row.testing_config_json) {
+      try {
+        config = JSON.parse(row.testing_config_json);
+      } catch {
+        config = null;
+      }
+    }
+
+    return c.json({ config });
+  });
+
+  app.post("/tasks/:taskId/testing/start", async (c) => {
+    const workspaceName = c.get("workspace");
+    const taskId = c.req.param("taskId");
+    const db = c.get("db");
+
+    const result = await db.query<{ id: string; testing_config_json: string | null }>(
+      `SELECT id, testing_config_json FROM tasks WHERE id = $1 LIMIT 1`,
+      [taskId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+    if (!row.testing_config_json) {
+      throw new PragmaError("NO_TESTING_CONFIG", 400, "No testing config found for this task.");
+    }
+
+    let config: {
+      setup?: string[];
+      processes: Array<{
+        name: string;
+        command: string;
+        cwd?: string;
+        port?: number;
+        healthcheck?: string;
+        ready_pattern?: string;
+      }>;
+    };
+    try {
+      config = JSON.parse(row.testing_config_json);
+    } catch {
+      throw new PragmaError("INVALID_TESTING_CONFIG", 400, "Testing config JSON is invalid.");
+    }
+
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
+
+    if (config.setup && config.setup.length > 0) {
+      for (const setupCmd of config.setup) {
+        const setupResult = await runShellCommandDetailed({
+          command: setupCmd,
+          cwd: runRoot,
+          env: {
+            ...process.env,
+            PRAGMA_WORKSPACE_NAME: workspaceName,
+            PRAGMA_TASK_ID: taskId,
+          },
+        });
+        if (setupResult.exitCode !== 0) {
+          throw new PragmaError(
+            "TESTING_SETUP_FAILED",
+            500,
+            `Setup command failed: ${setupCmd}\n${setupResult.stderr || setupResult.stdout}`,
+          );
+        }
+      }
+    }
+
+    const services: Record<string, RuntimeServiceSummary> = {};
+    for (const proc of config.processes) {
+      const processCwd = proc.cwd
+        ? await resolveTaskCommandCwd(runRoot, proc.cwd)
+        : runRoot;
+
+      const service = startRuntimeService({
+        workspaceName,
+        taskId,
+        label: proc.name,
+        command: proc.command,
+        requestedCwd: proc.cwd || ".",
+        absoluteCwd: processCwd,
+        env: {
+          ...process.env,
+          PRAGMA_WORKSPACE_NAME: workspaceName,
+          PRAGMA_TASK_ID: taskId,
+        },
+        readyPattern: proc.ready_pattern,
+        port: proc.port,
+        healthcheck: proc.healthcheck,
+      });
+      services[proc.name] = toRuntimeServiceSummary(service);
+    }
+
+    return c.json({ ok: true, services });
+  });
+
+  app.post("/tasks/:taskId/testing/stop", async (c) => {
+    const workspaceName = c.get("workspace");
+    const taskId = c.req.param("taskId");
+
+    const store = getWorkspaceServiceStore(workspaceName);
+    for (const service of store.values()) {
+      if (service.task_id === taskId) {
+        stopRuntimeService(service);
+      }
+    }
+
+    return c.json({ ok: true });
+  });
+
+  app.post(
+    "/tasks/:taskId/testing/proxy",
+    validateJson(testingProxyRequestSchema),
+    async (c) => {
+      const taskId = c.req.param("taskId");
+      const body = c.req.valid("json");
+      const db = c.get("db");
+
+      const result = await db.query<{ id: string; testing_config_json: string | null }>(
+        `SELECT id, testing_config_json FROM tasks WHERE id = $1 LIMIT 1`,
+        [taskId],
+      );
+      const row = result.rows[0];
+      if (!row || !row.testing_config_json) {
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task or testing config not found: ${taskId}`);
+      }
+
+      let config: { processes: Array<{ name: string; port?: number }> };
+      try {
+        config = JSON.parse(row.testing_config_json);
+      } catch {
+        throw new PragmaError("INVALID_TESTING_CONFIG", 400, "Testing config JSON is invalid.");
+      }
+
+      const proc = config.processes.find((p) => p.name === body.process_name);
+      if (!proc || !proc.port) {
+        throw new PragmaError(
+          "PROCESS_NOT_FOUND",
+          404,
+          `Process "${body.process_name}" not found or has no port configured.`,
+        );
+      }
+
+      const targetUrl = `http://localhost:${proc.port}${body.path}`;
+      const startTime = Date.now();
+      try {
+        const fetchResponse = await fetch(targetUrl, {
+          method: body.method,
+          headers: body.headers as Record<string, string> | undefined,
+          body: body.method !== "GET" && body.method !== "HEAD" ? body.body : undefined,
+        });
+        const elapsed = Date.now() - startTime;
+        const responseBody = await fetchResponse.text();
+        const responseHeaders: Record<string, string[]> = {};
+        fetchResponse.headers.forEach((value, key) => {
+          responseHeaders[key] = [value];
+        });
+
+        return c.json({
+          status: fetchResponse.status,
+          headers: responseHeaders,
+          body: responseBody,
+          elapsed_ms: elapsed,
+        });
+      } catch (error) {
+        throw new PragmaError(
+          "PROXY_REQUEST_FAILED",
+          502,
+          `Proxy request to ${targetUrl} failed: ${errorMessage(error)}`,
+        );
+      }
+    },
+  );
+
+  app.post(
+    "/services/:serviceId/stdin",
+    validateJson(serviceStdinSchema),
+    async (c) => {
+      const workspaceName = c.get("workspace");
+      const serviceId = c.req.param("serviceId");
+      const body = c.req.valid("json");
+
+      const service = getRuntimeService(workspaceName, serviceId);
+      if (!service) {
+        throw new PragmaError("SERVICE_NOT_FOUND", 404, `Service not found: ${serviceId}`);
+      }
+      if (service.status !== "running" && service.status !== "ready") {
+        throw new PragmaError("SERVICE_NOT_RUNNING", 409, `Service is not running: ${serviceId}`);
+      }
+
+      const child = service._child;
+      if (!child || !child.stdin) {
+        throw new PragmaError("SERVICE_NO_STDIN", 400, "Service stdin is not available.");
+      }
+
+      child.stdin.write(body.text);
+      return c.json({ ok: true });
     },
   );
 

@@ -9,6 +9,7 @@ import {
   taskOutputContentUrl,
   taskOutputDownloadUrl,
 } from '../api'
+import { TestingPane } from './TestingPane'
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
 
@@ -195,6 +196,7 @@ export function OutputPanel({
   runtimeServiceLogs = [],
   runtimeServiceError = '',
   onStopRuntimeService,
+  testingConfig = null,
 }) {
   const [tab, setTab] = useState('outputs')
   const runtimeLogRef = useRef(null)
@@ -217,10 +219,10 @@ export function OutputPanel({
 
   useEffect(() => {
     if (!taskId) return
-    setTab('outputs')
+    setTab(testingConfig ? 'testing' : 'outputs')
     void loadChanges(taskId)
     void loadFiles(taskId)
-  }, [taskId])
+  }, [taskId, testingConfig])
 
   useEffect(() => {
     if (!files.length) {
@@ -397,6 +399,14 @@ export function OutputPanel({
         >
           Plan
         </button>
+        {testingConfig && (
+          <button
+            className={`output-tab-btn ${tab === 'testing' ? 'active' : ''}`}
+            onClick={() => setTab('testing')}
+          >
+            Testing
+          </button>
+        )}
       </div>
 
       {tab === 'changes' && (
@@ -635,6 +645,12 @@ export function OutputPanel({
           {!planLoading && !planError && !planData && (
             <div className="muted">No plan yet.</div>
           )}
+        </div>
+      )}
+
+      {tab === 'testing' && testingConfig && (
+        <div className="output-tab-body output-testing-body">
+          <TestingPane taskId={taskId} config={testingConfig} />
         </div>
       )}
     </div>

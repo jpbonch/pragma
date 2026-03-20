@@ -421,6 +421,47 @@ taskCommand
   );
 
 taskCommand
+  .command("submit-testing-config")
+  .description("Submit a testing config for the current task")
+  .requiredOption("--config <json>", "The full testing config as a JSON string")
+  .option("--task-id <id>", "Task id")
+  .option("--turn-id <id>", "Turn id")
+  .option("--api-url <url>", "Pragma API base URL")
+  .action(
+    async (options: {
+      config: string;
+      taskId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
+
+      let config: unknown;
+      try {
+        config = JSON.parse(options.config);
+      } catch {
+        throw new Error("--config must be valid JSON.");
+      }
+
+      await apiRequest(
+        apiUrl,
+        `/tasks/${encodeURIComponent(taskId)}/agent/testing-config`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            config,
+            turn_id: turnId,
+            agent_id: normalizeOptionalString(process.env.PRAGMA_AGENT_ID),
+          }),
+        },
+      );
+
+      console.log(`Submitted testing config for task ${taskId}.`);
+    },
+  );
+
+taskCommand
   .command("plan-summary")
   .description("Submit structured plan summary for the current plan turn")
   .requiredOption("--title <text>", "Plan title")
