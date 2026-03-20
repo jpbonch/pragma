@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { initializeWorkspaceGit } from "./conversation/gitWorkflow";
 import { ensureConversationSchema } from "./conversation/store";
+import { BUNDLED_SKILLS } from "./bundledSkills";
 
 export const PRAGMA_DIR = join(homedir(), ".pragma");
 const ACTIVE_WORKSPACE_FILE = join(PRAGMA_DIR, "active_workspace");
@@ -505,6 +506,7 @@ async function createWorkspaceDatabase(dbDir: string): Promise<PGlite> {
   await ensureRequiredSchema(db);
   await ensureDefaultAgents(db);
   await ensureDefaultHuman(db);
+  await ensureDefaultSkills(db);
   await ensureConversationSchema(db);
   return patchDatabaseClose(db);
 }
@@ -829,6 +831,17 @@ async function ensureDefaultHuman(db: PGlite): Promise<void> {
     `INSERT INTO humans (id, emoji) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
     [DEFAULT_HUMAN_ID, DEFAULT_HUMAN_EMOJI],
   );
+}
+
+async function ensureDefaultSkills(db: PGlite): Promise<void> {
+  for (const skill of BUNDLED_SKILLS) {
+    await db.query(
+      `INSERT INTO skills (id, name, description, content)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO NOTHING`,
+      [skill.id, skill.name, skill.description, skill.content],
+    );
+  }
 }
 
 async function pathExists(path: string): Promise<boolean> {

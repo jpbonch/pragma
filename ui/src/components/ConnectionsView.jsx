@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Download, Trash2, Plus, X, Link, Unlink, Settings, Key } from 'lucide-react'
 import {
-  fetchSkillRegistry,
   fetchInstalledSkills,
   fetchGlobalSkills,
   fetchMcpServers,
-  installRegistrySkill,
   createCustomSkill,
   deleteSkill,
   fetchAgents,
@@ -66,7 +64,6 @@ function connectorDisplayName(connector) {
 }
 
 export function ConnectionsView() {
-  const [registry, setRegistry] = useState([])
   const [installed, setInstalled] = useState([])
   const [harnessGlobalSkills, setHarnessGlobalSkills] = useState({})
   const [harnessMcpServers, setHarnessMcpServers] = useState({})
@@ -74,7 +71,6 @@ export function ConnectionsView() {
   const [skillAgents, setSkillAgents] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [installing, setInstalling] = useState(null)
   const [removing, setRemoving] = useState(null)
   const [actionError, setActionError] = useState('')
   const [assignBusy, setAssignBusy] = useState(false)
@@ -188,13 +184,11 @@ export function ConnectionsView() {
     setLoading(true)
     setError('')
     try {
-      const [reg, inst, agentList, connList] = await Promise.all([
-        fetchSkillRegistry(),
+      const [inst, agentList, connList] = await Promise.all([
         fetchInstalledSkills(),
         fetchAgents(),
         fetchConnectors(),
       ])
-      setRegistry(reg)
       setInstalled(inst)
       setAgents(agentList)
       setConnectors(connList)
@@ -249,34 +243,6 @@ export function ConnectionsView() {
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [addingSkillToAgent, addingConnectorToAgent])
-
-  const installedNames = new Set(installed.map((s) => s.name))
-
-  async function handleInstall(skill) {
-    if (installing) return
-    setInstalling(skill.name)
-    setActionError('')
-    try {
-      await installRegistrySkill({
-        name: skill.name,
-        provider: skill.provider,
-        repo: skill.repo,
-        skill_path: skill.skill_path,
-      })
-      const [inst, agentList] = await Promise.all([
-        fetchInstalledSkills(),
-        fetchAgents(),
-      ])
-      setInstalled(inst)
-      setAgents(agentList)
-      const map = await loadAgentSkillMap(agentList, inst)
-      setSkillAgents(map)
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setInstalling(null)
-    }
-  }
 
   async function handleRemove(skill) {
     if (removing) return
@@ -566,7 +532,6 @@ export function ConnectionsView() {
   }
 
   const connectedConnectors = connectors.filter((c) => c.status === 'connected')
-  const catalogSkills = registry
 
   return (
     <section className="cn">
@@ -742,7 +707,7 @@ export function ConnectionsView() {
                       <span>New Skill</span>
                     </button>
                   </div>
-                  <p className="cn-section-desc">Saved prompts that teach your agents new abilities. Install a skill from the catalog or create your own to give agents specialized knowledge and behaviors.</p>
+                  <p className="cn-section-desc">Saved prompts that teach your agents new abilities. Create your own or use the bundled skills to give agents specialized knowledge and behaviors.</p>
                   <div className="cn-list">
                     {installed.map((skill) => (
                         <div key={skill.id} className="cn-skill-block">
@@ -775,40 +740,7 @@ export function ConnectionsView() {
                         </div>
                     ))}
 
-                    {catalogSkills.filter((s) => !installedNames.has(s.name)).map((skill) => {
-                      const catalogKey = `catalog-${skill.provider}-${skill.name}`
-                      return (
-                        <div key={catalogKey} className="cn-skill-block">
-                          <div
-                            className="cn-row cn-row--clickable"
-                            onClick={() => setViewingSkill(skill)}
-                          >
-                            <div className="cn-row-left">
-                              <span className="cn-row-name">{skill.name}</span>
-                              {skill.description && (
-                                <span className="cn-row-desc">{skill.description}</span>
-                              )}
-                            </div>
-                            <div className="cn-row-actions" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                className="cn-install-btn"
-                                onClick={() => handleInstall(skill)}
-                                disabled={installing === skill.name}
-                              >
-                                {installing === skill.name ? (
-                                  <div className="cn-spinner-sm" />
-                                ) : (
-                                  <Download size={13} />
-                                )}
-                                <span>{installing === skill.name ? 'Installing...' : 'Install'}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-
-                    {installed.length === 0 && catalogSkills.length === 0 && (
+                    {installed.length === 0 && (
                       <div className="cn-list-empty">No skills available</div>
                     )}
                   </div>
@@ -969,11 +901,11 @@ export function ConnectionsView() {
               </div>
             </div>
 
-            {registry.length === 0 && installed.length === 0 && connectors.length === 0 && (
+            {installed.length === 0 && connectors.length === 0 && (
               <div className="cn-empty">
                 <Download size={40} strokeWidth={1.5} />
                 <p className="cn-empty-title">No skills available</p>
-                <p className="cn-empty-desc">Create a custom skill or check your registry configuration.</p>
+                <p className="cn-empty-desc">Create a custom skill to give agents specialized knowledge.</p>
               </div>
             )}
           </>

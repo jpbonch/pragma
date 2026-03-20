@@ -779,14 +779,6 @@ export async function updateHuman(id, emoji) {
   })
 }
 
-export async function fetchSkillRegistry() {
-  const data = asObject(await fetchJson('/skills/registry', undefined, 60000), 'Invalid registry response.')
-  if (!Array.isArray(data.skills)) {
-    throw invalidResponse('`skills` must be an array.')
-  }
-  return data.skills
-}
-
 export async function fetchGlobalSkills(harness) {
   const url = harness ? `/skills/global?harness=${encodeURIComponent(harness)}` : '/skills/global'
   const data = asObject(await fetchJson(url), 'Invalid global skills response.')
@@ -811,14 +803,6 @@ export async function fetchInstalledSkills() {
     throw invalidResponse('`skills` must be an array.')
   }
   return data.skills
-}
-
-export async function installRegistrySkill({ name, provider, repo, skill_path }) {
-  return fetchJson('/skills/registry/install', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name, provider, repo, skill_path }),
-  }, 30000)
 }
 
 export async function createCustomSkill({ name, description, content }) {
