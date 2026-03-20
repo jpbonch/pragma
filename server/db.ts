@@ -2,6 +2,8 @@ import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/p
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { Client } from "pg";
 import { initializeWorkspaceGit } from "./conversation/gitWorkflow";
 import { ensureConversationSchema } from "./conversation/store";
 import { BUNDLED_SKILLS } from "./bundledSkills";
@@ -20,7 +22,23 @@ const DEFAULT_HARNESS_MODELS: Record<string, { label: string; id: string }> = {
 function getDefaultModelForHarness(harness: string): { label: string; id: string } {
   return DEFAULT_HARNESS_MODELS[harness] ?? DEFAULT_HARNESS_MODELS.claude_code;
 }
-const REAL_CLOSE = new WeakMap<PGlite, () => Promise<void>>();
+const REAL_CLOSE = new WeakMap<object, () => Promise<void>>();
+const DB_SOCKET_HOST = "127.0.0.1";
+const DB_SOCKET_WAIT_MS = 5000;
+const DB_SOCKET_POLL_MS = 100;
+
+type DbSocketInfo = {
+  workspaceName: string;
+  host: string;
+  port: number;
+  ownerPid: number;
+  startedAt: string;
+};
+
+type DbOwnerLock = {
+  ownerPid: number;
+  createdAt: string;
+};
 
 export const DEFAULT_AGENT_FILE = `# Orchestrator
 
@@ -441,7 +459,7 @@ export async function openDatabase(workspaceName: string): Promise<PGlite> {
     return existing;
   }
 
-  const pending = createWorkspaceDatabase(paths.dbDir).catch((error) => {
+  const pending = openWorkspaceDatabase(paths).catch((error) => {
     OPEN_DATABASES.delete(workspaceName);
     throw error;
   });
@@ -500,7 +518,57 @@ export function validateWorkspaceName(name: string): void {
   }
 }
 
-async function createWorkspaceDatabase(dbDir: string): Promise<PGlite> {
+async function openWorkspaceDatabase(
+  paths: ReturnType<typeof getWorkspacePaths>,
+): Promise<PGlite> {
+  const remote = await tryConnectToWorkspaceDatabase(paths);
+  if (remote) {
+    return remote;
+  }
+
+  if (await acquireWorkspaceOwnerLock(paths)) {
+    try {
+      return await createOwnedWorkspaceDatabase(paths);
+    } catch (error) {
+      await cleanupWorkspaceSocketFiles(paths);
+      throw error;
+    }
+  }
+
+  const waited = await waitForWorkspaceDatabase(paths);
+  if (waited) {
+    return waited;
+  }
+
+  throw new Error(`Timed out waiting for shared workspace database: ${paths.name}`);
+}
+
+async function createOwnedWorkspaceDatabase(
+  paths: ReturnType<typeof getWorkspacePaths>,
+): Promise<PGlite> {
+  const db = await initializeWorkspaceDatabase(paths.dbDir);
+  const rawClose = db.close.bind(db);
+  const socketServer = new PGLiteSocketServer({
+    db,
+    host: DB_SOCKET_HOST,
+    port: 0,
+    maxConnections: 25,
+  });
+  await socketServer.start();
+
+  const socketInfo = createSocketInfo(paths.name, socketServer.getServerConn());
+  await writeSocketInfo(paths, socketInfo);
+
+  const realClose = async () => {
+    await socketServer.stop().catch(() => {});
+    await cleanupWorkspaceSocketFiles(paths);
+    await rawClose();
+  };
+
+  return patchDatabaseClose(db, realClose);
+}
+
+async function initializeWorkspaceDatabase(dbDir: string): Promise<PGlite> {
   const db = new PGlite(dbDir);
   await db.waitReady;
   await ensureRequiredSchema(db);
@@ -508,18 +576,253 @@ async function createWorkspaceDatabase(dbDir: string): Promise<PGlite> {
   await ensureDefaultHuman(db);
   await ensureDefaultSkills(db);
   await ensureConversationSchema(db);
-  return patchDatabaseClose(db);
+  return db;
 }
 
-function patchDatabaseClose(db: PGlite): PGlite {
-  if (REAL_CLOSE.has(db)) {
+function patchDatabaseClose<T extends { close: () => Promise<void> }>(
+  db: T,
+  realClose: () => Promise<void>,
+): T {
+  if (REAL_CLOSE.has(db as object)) {
     return db;
   }
 
-  const realClose = db.close.bind(db);
-  REAL_CLOSE.set(db, realClose);
+  REAL_CLOSE.set(db as object, realClose);
   db.close = async () => {};
   return db;
+}
+
+async function tryConnectToWorkspaceDatabase(
+  paths: ReturnType<typeof getWorkspacePaths>,
+): Promise<PGlite | null> {
+  const socketInfo = await readSocketInfo(paths);
+  if (!socketInfo) {
+    return null;
+  }
+
+  try {
+    return await connectToSharedDatabase(socketInfo);
+  } catch {
+    if (!isProcessAlive(socketInfo.ownerPid)) {
+      await cleanupWorkspaceSocketFiles(paths);
+    }
+    return null;
+  }
+}
+
+async function waitForWorkspaceDatabase(
+  paths: ReturnType<typeof getWorkspacePaths>,
+): Promise<PGlite | null> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < DB_SOCKET_WAIT_MS) {
+    const remote = await tryConnectToWorkspaceDatabase(paths);
+    if (remote) {
+      return remote;
+    }
+
+    const ownerLock = await readOwnerLock(paths);
+    if (!ownerLock) {
+      if (await acquireWorkspaceOwnerLock(paths)) {
+        try {
+          return await createOwnedWorkspaceDatabase(paths);
+        } catch (error) {
+          await cleanupWorkspaceSocketFiles(paths);
+          throw error;
+        }
+      }
+    } else if (!isProcessAlive(ownerLock.ownerPid)) {
+      await cleanupWorkspaceSocketFiles(paths);
+      if (await acquireWorkspaceOwnerLock(paths)) {
+        try {
+          return await createOwnedWorkspaceDatabase(paths);
+        } catch (error) {
+          await cleanupWorkspaceSocketFiles(paths);
+          throw error;
+        }
+      }
+    }
+
+    await sleep(DB_SOCKET_POLL_MS);
+  }
+
+  return null;
+}
+
+async function connectToSharedDatabase(socketInfo: DbSocketInfo): Promise<PGlite> {
+  const client = new Client({
+    host: socketInfo.host,
+    port: socketInfo.port,
+    database: "template1",
+    ssl: false,
+  });
+  client.on("error", () => {});
+  await client.connect();
+  await client.query("SELECT 1");
+
+  const remote = patchDatabaseClose(
+    new RemotePGliteClient(client),
+    async () => {
+      await client.end().catch(() => {});
+    },
+  );
+
+  return remote as unknown as PGlite;
+}
+
+async function acquireWorkspaceOwnerLock(
+  paths: ReturnType<typeof getWorkspacePaths>,
+): Promise<boolean> {
+  const lockPath = getSocketLockPath(paths);
+
+  for (;;) {
+    try {
+      const payload: DbOwnerLock = {
+        ownerPid: process.pid,
+        createdAt: new Date().toISOString(),
+      };
+      await writeFile(lockPath, JSON.stringify(payload), { flag: "wx" });
+      return true;
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "EEXIST") {
+        throw error;
+      }
+
+      const lock = await readOwnerLock(paths);
+      if (!lock || !isProcessAlive(lock.ownerPid)) {
+        await rm(lockPath, { force: true });
+        continue;
+      }
+
+      return false;
+    }
+  }
+}
+
+async function readSocketInfo(
+  paths: ReturnType<typeof getWorkspacePaths>,
+): Promise<DbSocketInfo | null> {
+  try {
+    const raw = await readFile(getSocketInfoPath(paths), "utf8");
+    const parsed = JSON.parse(raw) as Partial<DbSocketInfo>;
+    if (
+      parsed.workspaceName !== paths.name ||
+      typeof parsed.host !== "string" ||
+      !Number.isInteger(parsed.port) ||
+      parsed.port! <= 0 ||
+      typeof parsed.ownerPid !== "number"
+    ) {
+      return null;
+    }
+    return {
+      workspaceName: parsed.workspaceName,
+      host: parsed.host,
+      port: Number(parsed.port),
+      ownerPid: parsed.ownerPid,
+      startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeSocketInfo(
+  paths: ReturnType<typeof getWorkspacePaths>,
+  socketInfo: DbSocketInfo,
+): Promise<void> {
+  await writeFile(getSocketInfoPath(paths), JSON.stringify(socketInfo));
+}
+
+async function readOwnerLock(
+  paths: ReturnType<typeof getWorkspacePaths>,
+): Promise<DbOwnerLock | null> {
+  try {
+    const raw = await readFile(getSocketLockPath(paths), "utf8");
+    const parsed = JSON.parse(raw) as Partial<DbOwnerLock>;
+    if (typeof parsed.ownerPid !== "number") {
+      return null;
+    }
+    return {
+      ownerPid: parsed.ownerPid,
+      createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function cleanupWorkspaceSocketFiles(
+  paths: ReturnType<typeof getWorkspacePaths>,
+): Promise<void> {
+  await rm(getSocketInfoPath(paths), { force: true });
+  await rm(getSocketLockPath(paths), { force: true });
+}
+
+function getSocketInfoPath(paths: ReturnType<typeof getWorkspacePaths>): string {
+  return join(paths.rootDir, ".db-socket.json");
+}
+
+function getSocketLockPath(paths: ReturnType<typeof getWorkspacePaths>): string {
+  return join(paths.rootDir, ".db-socket.lock");
+}
+
+function createSocketInfo(workspaceName: string, serverConn: string): DbSocketInfo {
+  const [host, portValue] = serverConn.split(":");
+  const port = Number.parseInt(portValue ?? "", 10);
+  if (!host || !Number.isInteger(port) || port <= 0) {
+    throw new Error(`Invalid PGlite socket server address: ${serverConn}`);
+  }
+
+  return {
+    workspaceName,
+    host,
+    port,
+    ownerPid: process.pid,
+    startedAt: new Date().toISOString(),
+  };
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class RemotePGliteClient {
+  constructor(private readonly client: Client) {}
+
+  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
+    const result = await this.client.query(sql, params as unknown[] | undefined);
+    return {
+      rows: result.rows as T[],
+      fields: result.fields,
+      rowCount: result.rowCount ?? 0,
+      affectedRows: result.rowCount ?? 0,
+    };
+  }
+
+  async exec(sql: string): Promise<void> {
+    await this.client.query(sql);
+  }
+
+  async close(): Promise<void> {
+    await this.client.end();
+  }
 }
 
 async function ensureRequiredSchema(db: PGlite): Promise<void> {
