@@ -622,23 +622,33 @@ program
     });
   });
 
-async function getRandomFreePort(): Promise<number> {
+async function getRandomFreePort(host?: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
+    const onListen = () => {
       const port = (srv.address() as net.AddressInfo).port;
       srv.close(() => resolve(port));
-    });
+    };
+    if (host) {
+      srv.listen(0, host, onListen);
+    } else {
+      srv.listen(0, onListen);
+    }
     srv.on("error", reject);
   });
 }
 
-async function tryPort(port: number): Promise<number | null> {
+async function tryPort(port: number, host?: string): Promise<number | null> {
   return new Promise((resolve) => {
     const srv = net.createServer();
-    srv.listen(port, "127.0.0.1", () => {
+    const onListen = () => {
       srv.close(() => resolve(port));
-    });
+    };
+    if (host) {
+      srv.listen(port, host, onListen);
+    } else {
+      srv.listen(port, onListen);
+    }
     srv.on("error", () => resolve(null));
   });
 }
@@ -648,7 +658,7 @@ async function runAll(): Promise<void> {
   const preferredUiPort = parsePort(new URL(DEFAULT_UI_URL).port || "5173");
 
   const serverPort = (await tryPort(preferredServerPort)) ?? (await getRandomFreePort());
-  const uiPort = (await tryPort(preferredUiPort)) ?? (await getRandomFreePort());
+  const uiPort = (await tryPort(preferredUiPort, "127.0.0.1")) ?? (await getRandomFreePort("127.0.0.1"));
   const apiUrl = `http://127.0.0.1:${serverPort}`;
   const uiUrl = `http://127.0.0.1:${uiPort}`;
 

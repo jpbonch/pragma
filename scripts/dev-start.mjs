@@ -1,4 +1,4 @@
-import { cp, mkdir, rm, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,8 +84,23 @@ async function preparePragmaDir() {
   console.log(`[dev] reusing Pragma state: ${targetPragmaDir}`);
 }
 
+async function removeCopiedWorkspaceDatabases() {
+  if (!(await pathExists(targetPragmaDir))) {
+    return;
+  }
+
+  const entries = await readdir(targetPragmaDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith(".")) continue;
+    const dbDir = join(targetPragmaDir, entry.name, "db");
+    await rm(dbDir, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   await preparePragmaDir();
+  await removeCopiedWorkspaceDatabases();
 
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   await runCommand(npmCommand, ["run", "build"], process.env);
