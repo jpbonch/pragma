@@ -1,6 +1,6 @@
 {
   "name": "pragma-so",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Very minimal pragma-so CLI",
   "main": "dist/cli/index.js",
   "bin": {
