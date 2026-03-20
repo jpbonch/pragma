@@ -984,14 +984,6 @@ export async function createProcess(folderName, { label, command, cwd, type }) {
   })
 }
 
-export async function createWorkspaceProcess({ label, command, cwd, type }) {
-  return fetchJson('/processes', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ label, command, cwd, type }),
-  })
-}
-
 export async function updateProcess(processId, updates) {
   return fetchJson(`/processes/${encodeURIComponent(processId)}`, {
     method: 'PUT',
