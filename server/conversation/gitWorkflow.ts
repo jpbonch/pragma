@@ -1,5 +1,4 @@
 import {
-  copyFile,
   cp,
   lstat,
   mkdir,
@@ -7,7 +6,6 @@ import {
   readFile,
   rm,
   stat,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -408,7 +406,7 @@ async function createFreshTaskWorktrees(input: {
       startPoint: baseCommit,
     });
 
-    await symlinkOrCopyGitignoredFiles({
+    await copyGitignoredEntriesToWorktree({
       sourceRepoPath,
       worktreePath: taskRepoPath,
       excludedEntries: getManagedIgnoredEntryExcludes(relativePath),
@@ -454,7 +452,7 @@ async function createFollowupTaskWorktrees(input: {
       startPoint: predecessorHead,
     });
 
-    await symlinkOrCopyGitignoredFiles({
+    await copyGitignoredEntriesToWorktree({
       sourceRepoPath,
       worktreePath: taskRepoPath,
       excludedEntries: getManagedIgnoredEntryExcludes(relativePath),
@@ -493,7 +491,7 @@ async function ensureExistingTaskWorktrees(input: {
       startPoint: repo.base_commit,
     });
 
-    await symlinkOrCopyGitignoredFiles({
+    await copyGitignoredEntriesToWorktree({
       sourceRepoPath,
       worktreePath: taskRepoPath,
       excludedEntries: getManagedIgnoredEntryExcludes(relativePath),
@@ -566,19 +564,25 @@ async function getTopLevelGitignoredEntries(
   return entries;
 }
 
-async function symlinkOrCopyGitignoredFiles(input: {
+async function copyGitignoredEntriesToWorktree(input: {
   sourceRepoPath: string;
   worktreePath: string;
   excludedEntries?: Set<string>;
 }): Promise<void> {
+  const sourceRepoPath = resolve(input.sourceRepoPath);
+  const worktreePath = resolve(input.worktreePath);
+  if (sourceRepoPath === worktreePath) {
+    return;
+  }
+
   const entries = await getTopLevelGitignoredEntries(
     input.sourceRepoPath,
     input.excludedEntries,
   );
 
   for (const entry of entries) {
-    const sourcePath = join(input.sourceRepoPath, entry);
-    const targetPath = join(input.worktreePath, entry);
+    const sourcePath = resolve(sourceRepoPath, entry);
+    const targetPath = resolve(worktreePath, entry);
 
     try {
       if (sourcePath === targetPath) continue;
@@ -590,13 +594,7 @@ async function symlinkOrCopyGitignoredFiles(input: {
       const sourceStat = await lstat(sourcePath).catch(() => null);
       if (!sourceStat) continue;
 
-      if (sourceStat.isDirectory()) {
-        // Large directories → symlink
-        await symlink(sourcePath, targetPath);
-      } else if (sourceStat.isFile()) {
-        // Small files → copy (avoids shared-mutation for .env etc.)
-        await copyFile(sourcePath, targetPath);
-      }
+      await copyIgnoredEntry(sourcePath, targetPath);
     } catch {
       // Silently continue on individual failures (race conditions, permissions, etc.)
     }
@@ -608,36 +606,52 @@ async function syncGitignoredFilesBackToSource(input: {
   worktreePath: string;
   excludedEntries?: Set<string>;
 }): Promise<void> {
-  const entries = await getTopLevelGitignoredEntries(
-    input.sourceRepoPath,
-    input.excludedEntries,
-  );
+  const sourceRepoPath = resolve(input.sourceRepoPath);
+  const worktreePath = resolve(input.worktreePath);
+  if (sourceRepoPath === worktreePath) {
+    return;
+  }
+
+  const [sourceEntries, worktreeEntries] = await Promise.all([
+    getTopLevelGitignoredEntries(input.sourceRepoPath, input.excludedEntries),
+    getTopLevelGitignoredEntries(input.worktreePath, input.excludedEntries),
+  ]);
+  const entries = [...new Set([...sourceEntries, ...worktreeEntries])];
 
   for (const entry of entries) {
-    const worktreeEntryPath = join(input.worktreePath, entry);
-    const sourceEntryPath = join(input.sourceRepoPath, entry);
+    const worktreeEntryPath = resolve(worktreePath, entry);
+    const sourceEntryPath = resolve(sourceRepoPath, entry);
 
     try {
       if (worktreeEntryPath === sourceEntryPath) continue;
 
       const worktreeStat = await lstat(worktreeEntryPath).catch(() => null);
-      if (!worktreeStat) continue;
+      const sourceStat = await lstat(sourceEntryPath).catch(() => null);
 
-      // If it's still a symlink, source already has the content — nothing to do
-      if (worktreeStat.isSymbolicLink()) continue;
+      if (!worktreeStat) {
+        if (sourceStat) {
+          await rm(sourceEntryPath, { recursive: true, force: true });
+        }
+        continue;
+      }
 
-      if (worktreeStat.isFile()) {
-        // Agent replaced copied file — copy it back to source
-        await copyFile(worktreeEntryPath, sourceEntryPath);
-      } else if (worktreeStat.isDirectory()) {
-        // Agent replaced symlink with real directory — copy back to source
+      if (worktreeStat.isFile() || worktreeStat.isDirectory() || worktreeStat.isSymbolicLink()) {
         await rm(sourceEntryPath, { recursive: true, force: true });
-        await cp(worktreeEntryPath, sourceEntryPath, { recursive: true });
+        await copyIgnoredEntry(worktreeEntryPath, sourceEntryPath);
       }
     } catch {
       // Silently continue on individual failures
     }
   }
+}
+
+async function copyIgnoredEntry(sourcePath: string, targetPath: string): Promise<void> {
+  await mkdir(dirname(targetPath), { recursive: true });
+  await cp(sourcePath, targetPath, {
+    recursive: true,
+    force: true,
+    dereference: false,
+  });
 }
 
 async function discoverFlatRepoPaths(paths: WorkspacePathsLike): Promise<string[]> {
