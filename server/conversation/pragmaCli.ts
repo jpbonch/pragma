@@ -18,7 +18,7 @@ export function resolvePragmaCliCommand(runtimeDir: string): string {
     return `node ${quoteShellArg(existing)}`;
   }
 
-  return "pragma";
+  return "pragma-so";
 }
 
 function normalizeCliCommand(value: string | undefined): string | null {

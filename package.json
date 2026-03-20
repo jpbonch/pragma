@@ -1,10 +1,10 @@
 {
   "name": "pragma-so",
   "version": "0.1.0",
-  "description": "Very minimal pragma CLI",
+  "description": "Very minimal pragma-so CLI",
   "main": "dist/cli/index.js",
   "bin": {
-    "pragma": "dist/cli/index.js"
+    "pragma-so": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc && npm run ui:build",

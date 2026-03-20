@@ -13,7 +13,7 @@ export function buildPrompt(
   mode: "chat" | "plan" | "execute",
   message: string,
   reasoningEffort: ReasoningEffort = "medium",
-  pragmaCliCommand = "pragma",
+  pragmaCliCommand = "pragma-so",
   options: {
     planCandidates?: WorkerCandidate[];
     workspaceIsEmpty?: boolean;
@@ -24,7 +24,7 @@ export function buildPrompt(
 ): string {
   const cleanMessage = message.trim();
   const reasoningLine = formatReasoningInstruction(reasoningEffort);
-  const cli = pragmaCliCommand.trim() || "pragma";
+  const cli = pragmaCliCommand.trim() || "pragma-so";
 
   if (mode === "chat") {
     const chatParts = [
@@ -149,7 +149,7 @@ export function buildOrchestratorPrompt(input: {
 }): string {
   const forced = input.forcedRecipientAgentId?.trim() || "";
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
-  const cli = input.pragmaCliCommand?.trim() || "pragma";
+  const cli = input.pragmaCliCommand?.trim() || "pragma-so";
   const selectRecipientCommand = `${cli} task select-recipient --agent-id <candidate_id> --reason "<one sentence reason>"`;
   const candidateLines = input.candidates.map((candidate, index) => {
     const desc = candidate.description ? `; description=${candidate.description}` : "";
@@ -201,7 +201,7 @@ export function buildWorkerPrompt(input: {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
-  const cli = input.pragmaCliCommand?.trim() || "pragma";
+  const cli = input.pragmaCliCommand?.trim() || "pragma-so";
   const preferredCodePath = input.preferredCodePath?.trim() || "";
   const taskWorkspaceDir = input.taskWorkspaceDir?.trim() || "";
   const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"] [--option "<choice>" --option "<choice>" ...]`;

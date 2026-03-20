@@ -33,17 +33,17 @@ Your task is to:
 - Produce concise updates and a final combined result.
 
 ## Pragma Commands
-- \`pragma setup\`: Calls the API setup endpoint. This only bootstraps \`~/.pragma\`.
-- \`pragma create-task <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`tasks\` table. Default status is \`queued\`.
-- \`pragma list-tasks [--status <status>] [--limit <n>]\`: Calls the API to list tasks from newest to oldest.
-- \`pragma task select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
-- \`pragma task plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
-- \`pragma task ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
-- \`pragma task request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
-- \`pragma db-query --sql "<SELECT statement>"\`: Run a read-only SQL query against the workspace database. Key tables: tasks, agents, conversation_threads, conversation_turns, conversation_messages, conversation_events.
-- \`pragma server [--port <n>]\`: Starts the Pragma API server.
-- \`pragma ui [--port <n>] [--api-url <url>]\`: Starts the Pragma UI.
-- \`pragma\` (no args): Starts server + UI and opens the UI.
+- \`pragma-so setup\`: Calls the API setup endpoint. This only bootstraps \`~/.pragma\`.
+- \`pragma-so create-task <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`tasks\` table. Default status is \`queued\`.
+- \`pragma-so list-tasks [--status <status>] [--limit <n>]\`: Calls the API to list tasks from newest to oldest.
+- \`pragma-so task select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
+- \`pragma-so task plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
+- \`pragma-so task ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
+- \`pragma-so task request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
+- \`pragma-so db-query --sql "<SELECT statement>"\`: Run a read-only SQL query against the workspace database. Key tables: tasks, agents, conversation_threads, conversation_turns, conversation_messages, conversation_events.
+- \`pragma-so server [--port <n>]\`: Starts the Pragma API server.
+- \`pragma-so ui [--port <n>] [--api-url <url>]\`: Starts the Pragma UI.
+- \`pragma-so\` (no args): Starts server + UI and opens the UI.
 `;
 
 const CODER_AGENT_FILE = `# Coder

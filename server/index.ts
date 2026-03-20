@@ -4058,7 +4058,7 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
       throw new PragmaError(
         "PLAN_RECIPIENT_MISSING",
         409,
-        "Plan is missing a selected recipient. Submit `pragma task plan-select-recipient` in plan mode.",
+        "Plan is missing a selected recipient. Submit `pragma-so task plan-select-recipient` in plan mode.",
       );
     }
     const executeRecipient = await getAgentById(db, requestedRecipientAgentId);

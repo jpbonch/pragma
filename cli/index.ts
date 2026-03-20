@@ -12,13 +12,13 @@ const DEFAULT_API_URL = process.env.PRAGMA_API_URL ?? "http://127.0.0.1:3000";
 const DEFAULT_UI_URL = process.env.PRAGMA_UI_URL ?? "http://127.0.0.1:5173";
 
 if (!process.env.PRAGMA_CLI_COMMAND) {
-  const entry = process.argv[1] ? quoteShellArg(process.argv[1]) : "pragma";
+  const entry = process.argv[1] ? quoteShellArg(process.argv[1]) : "pragma-so";
   process.env.PRAGMA_CLI_COMMAND = `${quoteShellArg(process.execPath)} ${entry}`;
 }
 
 program
-  .name("pragma")
-  .description("Very minimal CLI")
+  .name("pragma-so")
+  .description("Very minimal pragma-so CLI")
   .version("0.1.0")
   .action(async () => {
     await runAll();
