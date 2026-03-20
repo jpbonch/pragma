@@ -23,9 +23,5 @@ export async function workspaceMiddleware(c: Context<WorkspaceEnv>, next: Next):
   const db = await openDatabase(activeWorkspace);
   c.set("db", db);
   c.set("workspace", activeWorkspace);
-  try {
-    await next();
-  } finally {
-    await db.close();
-  }
+  await next();
 }
