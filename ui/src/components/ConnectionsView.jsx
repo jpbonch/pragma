@@ -712,12 +712,11 @@ export function ConnectionsView() {
                     {installed.map((skill) => (
                         <div key={skill.id} className="cn-skill-block">
                           <div
-                            className="cn-row cn-row--installed cn-row--clickable"
+                            className="cn-row cn-row--clickable"
                             onClick={() => setViewingSkill(skill)}
                           >
                             <div className="cn-row-left">
                               <span className="cn-row-name">{skill.name}</span>
-                              <span className="cn-badge cn-badge--installed">Installed</span>
                               {skill.description && (
                                 <span className="cn-row-desc">{skill.description}</span>
                               )}

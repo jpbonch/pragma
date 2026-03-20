@@ -6652,8 +6652,6 @@ select { cursor: pointer; }
 }
 .cn-row:hover { background: #fafaf9; }
 .cn-row--clickable { cursor: pointer; }
-.cn-row--installed { background: #f9fafb; }
-.cn-row--installed:hover { background: #f4f5f6; }
 .cn-row--connected { background: #f9fafb; }
 
 /* Skill block */
@@ -7012,7 +7010,6 @@ select { cursor: pointer; }
   flex-shrink: 0; font-size: 11px; font-weight: 600;
   padding: 2px 8px; border-radius: 10px; white-space: nowrap;
 }
-.cn-badge--installed { background: #ecfdf5; color: #059669; }
 .cn-badge--connected { background: #ecfdf5; color: #059669; }
 .cn-badge--disconnected { background: #fefce8; color: #ca8a04; }
 .cn-badge--needs-config { background: #f3f4f6; color: #6b7280; }
@@ -7032,15 +7029,6 @@ select { cursor: pointer; }
 
 .cn-card-footer { display: flex; align-items: center; gap: 8px; margin-top: auto; }
 
-.cn-install-btn {
-  display: flex; align-items: center; gap: 4px;
-  border: none; border-radius: 6px; background: #2383e2; color: #fff;
-  font-size: 12px; font-weight: 600; padding: 4px 10px;
-  cursor: pointer; transition: background 0.15s; font-family: inherit;
-}
-.cn-install-btn:hover:not(:disabled) { background: #1b6ec2; }
-.cn-install-btn:disabled { opacity: 0.7; cursor: default; }
-
 .cn-remove-btn {
   display: flex; align-items: center; gap: 4px;
   border: 1px solid #e8e7e4; border-radius: 6px; background: #fff;
@@ -7049,11 +7037,6 @@ select { cursor: pointer; }
 }
 .cn-remove-btn:hover:not(:disabled) { border-color: #dc2626; color: #dc2626; }
 .cn-remove-btn:disabled { opacity: 0.7; cursor: default; }
-
-.cn-installed-label {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 12px; color: #059669; font-weight: 500;
-}
 
 .cn-connect-stack {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
