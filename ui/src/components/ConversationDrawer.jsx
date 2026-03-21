@@ -790,6 +790,7 @@ export function ConversationDrawer({
                   runtimeServiceError={runtimeServiceError}
                   onStopRuntimeService={onStopRuntimeService}
                   testingConfig={testingConfig}
+                  onTestingConfigUpdated={setTestingConfig}
                 />
                 <div className="conv-execute-actions">
                   {approveError && <div className="error" style={{ padding: '0 0 4px' }}>Error: {approveError}</div>}

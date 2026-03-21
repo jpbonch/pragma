@@ -344,6 +344,10 @@ export const agentSubmitTestingConfigSchema = z.object({
   agent_id: nonEmptyString.optional(),
 }).strict();
 
+export const updateTestingConfigSchema = z.object({
+  config: testingConfigSchema,
+}).strict();
+
 export const testingProxyRequestSchema = z.object({
   process_name: nonEmptyString,
   method: nonEmptyString,

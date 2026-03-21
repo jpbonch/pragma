@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { startTaskTesting, stopTaskTesting, openRuntimeServiceStream } from '../api'
+import { startTaskTesting, stopTaskTesting, openRuntimeServiceStream, updateTaskTestingConfig } from '../api'
 import { ApiTesterPanel } from './testing/ApiTesterPanel'
 import { WebPreviewPanel } from './testing/WebPreviewPanel'
 import { TerminalPanel } from './testing/TerminalPanel'
@@ -19,7 +19,7 @@ function ProcessBadge({ name, status }) {
   )
 }
 
-export function TestingPane({ taskId, config }) {
+export function TestingPane({ taskId, config, onConfigUpdated }) {
   const [services, setServices] = useState({})
   const [started, setStarted] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -27,6 +27,10 @@ export function TestingPane({ taskId, config }) {
   const [showLogs, setShowLogs] = useState(false)
   const [processLogs, setProcessLogs] = useState({})
   const [processStatuses, setProcessStatuses] = useState({})
+  const [editing, setEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState('')
+  const [editError, setEditError] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
   const cleanupRef = useRef([])
 
   const panels = Array.isArray(config?.panels) ? config.panels : []
@@ -108,6 +112,38 @@ export function TestingPane({ taskId, config }) {
     return processStatuses[svc.id] || svc.status || 'running'
   }
 
+  function handleEditOpen() {
+    setEditDraft(JSON.stringify(config, null, 2))
+    setEditError('')
+    setEditing(true)
+  }
+
+  function handleEditCancel() {
+    setEditing(false)
+    setEditError('')
+  }
+
+  async function handleEditSave() {
+    setEditError('')
+    let parsed
+    try {
+      parsed = JSON.parse(editDraft)
+    } catch {
+      setEditError('Invalid JSON')
+      return
+    }
+    setEditSaving(true)
+    try {
+      await updateTaskTestingConfig(taskId, parsed)
+      setEditing(false)
+      if (onConfigUpdated) onConfigUpdated(parsed)
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   function renderPanel() {
     const panel = panels[activePanel]
     if (!panel) return null
@@ -151,7 +187,31 @@ export function TestingPane({ taskId, config }) {
             />
           ))}
         </div>
+        <button className="testing-edit-btn" onClick={handleEditOpen} disabled={editing} title="Edit testing config">
+          Edit Config
+        </button>
       </div>
+
+      {editing && (
+        <div className="testing-edit-overlay">
+          <div className="testing-edit-header">
+            <span>Edit Testing Config</span>
+            <div className="testing-edit-actions">
+              <button className="testing-edit-cancel" onClick={handleEditCancel} disabled={editSaving}>Cancel</button>
+              <button className="testing-edit-save" onClick={handleEditSave} disabled={editSaving}>
+                {editSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+          {editError && <div className="testing-edit-error">{editError}</div>}
+          <textarea
+            className="testing-edit-textarea"
+            value={editDraft}
+            onChange={e => setEditDraft(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+      )}
 
       {panels.length > 1 && (
         <div className="testing-panel-tabs">

@@ -3649,6 +3649,92 @@ select { cursor: pointer; }
   font-size: 11px;
 }
 
+.testing-edit-btn {
+  margin-left: auto;
+  border: 1px solid #d9d8d2;
+  background: #f7f7f5;
+  color: #37352f;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.testing-edit-btn:hover { background: #efeee9; }
+.testing-edit-btn:disabled { opacity: 0.5; cursor: default; }
+
+.testing-edit-overlay {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid #f0efec;
+  background: #fafaf8;
+  flex: 1;
+  min-height: 0;
+}
+
+.testing-edit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #37352f;
+  border-bottom: 1px solid #f0efec;
+}
+
+.testing-edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.testing-edit-cancel {
+  border: 1px solid #d9d8d2;
+  background: #fff;
+  color: #37352f;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.testing-edit-cancel:hover { background: #f7f7f5; }
+
+.testing-edit-save {
+  border: 1px solid #2383e2;
+  background: #2383e2;
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.testing-edit-save:hover { background: #1b6ec2; }
+.testing-edit-save:disabled { opacity: 0.6; cursor: default; }
+
+.testing-edit-error {
+  padding: 4px 12px;
+  color: #c53030;
+  font-size: 11px;
+}
+
+.testing-edit-textarea {
+  flex: 1;
+  min-height: 200px;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 8px 12px;
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #37352f;
+  background: #fafaf8;
+}
+
 /* ─── API Tester Panel ─────────────────────────────── */
 
 .api-tester {

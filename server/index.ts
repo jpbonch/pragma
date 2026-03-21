@@ -81,6 +81,7 @@ import { AutomationRegistry, rowToAutomation, automationToRow } from "./events/a
 import {
   agentSubmitTestCommandsSchema,
   agentSubmitTestingConfigSchema,
+  updateTestingConfigSchema,
   agentAskQuestionSchema,
   agentRequestHelpSchema,
   agentSelectRecipientSchema,
@@ -3043,6 +3044,32 @@ LIMIT 1
 
     return c.json({ config });
   });
+
+  app.put(
+    "/tasks/:taskId/testing-config",
+    validateJson(updateTestingConfigSchema),
+    async (c) => {
+      const taskId = c.req.param("taskId");
+      const body = c.req.valid("json");
+      const db = c.get("db");
+
+      const taskResult = await db.query<{ id: string; status: TaskStatus }>(
+        `SELECT id, status FROM tasks WHERE id = $1 LIMIT 1`,
+        [taskId],
+      );
+      const task = taskResult.rows[0];
+      if (!task) {
+        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+      }
+
+      await db.query(
+        `UPDATE tasks SET testing_config_json = $2 WHERE id = $1`,
+        [taskId, JSON.stringify(body.config)],
+      );
+
+      return c.json({ ok: true, config: body.config });
+    },
+  );
 
   app.post("/tasks/:taskId/testing/start", async (c) => {
     const workspaceName = c.get("workspace");

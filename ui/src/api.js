@@ -927,6 +927,14 @@ export async function fetchTaskTestingConfig(taskId) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing-config`)
 }
 
+export async function updateTaskTestingConfig(taskId, config) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing-config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config }),
+  })
+}
+
 export async function startTaskTesting(taskId) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/start`, {
     method: 'POST',
