@@ -77,7 +77,7 @@ import {
 import type { HarnessId, TaskStatus, ReasoningEffort } from "./conversation/types";
 import { EventBus, createEvent, EVENT_TYPES } from "./events";
 import type { PragmaEvent } from "./events";
-import { AutomationRegistry, rowToAutomation, automationToRow } from "./events/automations";
+import { AutomationRegistry, rowToAutomation, automationToRow, type AutomationRow } from "./events/automations";
 import {
   agentSubmitTestCommandsSchema,
   agentSubmitTestingConfigSchema,
@@ -6166,18 +6166,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
   app.get("/automations", async (c) => {
     const db = c.get("db");
-    const result = await db.query<{
-      id: string;
-      name: string;
-      trigger_event_type: string;
-      trigger_filter_json: string | null;
-      action_type: string;
-      action_config_json: string;
-      enabled: boolean;
-      created_at: string;
-      updated_at: string;
-    }>(
+    const result = await db.query<AutomationRow>(
       `SELECT id, name, trigger_event_type, trigger_filter_json,
+              trigger_type, schedule_cron, schedule_timezone, last_scheduled_at,
               action_type, action_config_json, enabled, created_at, updated_at
        FROM workspace_automations ORDER BY created_at DESC`,
     );
@@ -6188,10 +6179,13 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     const db = c.get("db");
     const body = c.req.valid("json");
     const id = `auto_${randomBytes(12).toString("hex")}`;
+    const triggerType = body.triggerType ?? "event";
     const { action_type, action_config_json } = automationToRow({
       id,
       name: body.name,
-      trigger: body.trigger,
+      triggerType,
+      trigger: body.trigger ?? { eventType: "schedule" },
+      schedule: body.schedule ? { cron: body.schedule.cron, timezone: body.schedule.timezone ?? "UTC" } : undefined,
       action: body.action,
       enabled: body.enabled ?? true,
       createdAt: "",
@@ -6199,13 +6193,18 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     });
 
     await db.query(
-      `INSERT INTO workspace_automations (id, name, trigger_event_type, trigger_filter_json, action_type, action_config_json, enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO workspace_automations
+        (id, name, trigger_type, trigger_event_type, trigger_filter_json,
+         schedule_cron, schedule_timezone, action_type, action_config_json, enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         id,
         body.name,
-        body.trigger.eventType,
-        body.trigger.filter ? JSON.stringify(body.trigger.filter) : null,
+        triggerType,
+        body.trigger?.eventType ?? "schedule",
+        body.trigger?.filter ? JSON.stringify(body.trigger.filter) : null,
+        body.schedule?.cron ?? null,
+        body.schedule?.timezone ?? "UTC",
         action_type,
         action_config_json,
         body.enabled ?? true,
@@ -6213,17 +6212,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     );
 
     // Fetch the created row to get timestamps
-    const created = await db.query<{
-      id: string;
-      name: string;
-      trigger_event_type: string;
-      trigger_filter_json: string | null;
-      action_type: string;
-      action_config_json: string;
-      enabled: boolean;
-      created_at: string;
-      updated_at: string;
-    }>(`SELECT * FROM workspace_automations WHERE id = $1`, [id]);
+    const created = await db.query<AutomationRow>(
+      `SELECT * FROM workspace_automations WHERE id = $1`, [id],
+    );
     const automation = rowToAutomation(created.rows[0]);
 
     automationRegistry.setDatabase(db);
@@ -6253,11 +6244,23 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
       updates.push(`name = $${paramIndex++}`);
       params.push(body.name);
     }
+    if (body.triggerType !== undefined) {
+      updates.push(`trigger_type = $${paramIndex++}`);
+      params.push(body.triggerType);
+    }
     if (body.trigger !== undefined) {
       updates.push(`trigger_event_type = $${paramIndex++}`);
       params.push(body.trigger.eventType);
       updates.push(`trigger_filter_json = $${paramIndex++}`);
       params.push(body.trigger.filter ? JSON.stringify(body.trigger.filter) : null);
+    }
+    if (body.schedule !== undefined) {
+      updates.push(`schedule_cron = $${paramIndex++}`);
+      params.push(body.schedule.cron);
+      updates.push(`schedule_timezone = $${paramIndex++}`);
+      params.push(body.schedule.timezone ?? "UTC");
+      // Reset last_scheduled_at when schedule changes
+      updates.push(`last_scheduled_at = NULL`);
     }
     if (body.action !== undefined) {
       const { type, ...config } = body.action;
@@ -6280,17 +6283,9 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     );
 
     // Fetch updated row
-    const updated = await db.query<{
-      id: string;
-      name: string;
-      trigger_event_type: string;
-      trigger_filter_json: string | null;
-      action_type: string;
-      action_config_json: string;
-      enabled: boolean;
-      created_at: string;
-      updated_at: string;
-    }>(`SELECT * FROM workspace_automations WHERE id = $1`, [automationId]);
+    const updated = await db.query<AutomationRow>(
+      `SELECT * FROM workspace_automations WHERE id = $1`, [automationId],
+    );
     const automation = rowToAutomation(updated.rows[0]);
 
     // Re-register with updated config

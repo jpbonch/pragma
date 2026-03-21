@@ -1053,6 +1053,24 @@ CREATE TABLE IF NOT EXISTS workspace_automations (
 );
 `);
 
+  // Add schedule columns to workspace_automations
+  await db.exec(`
+ALTER TABLE workspace_automations
+ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(16) NOT NULL DEFAULT 'event'
+`);
+  await db.exec(`
+ALTER TABLE workspace_automations
+ADD COLUMN IF NOT EXISTS schedule_cron VARCHAR(128)
+`);
+  await db.exec(`
+ALTER TABLE workspace_automations
+ADD COLUMN IF NOT EXISTS schedule_timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'
+`);
+  await db.exec(`
+ALTER TABLE workspace_automations
+ADD COLUMN IF NOT EXISTS last_scheduled_at TIMESTAMPTZ
+`);
+
   await db.exec(`
 CREATE TABLE IF NOT EXISTS automation_runs (
   id VARCHAR(64) PRIMARY KEY,

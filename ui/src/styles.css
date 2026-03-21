@@ -8138,3 +8138,61 @@ select { cursor: pointer; }
   font-size: 11px;
   color: #9B9A97;
 }
+
+/* Trigger type selector */
+.aut-trigger-type-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.aut-trigger-type-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #E0DFDB;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: #9B9A97;
+  padding: 7px 16px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex: 1;
+  justify-content: center;
+}
+
+.aut-trigger-type-btn:hover {
+  border-color: #C4C3BF;
+  color: #37352F;
+}
+
+.aut-trigger-type-btn.active {
+  border-color: #2383e2;
+  background: #F0F7FF;
+  color: #2383e2;
+  font-weight: 600;
+}
+
+/* Schedule trigger badge in card */
+.aut-card-trigger-schedule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #F0F7FF;
+  color: #2383e2;
+}
+
+/* Cron hint text */
+.aut-cron-hint {
+  font-size: 11px;
+  color: #9B9A97;
+  margin-top: 2px;
+}
+
+.aut-cron-input {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+}

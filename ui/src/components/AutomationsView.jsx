@@ -8,6 +8,8 @@ import {
   Clock,
   Activity,
   X,
+  Timer,
+  Zap,
 } from 'lucide-react'
 import {
   fetchAutomations,
@@ -36,13 +38,36 @@ const ACTION_TYPES = [
   { value: 'log', label: 'Log' },
 ]
 
+const SCHEDULE_PRESETS = [
+  { label: 'Every minute', cron: '* * * * *' },
+  { label: 'Every 5 minutes', cron: '*/5 * * * *' },
+  { label: 'Every 15 minutes', cron: '*/15 * * * *' },
+  { label: 'Every 30 minutes', cron: '*/30 * * * *' },
+  { label: 'Every hour', cron: '0 * * * *' },
+  { label: 'Every 6 hours', cron: '0 */6 * * *' },
+  { label: 'Every day at midnight', cron: '0 0 * * *' },
+  { label: 'Every day at 9am', cron: '0 9 * * *' },
+  { label: 'Every Monday at 9am', cron: '0 9 * * 1' },
+  { label: 'Custom', cron: '' },
+]
+
 const EMPTY_FORM = {
   name: '',
+  trigger_type: 'event',
   trigger_event: '',
   trigger_filter: '',
+  schedule_cron: '',
+  schedule_timezone: 'UTC',
   action_type: 'webhook',
   action_config: {},
   enabled: true,
+}
+
+function describeCron(cron) {
+  if (!cron) return ''
+  const preset = SCHEDULE_PRESETS.find((p) => p.cron === cron)
+  if (preset && preset.label !== 'Custom') return preset.label
+  return cron
 }
 
 function timeAgo(value) {
@@ -136,6 +161,61 @@ function ActionConfigForm({ actionType, config, onChange }) {
   }
 
   return null
+}
+
+function ScheduleConfigForm({ cron, timezone, onCronChange, onTimezoneChange }) {
+  const isPreset = SCHEDULE_PRESETS.some((p) => p.cron === cron && p.label !== 'Custom')
+  const [selectedPreset, setSelectedPreset] = useState(
+    isPreset ? cron : (cron ? '' : SCHEDULE_PRESETS[0].cron)
+  )
+
+  function handlePresetChange(e) {
+    const val = e.target.value
+    setSelectedPreset(val)
+    if (val !== '') {
+      onCronChange(val)
+    }
+  }
+
+  const showCustomInput = selectedPreset === '' || (!isPreset && cron)
+
+  return (
+    <div className="aut-action-fields">
+      <label className="aut-field-label">Schedule</label>
+      <select
+        className="aut-select"
+        value={isPreset ? cron : ''}
+        onChange={handlePresetChange}
+      >
+        {SCHEDULE_PRESETS.map((p) => (
+          <option key={p.label} value={p.cron}>{p.label}</option>
+        ))}
+      </select>
+
+      {showCustomInput && (
+        <>
+          <label className="aut-field-label">Cron expression</label>
+          <input
+            className="aut-input aut-cron-input"
+            placeholder="* * * * *  (min hour dom mon dow)"
+            value={cron}
+            onChange={(e) => onCronChange(e.target.value)}
+          />
+          <span className="aut-cron-hint">
+            Format: minute hour day-of-month month day-of-week
+          </span>
+        </>
+      )}
+
+      <label className="aut-field-label">Timezone</label>
+      <input
+        className="aut-input"
+        placeholder="UTC"
+        value={timezone || 'UTC'}
+        onChange={(e) => onTimezoneChange(e.target.value)}
+      />
+    </div>
+  )
 }
 
 function RunHistory({ automationId }) {
@@ -287,12 +367,19 @@ export function AutomationsView() {
   function handleEdit(automation) {
     setForm({
       name: automation.name || '',
-      trigger_event: automation.trigger_event || '',
-      trigger_filter: typeof automation.trigger_filter === 'string'
-        ? automation.trigger_filter
-        : automation.trigger_filter ? JSON.stringify(automation.trigger_filter) : '',
-      action_type: automation.action_type || 'webhook',
-      action_config: automation.action_config || {},
+      trigger_type: automation.triggerType || 'event',
+      trigger_event: automation.trigger?.eventType || automation.trigger_event || '',
+      trigger_filter: typeof automation.trigger?.filter === 'string'
+        ? automation.trigger.filter
+        : automation.trigger?.filter ? JSON.stringify(automation.trigger.filter) : '',
+      schedule_cron: automation.schedule?.cron || '',
+      schedule_timezone: automation.schedule?.timezone || 'UTC',
+      action_type: automation.action?.type || automation.action_type || 'webhook',
+      action_config: (() => {
+        const action = automation.action || {}
+        const { type, ...rest } = action
+        return rest
+      })(),
       enabled: automation.enabled !== false,
     })
     setSaveError('')
@@ -306,7 +393,8 @@ export function AutomationsView() {
 
   async function handleSave() {
     if (!form.name.trim()) { setSaveError('Name is required.'); return }
-    if (!form.trigger_event) { setSaveError('Trigger event is required.'); return }
+    if (form.trigger_type === 'event' && !form.trigger_event) { setSaveError('Trigger event is required.'); return }
+    if (form.trigger_type === 'schedule' && !form.schedule_cron.trim()) { setSaveError('Cron expression is required for scheduled automations.'); return }
     if (!form.action_type) { setSaveError('Action type is required.'); return }
 
     setSaveLoading(true)
@@ -314,17 +402,27 @@ export function AutomationsView() {
 
     const payload = {
       name: form.name.trim(),
-      trigger_event: form.trigger_event,
-      action_type: form.action_type,
-      action_config: form.action_config,
+      triggerType: form.trigger_type,
+      action: {
+        type: form.action_type,
+        ...form.action_config,
+      },
       enabled: form.enabled,
     }
 
-    if (form.trigger_filter.trim()) {
-      try {
-        payload.trigger_filter = JSON.parse(form.trigger_filter)
-      } catch {
-        payload.trigger_filter = form.trigger_filter.trim()
+    if (form.trigger_type === 'event') {
+      payload.trigger = { eventType: form.trigger_event }
+      if (form.trigger_filter.trim()) {
+        try {
+          payload.trigger.filter = JSON.parse(form.trigger_filter)
+        } catch {
+          payload.trigger.filter = form.trigger_filter.trim()
+        }
+      }
+    } else {
+      payload.schedule = {
+        cron: form.schedule_cron.trim(),
+        timezone: form.schedule_timezone || 'UTC',
       }
     }
 
@@ -389,26 +487,59 @@ export function AutomationsView() {
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
 
-            <label className="aut-field-label">Trigger event</label>
-            <select
-              className="aut-select"
-              value={form.trigger_event}
-              onChange={(e) => setForm({ ...form, trigger_event: e.target.value })}
-            >
-              <option value="">Select event...</option>
-              {TRIGGER_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
+            <label className="aut-field-label">Trigger type</label>
+            <div className="aut-trigger-type-row">
+              <button
+                type="button"
+                className={`aut-trigger-type-btn ${form.trigger_type === 'event' ? 'active' : ''}`}
+                onClick={() => setForm({ ...form, trigger_type: 'event' })}
+              >
+                <Zap size={14} />
+                Event
+              </button>
+              <button
+                type="button"
+                className={`aut-trigger-type-btn ${form.trigger_type === 'schedule' ? 'active' : ''}`}
+                onClick={() => setForm({ ...form, trigger_type: 'schedule' })}
+              >
+                <Timer size={14} />
+                Schedule
+              </button>
+            </div>
 
-            <label className="aut-field-label">Trigger filter (optional JSON)</label>
-            <textarea
-              className="aut-textarea"
-              placeholder='{"status": "completed"}'
-              value={form.trigger_filter}
-              rows={2}
-              onChange={(e) => setForm({ ...form, trigger_filter: e.target.value })}
-            />
+            {form.trigger_type === 'event' && (
+              <>
+                <label className="aut-field-label">Trigger event</label>
+                <select
+                  className="aut-select"
+                  value={form.trigger_event}
+                  onChange={(e) => setForm({ ...form, trigger_event: e.target.value })}
+                >
+                  <option value="">Select event...</option>
+                  {TRIGGER_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+
+                <label className="aut-field-label">Trigger filter (optional JSON)</label>
+                <textarea
+                  className="aut-textarea"
+                  placeholder='{"status": "completed"}'
+                  value={form.trigger_filter}
+                  rows={2}
+                  onChange={(e) => setForm({ ...form, trigger_filter: e.target.value })}
+                />
+              </>
+            )}
+
+            {form.trigger_type === 'schedule' && (
+              <ScheduleConfigForm
+                cron={form.schedule_cron}
+                timezone={form.schedule_timezone}
+                onCronChange={(cron) => setForm({ ...form, schedule_cron: cron })}
+                onTimezoneChange={(tz) => setForm({ ...form, schedule_timezone: tz })}
+              />
+            )}
 
             <label className="aut-field-label">Action type</label>
             <select
@@ -494,87 +625,101 @@ export function AutomationsView() {
                 <p>No automations yet.</p>
                 <p className="aut-empty-hint">
                   Automations let you trigger actions (webhooks, task creation, logging)
-                  when events occur in your workspace.
+                  when events occur or on a timed schedule.
                 </p>
               </div>
             )}
 
             {!loading && !error && automations.length > 0 && (
               <div className="aut-list">
-                {automations.map((automation) => (
-                  <div key={automation.id} className="aut-card">
-                    <div className="aut-card-main" onClick={() => handleEdit(automation)}>
-                      <div className="aut-card-left">
-                        <div className="aut-card-name">{automation.name}</div>
-                        <div className="aut-card-meta">
-                          <span className="aut-card-trigger">{automation.trigger_event}</span>
-                          <span className="aut-card-arrow">&rarr;</span>
-                          <span className="aut-card-action">{automation.action_type}</span>
+                {automations.map((automation) => {
+                  const isSchedule = automation.triggerType === 'schedule'
+                  return (
+                    <div key={automation.id} className="aut-card">
+                      <div className="aut-card-main" onClick={() => handleEdit(automation)}>
+                        <div className="aut-card-left">
+                          <div className="aut-card-name">{automation.name}</div>
+                          <div className="aut-card-meta">
+                            {isSchedule ? (
+                              <span className="aut-card-trigger aut-card-trigger-schedule">
+                                <Timer size={10} />
+                                {describeCron(automation.schedule?.cron)}
+                              </span>
+                            ) : (
+                              <span className="aut-card-trigger">
+                                {automation.trigger?.eventType || automation.trigger_event}
+                              </span>
+                            )}
+                            <span className="aut-card-arrow">&rarr;</span>
+                            <span className="aut-card-action">
+                              {automation.action?.type || automation.action_type}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="aut-card-right">
+                          {automation.last_run_status && (
+                            <span className={`aut-card-status ${automation.last_run_status === 'success' ? 'success' : 'error'}`}>
+                              {automation.last_run_status === 'success' ? (
+                                <CheckCircle2 size={12} />
+                              ) : (
+                                <AlertCircle size={12} />
+                              )}
+                            </span>
+                          )}
+                          {typeof automation.run_count === 'number' && (
+                            <span className="aut-card-count">{automation.run_count} runs</span>
+                          )}
+                          <button
+                            className={`aut-toggle ${automation.enabled ? 'on' : ''}`}
+                            onClick={(e) => { e.stopPropagation(); handleToggleEnabled(automation) }}
+                            title={automation.enabled ? 'Disable' : 'Enable'}
+                          >
+                            <span className="aut-toggle-knob" />
+                          </button>
+                          {deleteConfirm === automation.id ? (
+                            <div className="aut-delete-confirm" onClick={(e) => e.stopPropagation()}>
+                              <span className="aut-delete-confirm-text">Delete?</span>
+                              <button
+                                className="aut-delete-yes"
+                                onClick={() => handleDelete(automation.id)}
+                              >
+                                Yes
+                              </button>
+                              <button
+                                className="aut-delete-no"
+                                onClick={() => setDeleteConfirm('')}
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              className="aut-delete-btn"
+                              onClick={(e) => { e.stopPropagation(); setDeleteConfirm(automation.id) }}
+                              title="Delete"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <div className="aut-card-right">
-                        {automation.last_run_status && (
-                          <span className={`aut-card-status ${automation.last_run_status === 'success' ? 'success' : 'error'}`}>
-                            {automation.last_run_status === 'success' ? (
-                              <CheckCircle2 size={12} />
-                            ) : (
-                              <AlertCircle size={12} />
-                            )}
-                          </span>
-                        )}
-                        {typeof automation.run_count === 'number' && (
-                          <span className="aut-card-count">{automation.run_count} runs</span>
-                        )}
+
+                      <div className="aut-card-expand">
                         <button
-                          className={`aut-toggle ${automation.enabled ? 'on' : ''}`}
-                          onClick={(e) => { e.stopPropagation(); handleToggleEnabled(automation) }}
-                          title={automation.enabled ? 'Disable' : 'Enable'}
+                          className="aut-runs-toggle"
+                          onClick={() => setExpandedRunsId(expandedRunsId === automation.id ? '' : automation.id)}
                         >
-                          <span className="aut-toggle-knob" />
+                          <Activity size={12} />
+                          {expandedRunsId === automation.id ? 'Hide runs' : 'Show runs'}
                         </button>
-                        {deleteConfirm === automation.id ? (
-                          <div className="aut-delete-confirm" onClick={(e) => e.stopPropagation()}>
-                            <span className="aut-delete-confirm-text">Delete?</span>
-                            <button
-                              className="aut-delete-yes"
-                              onClick={() => handleDelete(automation.id)}
-                            >
-                              Yes
-                            </button>
-                            <button
-                              className="aut-delete-no"
-                              onClick={() => setDeleteConfirm('')}
-                            >
-                              No
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            className="aut-delete-btn"
-                            onClick={(e) => { e.stopPropagation(); setDeleteConfirm(automation.id) }}
-                            title="Delete"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
                       </div>
-                    </div>
 
-                    <div className="aut-card-expand">
-                      <button
-                        className="aut-runs-toggle"
-                        onClick={() => setExpandedRunsId(expandedRunsId === automation.id ? '' : automation.id)}
-                      >
-                        <Activity size={12} />
-                        {expandedRunsId === automation.id ? 'Hide runs' : 'Show runs'}
-                      </button>
+                      {expandedRunsId === automation.id && (
+                        <RunHistory automationId={automation.id} />
+                      )}
                     </div>
-
-                    {expandedRunsId === automation.id && (
-                      <RunHistory automationId={automation.id} />
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </>

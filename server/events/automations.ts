@@ -1,15 +1,19 @@
 import { randomBytes } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import type { EventBus, PragmaEvent } from "./event-bus";
+import { createEvent } from "./event-bus";
 
 export interface Automation {
   id: string;
   name: string;
+  triggerType: "event" | "schedule";
   trigger: { eventType: string; filter?: Record<string, any> };
+  schedule?: { cron: string; timezone: string };
   action: AutomationAction;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  lastScheduledAt?: string;
 }
 
 export type AutomationAction =
@@ -108,11 +112,60 @@ async function recordRun(
   );
 }
 
+// ---- Lightweight cron matching ----
+
+function matchesCronField(field: string, value: number): boolean {
+  if (field === "*") return true;
+
+  for (const part of field.split(",")) {
+    // Handle step values: */5 or 1-10/2
+    if (part.includes("/")) {
+      const [range, stepStr] = part.split("/");
+      const step = parseInt(stepStr, 10);
+      if (isNaN(step) || step <= 0) continue;
+      if (range === "*") {
+        if (value % step === 0) return true;
+      } else if (range.includes("-")) {
+        const [lo, hi] = range.split("-").map(Number);
+        if (value >= lo && value <= hi && (value - lo) % step === 0) return true;
+      }
+      continue;
+    }
+
+    // Handle ranges: 1-5
+    if (part.includes("-")) {
+      const [lo, hi] = part.split("-").map(Number);
+      if (value >= lo && value <= hi) return true;
+      continue;
+    }
+
+    // Exact value
+    if (parseInt(part, 10) === value) return true;
+  }
+
+  return false;
+}
+
+export function cronMatchesNow(cron: string, now: Date): boolean {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length < 5) return false;
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  return (
+    matchesCronField(minute, now.getMinutes()) &&
+    matchesCronField(hour, now.getHours()) &&
+    matchesCronField(dayOfMonth, now.getDate()) &&
+    matchesCronField(month, now.getMonth() + 1) &&
+    matchesCronField(dayOfWeek, now.getDay())
+  );
+}
+
 export class AutomationRegistry {
   private eventBus: EventBus;
   private subscriptions = new Map<string, () => void>();
   private automations = new Map<string, Automation>();
   private db: PGlite | null = null;
+  private scheduleTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(eventBus: EventBus) {
     this.eventBus = eventBus;
@@ -129,6 +182,10 @@ export class AutomationRegistry {
       name: string;
       trigger_event_type: string;
       trigger_filter_json: string | null;
+      trigger_type: string;
+      schedule_cron: string | null;
+      schedule_timezone: string;
+      last_scheduled_at: string | null;
       action_type: string;
       action_config_json: string;
       enabled: boolean;
@@ -136,6 +193,7 @@ export class AutomationRegistry {
       updated_at: string;
     }>(
       `SELECT id, name, trigger_event_type, trigger_filter_json,
+              trigger_type, schedule_cron, schedule_timezone, last_scheduled_at,
               action_type, action_config_json, enabled, created_at, updated_at
        FROM workspace_automations WHERE enabled = true`,
     );
@@ -144,6 +202,8 @@ export class AutomationRegistry {
       const automation = rowToAutomation(row);
       this.register(automation);
     }
+
+    this.startScheduleRunner();
   }
 
   register(automation: Automation): void {
@@ -156,26 +216,30 @@ export class AutomationRegistry {
 
     if (!automation.enabled) return;
 
-    const unsubscribe = this.eventBus.on(automation.trigger.eventType, (event) => {
-      if (!matchesFilter(automation.trigger.filter, event.payload)) return;
-      if (!this.db) return;
-      const db = this.db;
-      void (async () => {
-        try {
-          const { status, result } = await executeAction(automation, event, db);
-          await recordRun(db, automation.id, event.id, status, result);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
+    // Only register event listener for event-based automations
+    if (automation.triggerType === "event") {
+      const unsubscribe = this.eventBus.on(automation.trigger.eventType, (event) => {
+        if (!matchesFilter(automation.trigger.filter, event.payload)) return;
+        if (!this.db) return;
+        const db = this.db;
+        void (async () => {
           try {
-            await recordRun(db, automation.id, event.id, "error", { error: message });
-          } catch {
-            // recording failure silenced
+            const { status, result } = await executeAction(automation, event, db);
+            await recordRun(db, automation.id, event.id, status, result);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            try {
+              await recordRun(db, automation.id, event.id, "error", { error: message });
+            } catch {
+              // recording failure silenced
+            }
           }
-        }
-      })();
-    });
+        })();
+      });
 
-    this.subscriptions.set(automation.id, unsubscribe);
+      this.subscriptions.set(automation.id, unsubscribe);
+    }
+    // Schedule-based automations are handled by the schedule runner
   }
 
   unregister(automationId: string): void {
@@ -192,21 +256,109 @@ export class AutomationRegistry {
     for (const id of [...this.subscriptions.keys()]) {
       this.unregister(id);
     }
+    // Also clear automations that don't have subscriptions (schedules)
+    this.automations.clear();
     await this.loadFromDatabase(db);
+  }
+
+  stopScheduleRunner(): void {
+    if (this.scheduleTimer) {
+      clearInterval(this.scheduleTimer);
+      this.scheduleTimer = null;
+    }
+  }
+
+  startScheduleRunner(): void {
+    this.stopScheduleRunner();
+    // Check every 60 seconds for scheduled automations
+    this.scheduleTimer = setInterval(() => {
+      void this.runScheduledAutomations();
+    }, 60_000);
+  }
+
+  private async runScheduledAutomations(): Promise<void> {
+    const db = this.db;
+    if (!db) return;
+
+    const now = new Date();
+
+    for (const automation of this.automations.values()) {
+      if (automation.triggerType !== "schedule") continue;
+      if (!automation.enabled) continue;
+      if (!automation.schedule?.cron) continue;
+
+      if (!cronMatchesNow(automation.schedule.cron, now)) continue;
+
+      // Prevent double-execution within the same minute
+      if (automation.lastScheduledAt) {
+        const lastRun = new Date(automation.lastScheduledAt);
+        if (
+          lastRun.getFullYear() === now.getFullYear() &&
+          lastRun.getMonth() === now.getMonth() &&
+          lastRun.getDate() === now.getDate() &&
+          lastRun.getHours() === now.getHours() &&
+          lastRun.getMinutes() === now.getMinutes()
+        ) {
+          continue;
+        }
+      }
+
+      // Create a synthetic event for the scheduled run
+      const syntheticEvent = createEvent({
+        type: "automation.scheduled",
+        payload: {
+          automationId: automation.id,
+          automationName: automation.name,
+          cron: automation.schedule.cron,
+          scheduledAt: now.toISOString(),
+        },
+        source: "scheduler",
+      });
+
+      // Update last_scheduled_at
+      automation.lastScheduledAt = now.toISOString();
+      try {
+        await db.query(
+          `UPDATE workspace_automations SET last_scheduled_at = $1 WHERE id = $2`,
+          [now.toISOString(), automation.id],
+        );
+      } catch {
+        // silenced
+      }
+
+      // Execute the action
+      try {
+        const { status, result } = await executeAction(automation, syntheticEvent, db);
+        await recordRun(db, automation.id, syntheticEvent.id, status, result);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          await recordRun(db, automation.id, syntheticEvent.id, "error", { error: message });
+        } catch {
+          // recording failure silenced
+        }
+      }
+    }
   }
 }
 
-export function rowToAutomation(row: {
+export type AutomationRow = {
   id: string;
   name: string;
   trigger_event_type: string;
   trigger_filter_json: string | null;
+  trigger_type: string;
+  schedule_cron: string | null;
+  schedule_timezone: string;
+  last_scheduled_at: string | null;
   action_type: string;
   action_config_json: string;
   enabled: boolean;
   created_at: string;
   updated_at: string;
-}): Automation {
+};
+
+export function rowToAutomation(row: AutomationRow): Automation {
   const config = JSON.parse(row.action_config_json);
   let action: AutomationAction;
 
@@ -224,17 +376,24 @@ export function rowToAutomation(row: {
       action = { type: "log", message: `Unknown action type: ${row.action_type}` };
   }
 
+  const triggerType = (row.trigger_type === "schedule" ? "schedule" : "event") as "event" | "schedule";
+
   return {
     id: row.id,
     name: row.name,
+    triggerType,
     trigger: {
       eventType: row.trigger_event_type,
       filter: row.trigger_filter_json ? JSON.parse(row.trigger_filter_json) : undefined,
     },
+    schedule: triggerType === "schedule" && row.schedule_cron
+      ? { cron: row.schedule_cron, timezone: row.schedule_timezone || "UTC" }
+      : undefined,
     action,
     enabled: row.enabled,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    lastScheduledAt: row.last_scheduled_at ?? undefined,
   };
 }
 

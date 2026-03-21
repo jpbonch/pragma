@@ -483,10 +483,19 @@ export const updateProcessSchema = z
 
 const automationActionTypeSchema = z.enum(["webhook", "create_task", "log"]);
 
+const automationTriggerTypeSchema = z.enum(["event", "schedule"]);
+
 const automationTriggerSchema = z
   .object({
     eventType: nonEmptyString,
     filter: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+const automationScheduleSchema = z
+  .object({
+    cron: nonEmptyString,
+    timezone: z.string().trim().optional(),
   })
   .strict();
 
@@ -523,16 +532,29 @@ const automationActionSchema = z.discriminatedUnion("type", [
 export const createAutomationSchema = z
   .object({
     name: nonEmptyString,
-    trigger: automationTriggerSchema,
+    triggerType: automationTriggerTypeSchema.optional(),
+    trigger: automationTriggerSchema.optional(),
+    schedule: automationScheduleSchema.optional(),
     action: automationActionSchema,
     enabled: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (data) => {
+      if (data.triggerType === "schedule") {
+        return !!data.schedule?.cron;
+      }
+      return !!data.trigger?.eventType;
+    },
+    { message: "Event automations require a trigger; schedule automations require a schedule with a cron expression." },
+  );
 
 export const updateAutomationSchema = z
   .object({
     name: nonEmptyString.optional(),
+    triggerType: automationTriggerTypeSchema.optional(),
     trigger: automationTriggerSchema.optional(),
+    schedule: automationScheduleSchema.optional(),
     action: automationActionSchema.optional(),
     enabled: z.boolean().optional(),
   })
