@@ -8,6 +8,7 @@ import { getConnectorBinDir } from "../connectorBinaries";
 import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "../connectorRegistry";
 import { getConversationAdapter } from "./adapters";
 import {
+  buildRepoDiffEntries,
   checkpointTaskRepos,
   deleteTaskWorktree,
   getTaskMainOutputDir,
@@ -46,6 +47,7 @@ type EnqueueExecuteInput = {
   skipOrchestratorSelection?: boolean;
   resumeWorkerSessionId?: string | null;
   followUpMessage?: string | null;
+  isTestingConfigRetry?: boolean;
 };
 
 type AgentRow = {
@@ -761,6 +763,46 @@ LIMIT 1
       // Auto-merge: the user already approved, agent just resolved conflicts
       await autoMergeAfterConflictResolution(db, input, paths, gitState, workerResult.sessionId, notifyTaskStatus, options);
     } else if (!isWaitingForHumanResponseStatus(currentStatus)) {
+      // --- Testing config gate ---
+      if (!input.isTestingConfigRetry) {
+        const repoDiffs = await buildRepoDiffEntries({
+          workspacePaths: paths,
+          taskId: input.taskId,
+          gitState,
+        });
+        const hasCodeChanges = repoDiffs.some((d) => d.has_changes);
+
+        if (hasCodeChanges) {
+          const tcResult = await db.query<{ testing_config_json: string | null }>(
+            `SELECT testing_config_json FROM tasks WHERE id = $1 LIMIT 1`,
+            [input.taskId],
+          );
+          const hasTestingConfig = !!tcResult.rows[0]?.testing_config_json;
+
+          if (!hasTestingConfig) {
+            await reopenThread(db, input.threadId);
+            await runExecuteTask(
+              {
+                workspaceName: input.workspaceName,
+                taskId: input.taskId,
+                threadId: input.threadId,
+                prompt: input.prompt,
+                reasoningEffort: input.reasoningEffort,
+                resumeWorkerSessionId: workerResult.sessionId,
+                followUpMessage:
+                  "You made code changes but did not submit a testing config. Submit a testing config now using the `submit-testing-config` CLI command so the reviewer can validate your changes. Do not make any code changes — only submit the testing config, then finish.",
+                skipOrchestratorSelection: true,
+                requestedRecipientAgentId: selectedWorker.id,
+                isTestingConfigRetry: true,
+              },
+              options,
+            );
+            return;
+          }
+        }
+      }
+      // --- END: Testing config gate ---
+
       await db.query(
         `
 UPDATE tasks
