@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
 import { PlanProposalPanel } from './PlanProposalPanel'
-import { fetchTaskPlan, fetchTaskTestCommands, fetchTaskTestingConfig, runTaskTestCommand, updateTaskTestCommands } from '../api'
+import { fetchTaskPlan, fetchTaskTestingConfig } from '../api'
 import { useSplitPane } from '../hooks/useSplitPane'
 
 const HEADER_STATUS_LABELS = {
@@ -116,10 +116,6 @@ export function ConversationDrawer({
   const fileInputRef = useRef(null)
   const [approveLoading, setApproveLoading] = useState(false)
   const [approveError, setApproveError] = useState('')
-  const [testCommands, setTestCommands] = useState([])
-  const [testCommandsLoading, setTestCommandsLoading] = useState(false)
-  const [testCommandsError, setTestCommandsError] = useState('')
-  const [runningTestCommand, setRunningTestCommand] = useState('')
   const [planData, setPlanData] = useState(null)
   const [planLoading, setPlanLoading] = useState(false)
   const [planError, setPlanError] = useState('')
@@ -179,10 +175,6 @@ export function ConversationDrawer({
       setPrompt('')
       setApproveLoading(false)
       setApproveError('')
-      setTestCommands([])
-      setTestCommandsLoading(false)
-      setTestCommandsError('')
-      setRunningTestCommand('')
       setPlanData(null)
       setPlanLoading(false)
       setPlanError('')
@@ -205,40 +197,6 @@ export function ConversationDrawer({
         if (!cancelled) setTestingConfig(null)
       })
     return () => { cancelled = true }
-  }, [open, taskId, showOutputPanel, entries.length, taskStatus])
-
-  useEffect(() => {
-    if (!open || !taskId || !showOutputPanel) {
-      return
-    }
-
-    let cancelled = false
-    setTestCommandsLoading(true)
-    setTestCommandsError('')
-    void fetchTaskTestCommands(taskId)
-      .then((data) => {
-        if (cancelled) {
-          return
-        }
-        const list = Array.isArray(data?.commands) ? data.commands : []
-        setTestCommands(list)
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return
-        }
-        setTestCommands([])
-        setTestCommandsError(error instanceof Error ? error.message : String(error))
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setTestCommandsLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
   }, [open, taskId, showOutputPanel, entries.length, taskStatus])
 
   useEffect(() => {
@@ -349,72 +307,6 @@ export function ConversationDrawer({
     } catch {
       setDeleteLoading(false)
       setDeleteConfirming(false)
-    }
-  }
-
-  async function handleRunTestCommand(item) {
-    const command = typeof item?.command === 'string' ? item.command : ''
-    const cwd = typeof item?.cwd === 'string' ? item.cwd : ''
-    const runKey = `${cwd}\n${command}`
-    if (!taskId || !command || !cwd || runningTestCommand) {
-      return
-    }
-    setRunningTestCommand(runKey)
-    setTestCommandsError('')
-    try {
-      const result = await runTaskTestCommand(taskId, command, cwd)
-      const service = result?.service && typeof result.service === 'object' ? result.service : null
-      if (service) {
-        onServiceStarted?.(service)
-      }
-    } catch (error) {
-      setTestCommandsError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setRunningTestCommand('')
-    }
-  }
-
-  async function handleUpdateTestCommand(index, nextCommand) {
-    if (!taskId || !Number.isInteger(index) || index < 0) {
-      return
-    }
-    const trimmed = typeof nextCommand === 'string' ? nextCommand.trim() : ''
-    if (!trimmed) {
-      return
-    }
-
-    const existing = Array.isArray(testCommands) ? testCommands[index] : null
-    if (!existing || typeof existing !== 'object') {
-      return
-    }
-    const currentCommand = typeof existing.command === 'string' ? existing.command : ''
-    if (currentCommand === trimmed) {
-      return
-    }
-
-    const nextCommands = testCommands
-      .map((item, itemIndex) => {
-        const command =
-          itemIndex === index
-            ? trimmed
-            : (typeof item?.command === 'string' ? item.command.trim() : '')
-        const cwd = typeof item?.cwd === 'string' ? item.cwd.trim() : ''
-        const label = typeof item?.label === 'string' ? item.label.trim() : command
-        return { label, command, cwd }
-      })
-      .filter((item) => item.command && item.cwd)
-
-    if (nextCommands.length === 0) {
-      return
-    }
-
-    setTestCommandsError('')
-    try {
-      const data = await updateTaskTestCommands(taskId, nextCommands)
-      const updated = Array.isArray(data?.commands) ? data.commands : nextCommands
-      setTestCommands(updated)
-    } catch (error) {
-      setTestCommandsError(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -774,12 +666,6 @@ export function ConversationDrawer({
                 <OutputPanel
                   taskId={taskId}
                   taskStatus={taskStatus}
-                  testCommands={testCommands}
-                  testCommandsLoading={testCommandsLoading}
-                  testCommandsError={testCommandsError}
-                  runningTestCommand={runningTestCommand}
-                  onRunTestCommand={handleRunTestCommand}
-                  onUpdateTestCommand={handleUpdateTestCommand}
                   onChangesLoaded={setHasChanges}
                   onFilesLoaded={setHasOutputFiles}
                   planData={planData}

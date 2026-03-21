@@ -79,7 +79,6 @@ import { EventBus, createEvent, EVENT_TYPES } from "./events";
 import type { PragmaEvent } from "./events";
 import { AutomationRegistry, rowToAutomation, automationToRow, type AutomationRow } from "./events/automations";
 import {
-  agentSubmitTestCommandsSchema,
   agentSubmitTestingConfigSchema,
   updateTestingConfigSchema,
   agentAskQuestionSchema,
@@ -108,8 +107,6 @@ import {
   planSelectRecipientSchema,
   executePlanProposalSchema,
   reviewTaskSchema,
-  runTaskTestCommandSchema,
-  updateTaskTestCommandsSchema,
   testingProxyRequestSchema,
   serviceStdinSchema,
   setActiveWorkspaceSchema,
@@ -186,14 +183,11 @@ import {
   getTaskDetail,
   getTaskStatus,
   getTaskStatusAndAssignment,
-  getTaskWithTestCommands,
   getTaskChangesInfo,
   getTaskPlan,
-  getTaskTestCommands as getTaskTestCommandsStore,
   getTaskOutputDir,
   insertTask,
   updateTaskStatus,
-  updateTaskTestCommandsJson,
   updateTaskAssignment,
   setTaskFollowup,
   getTaskFollowupInfo,
@@ -1983,136 +1977,6 @@ LIMIT 1
     return c.json({ plan });
   });
 
-  app.get("/tasks/:taskId/test-commands", async (c) => {
-    const workspaceName = c.get("workspace");
-    const taskId =c.req.param("taskId");
-    const db = c.get("db");
-
-    const result = await db.query<{ id: string; test_commands_json: string | null }>(
-      `
-SELECT id, test_commands_json
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-      [taskId],
-    );
-    const row = result.rows[0];
-    if (!row) {
-      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-    }
-
-    return c.json({
-      commands: parseTaskTestCommands(row.test_commands_json),
-    });
-  });
-
-  app.put(
-    "/tasks/:taskId/test-commands",
-    validateJson(updateTaskTestCommandsSchema),
-    async (c) => {
-      const workspaceName = c.get("workspace");
-      const taskId =c.req.param("taskId");
-      const body = c.req.valid("json");
-      const db = c.get("db");
-
-      const taskResult = await db.query<{ id: string }>(
-        `
-SELECT id
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-        [taskId],
-      );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-
-      const normalizedCommands = normalizeTaskTestCommands(body.commands);
-      if (normalizedCommands.length === 0) {
-        throw new PragmaError(
-          "INVALID_TEST_COMMANDS",
-          400,
-          "No valid test commands were provided.",
-        );
-      }
-
-      await db.query(
-        `
-UPDATE tasks
-SET test_commands_json = $2
-WHERE id = $1
-`,
-        [taskId, JSON.stringify(normalizedCommands)],
-      );
-
-      return c.json({
-        ok: true,
-        commands: normalizedCommands,
-      });
-    },
-  );
-
-  app.post("/tasks/:taskId/test-commands/run", validateJson(runTaskTestCommandSchema), async (c) => {
-    const workspaceName = c.get("workspace");
-    const taskId =c.req.param("taskId");
-    const body = c.req.valid("json");
-    const db = c.get("db");
-
-    const result = await db.query<{
-      id: string;
-      test_commands_json: string | null;
-    }>(
-      `
-SELECT id, test_commands_json
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-      [taskId],
-    );
-    const row = result.rows[0];
-    if (!row) {
-      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-    }
-
-    const commands = parseTaskTestCommands(row.test_commands_json);
-    const selected = commands.find(
-      (item) => item.command === body.command && item.cwd === body.cwd,
-    );
-    if (!selected) {
-      throw new PragmaError(
-        "TEST_COMMAND_NOT_ALLOWED",
-        409,
-        "Test command is not registered for this task.",
-      );
-    }
-
-    const workspacePaths = getWorkspacePaths(workspaceName);
-    const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
-    const commandCwd = await resolveTaskCommandCwd(runRoot, selected.cwd);
-    const service = startRuntimeService({
-      workspaceName,
-      taskId,
-      label: selected.label,
-      command: selected.command,
-      requestedCwd: selected.cwd,
-      absoluteCwd: commandCwd,
-      env: {
-        ...process.env,
-        PRAGMA_WORKSPACE_NAME: workspaceName,
-        PRAGMA_TASK_ID: taskId,
-      },
-    });
-
-    return c.json({
-      ok: true,
-      service: toRuntimeServiceSummary(service),
-    });
-  });
-
   app.post("/tasks/:taskId/review", validateJson(reviewTaskSchema), async (c) => {
     const workspaceName = c.get("workspace");
     const taskId =c.req.param("taskId");
@@ -2861,109 +2725,6 @@ WHERE id = $1
 
     return c.json({ ok: true, assigned_to: selectedAgentId });
   });
-
-  app.post(
-    "/tasks/:taskId/agent/test-commands",
-    validateJson(agentSubmitTestCommandsSchema),
-    async (c) => {
-      const workspaceName = c.get("workspace");
-      const taskId =c.req.param("taskId");
-      const body = c.req.valid("json");
-
-      const db = c.get("db");
-      await ensureConversationSchema(db);
-      const taskResult = await db.query<{
-        id: string;
-        status: TaskStatus;
-        assigned_to: string | null;
-        test_commands_json: string | null;
-      }>(
-        `
-SELECT id, status, assigned_to, test_commands_json
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-        [taskId],
-      );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-      if (task.status !== "running" && task.status !== "pending_review") {
-        throw new PragmaError(
-          "TASK_NOT_ACCEPTING_TEST_COMMANDS",
-          409,
-          `Task cannot accept test commands in status: ${task.status}`,
-        );
-      }
-
-      const normalizedCommands = normalizeTaskTestCommands(body.commands);
-      if (normalizedCommands.length === 0) {
-        throw new PragmaError(
-          "INVALID_TEST_COMMANDS",
-          400,
-          "No valid test commands were provided.",
-        );
-      }
-
-      const disallowed = normalizedCommands.find((entry) =>
-        isDisallowedHumanOnlyTestCommand(entry.command),
-      );
-      if (disallowed) {
-        throw new PragmaError(
-          "INVALID_TEST_COMMAND_POLICY",
-          400,
-          `Disallowed command for task window: ${disallowed.command}`,
-        );
-      }
-
-      const existingCommands = parseTaskTestCommands(task.test_commands_json);
-      const combinedCommands = body.replace
-        ? normalizedCommands
-        : normalizeTaskTestCommands(
-            [...existingCommands, ...normalizedCommands],
-            Number.MAX_SAFE_INTEGER,
-          ).slice(-8);
-
-      await db.query(
-        `
-UPDATE tasks
-SET test_commands_json = $2
-WHERE id = $1
-`,
-        [taskId, JSON.stringify(combinedCommands)],
-      );
-
-      const thread = await getThreadByTaskId(db, taskId);
-      if (thread) {
-        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId: thread.id,
-          turnId: body.turn_id || latestExecuteTurn?.id || null,
-          eventName: "worker_test_commands_submitted",
-          payload: {
-            commands: combinedCommands,
-            replace: Boolean(body.replace),
-            agent_id: body.agent_id ?? task.assigned_to ?? null,
-          },
-        });
-        eventBus.emit(createEvent({
-          type: EVENT_TYPES.THREAD_UPDATED,
-          threadId: thread.id,
-          workspaceName,
-          payload: {},
-          source: "worker_test_commands_submitted",
-        }));
-      }
-
-      return c.json({
-        ok: true,
-        commands: combinedCommands,
-      });
-    },
-  );
 
   app.post(
     "/tasks/:taskId/agent/testing-config",
@@ -7086,97 +6847,6 @@ function normalizeContextFolderName(name: string): string {
     throw new PragmaError("INVALID_CONTEXT_FOLDER", 400, "Invalid folder name.");
   }
   return trimmed;
-}
-
-type TaskTestCommand = {
-  label: string;
-  command: string;
-  cwd: string;
-};
-
-function parseTaskTestCommands(value: string | null | undefined): TaskTestCommand[] {
-  if (!value || typeof value !== "string") {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return normalizeTaskTestCommands(parsed);
-  } catch {
-    return [];
-  }
-}
-
-function normalizeTaskTestCommands(input: unknown, limit = 8): TaskTestCommand[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-
-  const commands: TaskTestCommand[] = [];
-  const seen = new Set<string>();
-  for (const item of input) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const record = item as Record<string, unknown>;
-    const command =
-      typeof record.command === "string" ? record.command.trim() : "";
-    const labelSource =
-      typeof record.label === "string" ? record.label.trim() : "";
-    const cwdSource = typeof record.cwd === "string" ? record.cwd.trim() : "";
-    const cwd = normalizeTaskTestCommandCwd(cwdSource);
-    if (!command || !cwd) {
-      continue;
-    }
-    const key = `${cwd}\n${command}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    commands.push({
-      label: labelSource || command,
-      command,
-      cwd,
-    });
-    if (commands.length >= limit) {
-      break;
-    }
-  }
-
-  return commands;
-}
-
-function isDisallowedHumanOnlyTestCommand(command: string): boolean {
-  const normalized = command.trim().toLowerCase();
-  if (!normalized) {
-    return true;
-  }
-
-  const disallowedPatterns: RegExp[] = [
-    /\blint\b/,
-    /\beslint\b/,
-    /\bprettier\b/,
-    /\bformat\b/,
-    /\bfmt\b/,
-    /\btypecheck\b/,
-    /\btsc\b/,
-    /\bbuild\b/,
-    /\bcompile\b/,
-    /\btest\b/,
-    /\bjest\b/,
-    /\bvitest\b/,
-    /\bmocha\b/,
-    /\bava\b/,
-    /\bpytest\b/,
-    /\brspec\b/,
-    /\bcargo\s+test\b/,
-    /\bgo\s+test\b/,
-  ];
-
-  return disallowedPatterns.some((pattern) => pattern.test(normalized));
 }
 
 async function resolveTaskExecutionRoot(

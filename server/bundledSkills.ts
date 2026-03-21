@@ -21,7 +21,7 @@ export const BUNDLED_SKILLS: BundledSkill[] = [
     id: PRAGMA_COMMANDS_SKILL_ID,
     name: "pragma-commands",
     description:
-      "Full Pragma CLI reference for worker agents. Covers asking questions, requesting help, submitting test commands, testing configs, and running database queries.",
+      "Full Pragma CLI reference for worker agents. Covers asking questions, requesting help, submitting testing configs, and running database queries.",
     content: `---
 name: pragma-commands
 description: Full Pragma CLI reference for worker agents.
@@ -49,11 +49,9 @@ ${BT3}
 
 After either CLI escalation command, stop doing further work. Do not ask for clarification/help only in plain text without calling the CLI.
 
-## Submitting test commands
+## Submitting testing config
 
-If you changed code, submit at least one runnable validation command for the task window.
-
-For richer testing UIs with multiple processes and panels, use ${BT}submit-testing-config${BT}:
+If you changed code, submit a testing config for the task window so the reviewer can validate your changes.
 
 ${BT3}
 pragma-so task submit-testing-config --config '<JSON>'
@@ -63,15 +61,7 @@ The config JSON has: ${BT}processes${BT} (array of {name, command, cwd?, ready_p
 
 Example: ${BT}--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'${BT}
 
-Fallback: for simple single-command cases, use:
-
-${BT3}
-pragma-so task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]
-${BT3}
-
-Include the exact run directory for each command (for example: ${BT}--cwd "code/default/my-app"${BT}).
-
-Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). Do not submit lint/typecheck/build/test commands to the task window. For app tasks, the first submitted command must run the app/service (for example dev/start script with explicit host/port). Provide only commands the human can run safely in this workspace.
+Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). For app tasks, the testing config should run the app/service (for example dev/start script with explicit host/port).
 
 ## Database queries
 

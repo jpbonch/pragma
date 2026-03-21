@@ -10,13 +10,6 @@ const reasoningEffortSchema = z.enum(["low", "medium", "high", "extra_high"]);
 const taskStatusSchema = z.enum(TASK_STATUS_VALUES);
 
 const nonEmptyString = z.string().trim().min(1);
-const testCommandItemSchema = z
-  .object({
-    label: nonEmptyString,
-    command: nonEmptyString,
-    cwd: nonEmptyString,
-  })
-  .strict();
 
 const positiveIntegerString = z
   .string()
@@ -163,21 +156,6 @@ export const agentRequestHelpSchema = z
   })
   .strict();
 
-export const agentSubmitTestCommandsSchema = z
-  .object({
-    commands: z.array(testCommandItemSchema).min(1),
-    turn_id: nonEmptyString.optional(),
-    agent_id: nonEmptyString.optional(),
-    replace: z.boolean().optional(),
-  })
-  .strict();
-
-export const updateTaskTestCommandsSchema = z
-  .object({
-    commands: z.array(testCommandItemSchema).min(1),
-  })
-  .strict();
-
 export const taskRespondSchema = z
   .object({
     message: nonEmptyString,
@@ -266,13 +244,6 @@ export const createCodeRepoCloneSchema = z
 export const createCodeFolderCopySchema = z
   .object({
     local_path: nonEmptyString,
-  })
-  .strict();
-
-export const runTaskTestCommandSchema = z
-  .object({
-    command: nonEmptyString,
-    cwd: nonEmptyString,
   })
   .strict();
 

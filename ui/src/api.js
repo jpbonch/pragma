@@ -351,26 +351,6 @@ export async function fetchTaskPlan(taskId) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/plan`)
 }
 
-export async function fetchTaskTestCommands(taskId) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/test-commands`)
-}
-
-export async function updateTaskTestCommands(taskId, commands) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/test-commands`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ commands }),
-  }, 60 * 1000)
-}
-
-export async function runTaskTestCommand(taskId, command, cwd) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/test-commands/run`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ command, cwd }),
-  }, 10 * 60 * 1000)
-}
-
 export async function fetchRuntimeServices() {
   const data = asObject(await fetchJson('/services'), 'Invalid services response.')
   if (!Array.isArray(data.services)) {

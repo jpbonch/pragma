@@ -106,23 +106,6 @@ export async function getTaskStatusAndAssignment(
   return result.rows[0] ?? null;
 }
 
-export async function getTaskWithTestCommands(
-  db: PGlite,
-  taskId: string,
-): Promise<{ id: string; status: TaskStatus; assigned_to: string | null; test_commands_json: string | null } | null> {
-  const result = await db.query<{
-    id: string;
-    status: TaskStatus;
-    assigned_to: string | null;
-    test_commands_json: string | null;
-  }>(
-    `SELECT id, status, assigned_to, test_commands_json
-     FROM tasks WHERE id = $1 LIMIT 1`,
-    [taskId],
-  );
-  return result.rows[0] ?? null;
-}
-
 export async function getTaskChangesInfo(
   db: PGlite,
   taskId: string,
@@ -146,17 +129,6 @@ export async function getTaskPlan(db: PGlite, taskId: string): Promise<string | 
     [taskId],
   );
   return result.rows[0]?.plan?.trim() || null;
-}
-
-export async function getTaskTestCommands(
-  db: PGlite,
-  taskId: string,
-): Promise<{ id: string; test_commands_json: string | null } | null> {
-  const result = await db.query<{ id: string; test_commands_json: string | null }>(
-    `SELECT id, test_commands_json FROM tasks WHERE id = $1 LIMIT 1`,
-    [taskId],
-  );
-  return result.rows[0] ?? null;
 }
 
 export async function getTaskOutputDir(
@@ -228,14 +200,6 @@ export async function updateTaskStatus(
   }
 
   await db.query(`UPDATE tasks SET ${sets.join(", ")} WHERE id = $1`, params);
-}
-
-export async function updateTaskTestCommandsJson(
-  db: PGlite,
-  taskId: string,
-  json: string,
-): Promise<void> {
-  await db.query(`UPDATE tasks SET test_commands_json = $2 WHERE id = $1`, [taskId, json]);
 }
 
 export async function getTaskTestingConfig(

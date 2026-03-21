@@ -245,7 +245,6 @@ SET status = $6,
     git_branch_name = $3,
     git_state_json = $4,
     assigned_to = $5,
-    test_commands_json = NULL,
     testing_config_json = NULL
 WHERE id = $1
 `,
@@ -270,7 +269,6 @@ SET status = 'orchestrating',
     git_branch_name = $3,
     git_state_json = $4,
     assigned_to = NULL,
-    test_commands_json = NULL,
     testing_config_json = NULL
 WHERE id = $1
 `,
