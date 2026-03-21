@@ -52,6 +52,7 @@ import { InputBar } from './components/InputBar'
 import { OnboardingModal } from './components/OnboardingModal'
 import { RightPanel } from './components/RightPanel'
 import { SettingsView } from './components/SettingsView'
+import { AutomationsView } from './components/AutomationsView'
 import { Sidebar } from './components/Sidebar'
 import { iconForAgent } from './lib/agentIcon'
 import {
@@ -1369,6 +1370,7 @@ export default function App() {
         )}
 
         {activeTab === 'skills' && <ConnectionsView />}
+        {activeTab === 'automations' && <AutomationsView />}
         {activeTab === 'settings' && (
           <SettingsView
             workspaceName={activeWorkspaceName}

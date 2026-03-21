@@ -18,6 +18,7 @@ import {
   Play,
   RotateCcw,
   Square,
+  Workflow,
 } from 'lucide-react'
 
 const ITEMS = [
@@ -26,6 +27,7 @@ const ITEMS = [
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'context', icon: BookOpen, label: 'Context' },
   { id: 'skills', icon: Puzzle, label: 'Skills' },
+  { id: 'automations', icon: Workflow, label: 'Automations' },
 ]
 
 function SidebarProcesses({ processes, services, activeServiceId, onOpenService, onStartProcess, onStopProcess, onAddProcess, onDeleteProcess }) {

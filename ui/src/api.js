@@ -1024,4 +1024,63 @@ export async function detectProcesses(folderName) {
   })
 }
 
+// ── Automations ─────────────────────────────────────────────────
+
+export async function fetchAutomations() {
+  const data = asObject(await fetchJson('/automations'), 'Invalid automations response.')
+  if (!Array.isArray(data.automations)) {
+    throw invalidResponse('`automations` must be an array.')
+  }
+  return data.automations
+}
+
+export async function createAutomation(automation) {
+  return fetchJson('/automations', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(automation),
+  })
+}
+
+export async function updateAutomation(id, updates) {
+  return fetchJson(`/automations/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(updates),
+  })
+}
+
+export async function deleteAutomation(id) {
+  return fetchJson(`/automations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function fetchAutomationRuns(id, limit = 20) {
+  const data = asObject(
+    await fetchJson(`/automations/${encodeURIComponent(id)}/runs?limit=${limit}`),
+    'Invalid automation runs response.',
+  )
+  if (!Array.isArray(data.runs)) {
+    throw invalidResponse('`runs` must be an array.')
+  }
+  return data.runs
+}
+
+export async function fetchEvents(params = {}) {
+  const qs = new URLSearchParams()
+  if (params.type) qs.set('type', params.type)
+  if (params.task_id) qs.set('task_id', params.task_id)
+  if (params.limit) qs.set('limit', String(params.limit))
+  const query = qs.toString()
+  const data = asObject(
+    await fetchJson(`/events${query ? `?${query}` : ''}`),
+    'Invalid events response.',
+  )
+  if (!Array.isArray(data.events)) {
+    throw invalidResponse('`events` must be an array.')
+  }
+  return data.events
+}
+
 export { API_URL }
