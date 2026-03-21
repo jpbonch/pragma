@@ -316,16 +316,18 @@ export function Sidebar({
         })}
       </nav>
 
-      <SidebarProcesses
-        processes={processes}
-        services={services}
-        activeServiceId={activeServiceId}
-        onOpenService={onOpenService}
-        onStartProcess={onStartProcess}
-        onStopProcess={onStopProcess}
-        onAddProcess={onAddProcess}
-        onDeleteProcess={onDeleteProcess}
-      />
+      {Array.isArray(processes) && processes.some((p) => p && !p.task_id) && (
+        <SidebarProcesses
+          processes={processes}
+          services={services}
+          activeServiceId={activeServiceId}
+          onOpenService={onOpenService}
+          onStartProcess={onStartProcess}
+          onStopProcess={onStopProcess}
+          onAddProcess={onAddProcess}
+          onDeleteProcess={onDeleteProcess}
+        />
+      )}
 
       <section className="sidebar-chats">
         <div className="sidebar-chats-header">
