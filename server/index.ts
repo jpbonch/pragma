@@ -6178,7 +6178,7 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
   app.get("/automations", async (c) => {
     const db = c.get("db");
     const result = await db.query<AutomationRow>(
-      `SELECT id, name, trigger_event_type, trigger_filter_json,
+      `SELECT id, name, trigger_event_type,
               trigger_type, schedule_cron, schedule_timezone, last_scheduled_at,
               action_type, action_config_json, enabled, created_at, updated_at
        FROM workspace_automations ORDER BY created_at DESC`,
@@ -6205,15 +6205,14 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
 
     await db.query(
       `INSERT INTO workspace_automations
-        (id, name, trigger_type, trigger_event_type, trigger_filter_json,
+        (id, name, trigger_type, trigger_event_type,
          schedule_cron, schedule_timezone, action_type, action_config_json, enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         id,
         body.name,
         triggerType,
         body.trigger?.eventType ?? "schedule",
-        body.trigger?.filter ? JSON.stringify(body.trigger.filter) : null,
         body.schedule?.cron ?? null,
         body.schedule?.timezone ?? "UTC",
         action_type,
@@ -6262,8 +6261,6 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     if (body.trigger !== undefined) {
       updates.push(`trigger_event_type = $${paramIndex++}`);
       params.push(body.trigger.eventType);
-      updates.push(`trigger_filter_json = $${paramIndex++}`);
-      params.push(body.trigger.filter ? JSON.stringify(body.trigger.filter) : null);
     }
     if (body.schedule !== undefined) {
       updates.push(`schedule_cron = $${paramIndex++}`);

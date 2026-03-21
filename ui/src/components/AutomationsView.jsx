@@ -18,6 +18,7 @@ import {
   deleteAutomation as deleteAutomationApi,
   fetchAutomationRuns,
   fetchEvents,
+  fetchAgents,
 } from '../api'
 
 const TRIGGER_OPTIONS = [
@@ -56,7 +57,6 @@ const EMPTY_FORM = {
   name: '',
   trigger_type: 'event',
   trigger_event: '',
-  trigger_filter: '',
   schedule_cron: '',
   schedule_timezone: 'UTC',
   action_type: 'webhook',
@@ -83,7 +83,25 @@ function timeAgo(value) {
   return `${days}d ago`
 }
 
-function ActionConfigForm({ actionType, config, onChange }) {
+function AgentSelect({ value, onChange, agents, label, emptyLabel }) {
+  return (
+    <>
+      <label className="aut-field-label">{label}</label>
+      <select
+        className="aut-select"
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value || '')}
+      >
+        <option value="">{emptyLabel || 'None (Orchestrator decides)'}</option>
+        {agents.map((agent) => (
+          <option key={agent.id} value={agent.id}>{agent.name || agent.id}</option>
+        ))}
+      </select>
+    </>
+  )
+}
+
+function ActionConfigForm({ actionType, config, onChange, agents }) {
   if (actionType === 'webhook') {
     return (
       <div className="aut-action-fields">
@@ -135,12 +153,34 @@ function ActionConfigForm({ actionType, config, onChange }) {
           rows={3}
           onChange={(e) => onChange({ ...config, description_template: e.target.value })}
         />
-        <label className="aut-field-label">Agent assignment</label>
-        <input
-          className="aut-input"
-          placeholder="agent-id (optional)"
-          value={config.agent_id || ''}
-          onChange={(e) => onChange({ ...config, agent_id: e.target.value })}
+        <AgentSelect
+          value={config.agent_id}
+          onChange={(val) => onChange({ ...config, agent_id: val })}
+          agents={agents}
+          label="Assign to agent"
+          emptyLabel="None (Orchestrator decides)"
+        />
+      </div>
+    )
+  }
+
+  if (actionType === 'execute_task') {
+    return (
+      <div className="aut-action-fields">
+        <label className="aut-field-label">Prompt</label>
+        <textarea
+          className="aut-textarea"
+          placeholder="Review task {{event.taskId}} and update context..."
+          value={config.prompt || ''}
+          rows={4}
+          onChange={(e) => onChange({ ...config, prompt: e.target.value })}
+        />
+        <AgentSelect
+          value={config.recipientAgentId}
+          onChange={(val) => onChange({ ...config, recipientAgentId: val })}
+          agents={agents}
+          label="Recipient agent"
+          emptyLabel="None (Orchestrator decides)"
         />
       </div>
     )
@@ -355,11 +395,13 @@ export function AutomationsView() {
   const [deleteConfirm, setDeleteConfirm] = useState('')
   const [expandedRunsId, setExpandedRunsId] = useState('')
   const [subTab, setSubTab] = useState('automations') // 'automations' | 'events'
+  const [agents, setAgents] = useState([])
 
   const nameInputRef = useRef(null)
 
   useEffect(() => {
     void loadAutomations()
+    void fetchAgents().then(setAgents).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -392,9 +434,6 @@ export function AutomationsView() {
       name: automation.name || '',
       trigger_type: automation.triggerType || 'event',
       trigger_event: automation.trigger?.eventType || automation.trigger_event || '',
-      trigger_filter: typeof automation.trigger?.filter === 'string'
-        ? automation.trigger.filter
-        : automation.trigger?.filter ? JSON.stringify(automation.trigger.filter) : '',
       schedule_cron: automation.schedule?.cron || '',
       schedule_timezone: automation.schedule?.timezone || 'UTC',
       action_type: automation.action?.type || automation.action_type || 'webhook',
@@ -435,13 +474,6 @@ export function AutomationsView() {
 
     if (form.trigger_type === 'event') {
       payload.trigger = { eventType: form.trigger_event }
-      if (form.trigger_filter.trim()) {
-        try {
-          payload.trigger.filter = JSON.parse(form.trigger_filter)
-        } catch {
-          payload.trigger.filter = form.trigger_filter.trim()
-        }
-      }
     } else {
       payload.schedule = {
         cron: form.schedule_cron.trim(),
@@ -543,15 +575,6 @@ export function AutomationsView() {
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>
-
-                <label className="aut-field-label">Trigger filter (optional JSON)</label>
-                <textarea
-                  className="aut-textarea"
-                  placeholder='{"status": "completed"}'
-                  value={form.trigger_filter}
-                  rows={2}
-                  onChange={(e) => setForm({ ...form, trigger_filter: e.target.value })}
-                />
               </>
             )}
 
@@ -579,6 +602,7 @@ export function AutomationsView() {
               actionType={form.action_type}
               config={form.action_config}
               onChange={(config) => setForm({ ...form, action_config: config })}
+              agents={agents}
             />
 
             <div className="aut-toggle-row">

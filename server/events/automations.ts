@@ -7,7 +7,7 @@ export interface Automation {
   id: string;
   name: string;
   triggerType: "event" | "schedule";
-  trigger: { eventType: string; filter?: Record<string, any> };
+  trigger: { eventType: string };
   schedule?: { cron: string; timezone: string };
   action: AutomationAction;
   enabled: boolean;
@@ -38,6 +38,7 @@ function matchesFilter(
   }
   return true;
 }
+
 
 function applyTemplateVars(template: string, event: PragmaEvent): string {
   return template
@@ -218,7 +219,6 @@ export class AutomationRegistry {
       id: string;
       name: string;
       trigger_event_type: string;
-      trigger_filter_json: string | null;
       trigger_type: string;
       schedule_cron: string | null;
       schedule_timezone: string;
@@ -229,7 +229,7 @@ export class AutomationRegistry {
       created_at: string;
       updated_at: string;
     }>(
-      `SELECT id, name, trigger_event_type, trigger_filter_json,
+      `SELECT id, name, trigger_event_type,
               trigger_type, schedule_cron, schedule_timezone, last_scheduled_at,
               action_type, action_config_json, enabled, created_at, updated_at
        FROM workspace_automations WHERE enabled = true`,
@@ -256,8 +256,14 @@ export class AutomationRegistry {
     // Only register event listener for event-based automations
     if (automation.triggerType === "event") {
       const unsubscribe = this.eventBus.on(automation.trigger.eventType, (event) => {
-        if (!matchesFilter(automation.trigger.filter, event.payload)) return;
         if (!this.db) return;
+        // Built-in anti-loop: skip events from the same agent the automation targets
+        if (automation.action.type === "execute_task" && automation.action.recipientAgentId) {
+          if (event.payload?.assigned_to === automation.action.recipientAgentId) return;
+        }
+        if (automation.action.type === "create_task" && automation.action.assignedTo) {
+          if (event.payload?.assigned_to === automation.action.assignedTo) return;
+        }
         const db = this.db;
         const apiUrl = this.apiUrl;
         void (async () => {
@@ -384,7 +390,7 @@ export type AutomationRow = {
   id: string;
   name: string;
   trigger_event_type: string;
-  trigger_filter_json: string | null;
+  trigger_filter_json?: string | null;
   trigger_type: string;
   schedule_cron: string | null;
   schedule_timezone: string;
@@ -425,7 +431,6 @@ export function rowToAutomation(row: AutomationRow): Automation {
     triggerType,
     trigger: {
       eventType: row.trigger_event_type,
-      filter: row.trigger_filter_json ? JSON.parse(row.trigger_filter_json) : undefined,
     },
     schedule: triggerType === "schedule" && row.schedule_cron
       ? { cron: row.schedule_cron, timezone: row.schedule_timezone || "UTC" }

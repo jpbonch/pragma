@@ -488,7 +488,6 @@ const automationTriggerTypeSchema = z.enum(["event", "schedule"]);
 const automationTriggerSchema = z
   .object({
     eventType: nonEmptyString,
-    filter: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
