@@ -34,6 +34,7 @@ import {
   updateThreadSession,
 } from "./store";
 import type { HarnessId, TaskStatus, ReasoningEffort } from "./types";
+import { EventBus, createEvent, EVENT_TYPES } from "../events";
 
 type EnqueueExecuteInput = {
   workspaceName: string;
@@ -549,6 +550,20 @@ WHERE id = $1
         model_id: selectedWorker.model_id,
       },
     });
+    EventBus.getInstance().emit(createEvent({
+      type: EVENT_TYPES.AGENT_SPAWNED,
+      taskId: input.taskId,
+      threadId: input.threadId,
+      turnId,
+      workspaceName: input.workspaceName,
+      payload: {
+        worker_agent_id: selectedWorker.id,
+        harness: selectedWorker.harness,
+        model_label: selectedWorker.model_label,
+        model_id: selectedWorker.model_id,
+      },
+      source: "execute_runner",
+    }));
 
     const workerAdapter = getConversationAdapter(selectedWorker.harness);
     const workerSkills = await listAgentSkills(db, selectedWorker.id);
@@ -709,6 +724,19 @@ WHERE id = $1
         worker_session_id: workerResult.sessionId,
       },
     });
+    EventBus.getInstance().emit(createEvent({
+      type: EVENT_TYPES.AGENT_COMPLETED,
+      taskId: input.taskId,
+      threadId: input.threadId,
+      turnId,
+      workspaceName: input.workspaceName,
+      payload: {
+        turn_id: turnId,
+        selected_agent_id: selectedWorker.id,
+        worker_session_id: workerResult.sessionId,
+      },
+      source: "execute_runner",
+    }));
 
     await checkpointTaskRepos({
       workspacePaths: paths,

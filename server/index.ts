@@ -75,6 +75,8 @@ import {
   failTurn,
 } from "./conversation/store";
 import type { HarnessId, TaskStatus, ReasoningEffort } from "./conversation/types";
+import { EventBus, createEvent, EVENT_TYPES } from "./events";
+import type { PragmaEvent } from "./events";
 import {
   agentSubmitTestCommandsSchema,
   agentSubmitTestingConfigSchema,
@@ -372,21 +374,6 @@ type StartServerOptions = {
   port: number;
 };
 
-type TaskStatusStreamEvent = {
-  task_id: string;
-  thread_id?: string;
-  status: TaskStatus;
-  changed_at: string;
-  source: string;
-};
-
-type TaskStatusListener = (event: TaskStatusStreamEvent) => void;
-type ThreadUpdateListener = (event: {
-  thread_id: string;
-  changed_at: string;
-  source: string;
-}) => void;
-
 type RuntimeServiceStatus = "running" | "ready" | "exited" | "stopped";
 type RuntimeServiceLogStream = "stdout" | "stderr" | "system";
 
@@ -429,90 +416,7 @@ type RuntimeServiceRecord = RuntimeServiceSummary & {
   process_db_id?: string;
 };
 
-const TASK_STATUS_LISTENERS = new Map<string, Set<TaskStatusListener>>();
-const THREAD_UPDATE_LISTENERS = new Map<string, Set<ThreadUpdateListener>>();
 const RUNTIME_SERVICES_BY_WORKSPACE = new Map<string, Map<string, RuntimeServiceRecord>>();
-
-function threadListenerKey(workspaceName: string, threadId: string): string {
-  return `${workspaceName}:${threadId}`;
-}
-
-function subscribeTaskStatus(workspaceName: string, listener: TaskStatusListener): () => void {
-  const current = TASK_STATUS_LISTENERS.get(workspaceName);
-  if (current) {
-    current.add(listener);
-  } else {
-    TASK_STATUS_LISTENERS.set(workspaceName, new Set([listener]));
-  }
-
-  return () => {
-    const listeners = TASK_STATUS_LISTENERS.get(workspaceName);
-    if (!listeners) {
-      return;
-    }
-    listeners.delete(listener);
-    if (listeners.size === 0) {
-      TASK_STATUS_LISTENERS.delete(workspaceName);
-    }
-  };
-}
-
-function publishTaskStatus(workspaceName: string, event: TaskStatusStreamEvent): void {
-  const listeners = TASK_STATUS_LISTENERS.get(workspaceName);
-  if (!listeners || listeners.size === 0) {
-    return;
-  }
-
-  for (const listener of listeners) {
-    listener(event);
-  }
-}
-
-function subscribeThreadUpdates(
-  workspaceName: string,
-  threadId: string,
-  listener: ThreadUpdateListener,
-): () => void {
-  const key = threadListenerKey(workspaceName, threadId);
-  const current = THREAD_UPDATE_LISTENERS.get(key);
-  if (current) {
-    current.add(listener);
-  } else {
-    THREAD_UPDATE_LISTENERS.set(key, new Set([listener]));
-  }
-
-  return () => {
-    const listeners = THREAD_UPDATE_LISTENERS.get(key);
-    if (!listeners) {
-      return;
-    }
-    listeners.delete(listener);
-    if (listeners.size === 0) {
-      THREAD_UPDATE_LISTENERS.delete(key);
-    }
-  };
-}
-
-function publishThreadUpdated(
-  workspaceName: string,
-  threadId: string,
-  source: string,
-): void {
-  const key = threadListenerKey(workspaceName, threadId);
-  const listeners = THREAD_UPDATE_LISTENERS.get(key);
-  if (!listeners || listeners.size === 0) {
-    return;
-  }
-
-  const event = {
-    thread_id: threadId,
-    changed_at: new Date().toISOString(),
-    source,
-  };
-  for (const listener of listeners) {
-    listener(event);
-  }
-}
 
 type WriteEventFn = (
   eventName: string,
@@ -879,6 +783,14 @@ async function recoverOrphanedTasks(): Promise<void> {
         eventName: "error",
         payload: { code: "SERVER_RESTART", message: "Server restarted while turn was in progress" },
       });
+      EventBus.getInstance().emit(createEvent({
+        type: EVENT_TYPES.ERROR,
+        threadId: turn.thread_id,
+        turnId: turn.id,
+        workspaceName,
+        payload: { code: "SERVER_RESTART", message: "Server restarted while turn was in progress" },
+        source: "recovery",
+      }));
     }
 
     // 2. Fail orphaned tasks in active execution states
@@ -950,6 +862,19 @@ async function recoverOrphanedProcesses(): Promise<void> {
 
 export async function startServer(options: StartServerOptions): Promise<void> {
   await setupPragma();
+
+  // Initialize the unified event bus with DB persistence
+  const eventBus = EventBus.getInstance();
+  eventBus.setPersistFn(async (event: PragmaEvent) => {
+    if (!event.workspaceName) return;
+    const db = await openDatabase(event.workspaceName);
+    await db.query(
+      `INSERT INTO pragma_events (id, event_type, task_id, thread_id, turn_id, workspace_name, payload_json, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [event.id, event.type, event.taskId ?? null, event.threadId ?? null, event.turnId ?? null, event.workspaceName, JSON.stringify(event.payload), event.source],
+    );
+  });
+
   await recoverOrphanedTasks();
   if (process.env.PRAGMA_SKIP_PROCESS_RECOVERY !== "1") {
     await recoverOrphanedProcesses();
@@ -960,16 +885,23 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     apiUrl,
     pragmaCliCommand,
     onTaskStatusChanged: (input) => {
-      publishTaskStatus(input.workspaceName, {
-        task_id: input.taskId,
-        thread_id: input.threadId || undefined,
-        status: input.status,
-        changed_at: new Date().toISOString(),
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.TASK_STATUS_CHANGED,
+        taskId: input.taskId,
+        threadId: input.threadId || undefined,
+        workspaceName: input.workspaceName,
+        payload: { status: input.status, changed_at: new Date().toISOString() },
         source: input.source,
-      });
+      }));
     },
     onThreadUpdated: (input) => {
-      publishThreadUpdated(input.workspaceName, input.threadId, input.source);
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.THREAD_UPDATED,
+        threadId: input.threadId,
+        workspaceName: input.workspaceName,
+        payload: {},
+        source: input.source,
+      }));
     },
   });
 
@@ -998,13 +930,37 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     taskId: string,
     status: TaskStatus,
     source: string,
+    threadId?: string,
   ): void => {
-    publishTaskStatus(workspaceName, {
-      task_id: taskId,
-      status,
-      changed_at: new Date().toISOString(),
+    eventBus.emit(createEvent({
+      type: EVENT_TYPES.TASK_STATUS_CHANGED,
+      taskId,
+      threadId,
+      workspaceName,
+      payload: { status, changed_at: new Date().toISOString() },
       source,
-    });
+    }));
+
+    // Emit companion lifecycle events for completed/failed statuses
+    if (status === "completed") {
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.TASK_COMPLETED,
+        taskId,
+        threadId,
+        workspaceName,
+        payload: { status, changed_at: new Date().toISOString() },
+        source,
+      }));
+    } else if (status === "failed") {
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.TASK_FAILED,
+        taskId,
+        threadId,
+        workspaceName,
+        payload: { status, changed_at: new Date().toISOString() },
+        source,
+      }));
+    }
   };
 
   // Workspace middleware: provides c.get("db") and c.get("workspace") for all workspace-scoped routes
@@ -1029,16 +985,23 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     apiUrl,
     pragmaCliCommand,
     onThreadUpdated: (input) => {
-      publishThreadUpdated(input.workspaceName, input.threadId, input.source);
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.THREAD_UPDATED,
+        threadId: input.threadId,
+        workspaceName: input.workspaceName,
+        payload: {},
+        source: input.source,
+      }));
     },
     onTaskStatusChanged: (input) => {
-      publishTaskStatus(input.workspaceName, {
-        task_id: input.taskId,
-        thread_id: input.threadId,
-        status: input.status as TaskStatus,
-        changed_at: new Date().toISOString(),
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.TASK_STATUS_CHANGED,
+        taskId: input.taskId,
+        threadId: input.threadId,
+        workspaceName: input.workspaceName,
+        payload: { status: input.status, changed_at: new Date().toISOString() },
         source: input.source,
-      });
+      }));
     },
     getAgentRow: getAgentById,
     listPlanWorkerCandidates: (db) => listPlanWorkerCandidates(db, DEFAULT_AGENT_ID),
@@ -1417,8 +1380,16 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     return createSSEStream(c, {
       setup: async (writeEvent) => {
         await writeEvent("ready", { workspace: workspaceName, ts: new Date().toISOString() });
-        return subscribeTaskStatus(workspaceName, (event) => {
-          void writeEvent("task_status_changed", event);
+        return eventBus.on(EVENT_TYPES.TASK_STATUS_CHANGED, (event) => {
+          if (event.workspaceName === workspaceName) {
+            void writeEvent("task_status_changed", {
+              task_id: event.taskId,
+              thread_id: event.threadId,
+              status: event.payload.status,
+              changed_at: event.payload.changed_at ?? event.timestamp,
+              source: event.source,
+            });
+          }
         });
       },
     });
@@ -1785,16 +1756,12 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       setup: async (writeEvent) => {
         // Replay missed events from the DB
         const replayDb = await openDatabase(workspaceName);
-        try {
-          await ensureConversationSchema(replayDb);
-          const missedEvents = await getEventsSince(replayDb, threadId, lastSeq);
-          for (const evt of missedEvents) {
-            const payload = JSON.parse(evt.payload_json);
-            await writeEvent(evt.event_name, payload, evt.seq);
-            lastSeq = evt.seq;
-          }
-        } finally {
-          await replayDb.close();
+        await ensureConversationSchema(replayDb);
+        const missedEvents = await getEventsSince(replayDb, threadId, lastSeq);
+        for (const evt of missedEvents) {
+          const payload = JSON.parse(evt.payload_json);
+          await writeEvent(evt.event_name, payload, evt.seq);
+          lastSeq = evt.seq;
         }
 
         await writeEvent("ready", { thread_id: threadId, ts: new Date().toISOString() });
@@ -1802,22 +1769,24 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         // Subscribe to live thread updates and forward new events
         const drainNewEvents = async (): Promise<void> => {
           const eventDb = await openDatabase(workspaceName);
-          try {
-            await ensureConversationSchema(eventDb);
-            const events = await getEventsSince(eventDb, threadId, lastSeq);
-            for (const evt of events) {
-              lastSeq = evt.seq;
-              const payload = JSON.parse(evt.payload_json);
-              await writeEvent(evt.event_name, payload, evt.seq);
-            }
-          } finally {
-            await eventDb.close();
+          await ensureConversationSchema(eventDb);
+          const events = await getEventsSince(eventDb, threadId, lastSeq);
+          for (const evt of events) {
+            lastSeq = evt.seq;
+            const payload = JSON.parse(evt.payload_json);
+            await writeEvent(evt.event_name, payload, evt.seq);
           }
         };
 
-        return subscribeThreadUpdates(workspaceName, threadId, (updateEvent) => {
-          void drainNewEvents();
-          void writeEvent("thread_updated", updateEvent);
+        return eventBus.on(EVENT_TYPES.THREAD_UPDATED, (event) => {
+          if (event.threadId === threadId && event.workspaceName === workspaceName) {
+            void drainNewEvents();
+            void writeEvent("thread_updated", {
+              thread_id: event.threadId,
+              changed_at: event.timestamp,
+              source: event.source,
+            });
+          }
         });
       },
     });
@@ -2190,7 +2159,21 @@ WHERE id = $1
           from_status: "completed",
         },
       });
-      publishThreadUpdated(workspaceName, thread.id, "task_reopened");
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.TASK_REOPENED,
+        taskId,
+        threadId: thread.id,
+        workspaceName,
+        payload: { from_status: "completed" },
+        source: "review_reopen",
+      }));
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.THREAD_UPDATED,
+        threadId: thread.id,
+        workspaceName,
+        payload: {},
+        source: "task_reopened",
+      }));
 
       return c.json({
         ok: true,
@@ -2507,6 +2490,13 @@ VALUES ($1, $2, $3, $4, $5, $6)
         ],
       );
       emitTaskStatus(workspaceName, taskId, status, "task_created");
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.TASK_CREATED,
+        taskId,
+        workspaceName,
+        payload: { status, title: body.title },
+        source: "task_created",
+      }));
     } catch (error: unknown) {
       throw new PragmaError("CREATE_TASK_FAILED", 400, errorMessage(error));
     }
@@ -2561,6 +2551,13 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
         [taskId, fallbackTitle, prompt],
       );
       emitTaskStatus(workspaceName, taskId, "queued", "execute_created");
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.TASK_CREATED,
+        taskId,
+        workspaceName,
+        payload: { status: "queued", title: fallbackTitle },
+        source: "execute_created",
+      }));
 
       // Fire-and-forget: generate an AI title from the prompt
       generateTitle(db, prompt, "").then(async (aiTitle) => {
@@ -2663,6 +2660,13 @@ VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
       );
 
       emitTaskStatus(workspaceName, newTaskId, "queued", "followup_created");
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.TASK_CREATED,
+        taskId: newTaskId,
+        workspaceName,
+        payload: { status: "queued" },
+        source: "followup_created",
+      }));
 
       generateTitle(db, prompt, "").then(async (aiTitle) => {
         await updateTaskTitle(db, newTaskId, aiTitle);
@@ -2914,7 +2918,13 @@ WHERE id = $1
             agent_id: body.agent_id ?? task.assigned_to ?? null,
           },
         });
-        publishThreadUpdated(workspaceName, thread.id, "worker_test_commands_submitted");
+        eventBus.emit(createEvent({
+          type: EVENT_TYPES.THREAD_UPDATED,
+          threadId: thread.id,
+          workspaceName,
+          payload: {},
+          source: "worker_test_commands_submitted",
+        }));
       }
 
       return c.json({
@@ -2977,7 +2987,13 @@ LIMIT 1
             agent_id: body.agent_id ?? task.assigned_to ?? null,
           },
         });
-        publishThreadUpdated(workspaceName, thread.id, "worker_testing_config_submitted");
+        eventBus.emit(createEvent({
+          type: EVENT_TYPES.THREAD_UPDATED,
+          threadId: thread.id,
+          workspaceName,
+          payload: {},
+          source: "worker_testing_config_submitted",
+        }));
       }
 
       return c.json({ ok: true });
@@ -3396,7 +3412,13 @@ WHERE id = $1
 
       await db.query(`UPDATE tasks SET status = 'queued' WHERE id = $1`, [taskId]);
       emitTaskStatus(workspaceName, taskId, "queued", "task_stopped");
-      publishThreadUpdated(workspaceName, thread.id, "task_stopped");
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.THREAD_UPDATED,
+        threadId: thread.id,
+        workspaceName,
+        payload: {},
+        source: "task_stopped",
+      }));
 
       const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
       if (latestExecuteTurn && task.assigned_to) {
@@ -3422,7 +3444,13 @@ WHERE id = $1
           eventName: "task_stopped",
           payload: { previous_status: task.status },
         });
-        publishThreadUpdated(workspaceName, thread.id, "task_stopped");
+        eventBus.emit(createEvent({
+          type: EVENT_TYPES.THREAD_UPDATED,
+          threadId: thread.id,
+          workspaceName,
+          payload: {},
+          source: "task_stopped",
+        }));
       }
 
       await db.query(
@@ -3562,7 +3590,13 @@ LIMIT 1
         [taskId],
       );
       emitTaskStatus(workspaceName, taskId, "planning", "plan_question_responded");
-      publishThreadUpdated(workspaceName, thread.id, "human_response_received");
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.THREAD_UPDATED,
+        threadId: thread.id,
+        workspaceName,
+        payload: {},
+        source: "human_response_received",
+      }));
 
       planContinuation = {
         threadId: thread.id,
@@ -3626,7 +3660,13 @@ WHERE id = $1
         [taskId],
       );
       emitTaskStatus(workspaceName, taskId, "queued", "execute_question_responded");
-      publishThreadUpdated(workspaceName, thread.id, "human_response_received");
+      eventBus.emit(createEvent({
+        type: EVENT_TYPES.THREAD_UPDATED,
+        threadId: thread.id,
+        workspaceName,
+        payload: {},
+        source: "human_response_received",
+      }));
 
       requeue = {
         threadId: thread.id,
@@ -3829,8 +3869,22 @@ WHERE id = $1
         tasks: body.tasks,
       },
     });
+    eventBus.emit(createEvent({
+      type: EVENT_TYPES.PLAN_PROPOSED,
+      threadId,
+      turnId,
+      workspaceName,
+      payload: { tasks: body.tasks },
+      source: "cli",
+    }));
 
-    publishThreadUpdated(workspaceName, threadId, "plan_proposal_submitted");
+    eventBus.emit(createEvent({
+      type: EVENT_TYPES.THREAD_UPDATED,
+      threadId,
+      workspaceName,
+      payload: {},
+      source: "plan_proposal_submitted",
+    }));
 
     return c.json({ ok: true, task_count: body.tasks.length });
   });
@@ -3997,6 +4051,15 @@ WHERE id = $1
         force: true,
       });
     }).catch(() => {});
+
+    // Emit plan.approved event
+    eventBus.emit(createEvent({
+      type: EVENT_TYPES.PLAN_APPROVED,
+      threadId,
+      workspaceName,
+      payload: { task_ids: taskIds },
+      source: "execute_proposal",
+    }));
 
     // Close the plan thread
     await closeThread(db, threadId);
@@ -4413,19 +4476,15 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
 
       const drainEvents = async (writeEvent: WriteEventFn): Promise<boolean> => {
         const eventDb = await openDatabase(workspaceName);
-        try {
-          await ensureConversationSchema(eventDb);
-          const events = await getEventsSince(eventDb, threadId, lastSeq);
-          for (const evt of events) {
-            lastSeq = evt.seq;
-            const payload = JSON.parse(evt.payload_json);
-            await writeEvent(evt.event_name, payload, evt.seq);
-            if (evt.event_name === "turn_completed" || evt.event_name === "error" || evt.event_name === "turn_failed") {
-              return true;
-            }
+        await ensureConversationSchema(eventDb);
+        const events = await getEventsSince(eventDb, threadId, lastSeq);
+        for (const evt of events) {
+          lastSeq = evt.seq;
+          const payload = JSON.parse(evt.payload_json);
+          await writeEvent(evt.event_name, payload, evt.seq);
+          if (evt.event_name === "turn_completed" || evt.event_name === "error" || evt.event_name === "turn_failed") {
+            return true;
           }
-        } finally {
-          await eventDb.close();
         }
         return false;
       };
@@ -4439,10 +4498,12 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
           }
 
           // Subscribe to live updates
-          return subscribeThreadUpdates(workspaceName, threadId, () => {
-            void drainEvents(writeEvent).then((finished) => {
-              if (finished) done = true;
-            });
+          return eventBus.on(EVENT_TYPES.THREAD_UPDATED, (event) => {
+            if (event.threadId === threadId && event.workspaceName === workspaceName) {
+              void drainEvents(writeEvent).then((finished) => {
+                if (finished) done = true;
+              });
+            }
           });
         },
         closedSignal: () => done,
