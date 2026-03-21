@@ -477,6 +477,78 @@ export const updateProcessSchema = z
   })
   .strict();
 
+const automationActionTypeSchema = z.enum(["webhook", "create_task", "log"]);
+
+const automationTriggerSchema = z
+  .object({
+    eventType: nonEmptyString,
+    filter: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+const webhookActionSchema = z
+  .object({
+    type: z.literal("webhook"),
+    url: z.string().trim().url(),
+    headers: z.record(z.string(), z.string()).optional(),
+    method: z.string().trim().optional(),
+  })
+  .strict();
+
+const createTaskActionSchema = z
+  .object({
+    type: z.literal("create_task"),
+    title: nonEmptyString,
+    assignedTo: nonEmptyString.optional(),
+  })
+  .strict();
+
+const logActionSchema = z
+  .object({
+    type: z.literal("log"),
+    message: z.string().optional(),
+  })
+  .strict();
+
+const automationActionSchema = z.discriminatedUnion("type", [
+  webhookActionSchema,
+  createTaskActionSchema,
+  logActionSchema,
+]);
+
+export const createAutomationSchema = z
+  .object({
+    name: nonEmptyString,
+    trigger: automationTriggerSchema,
+    action: automationActionSchema,
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
+export const updateAutomationSchema = z
+  .object({
+    name: nonEmptyString.optional(),
+    trigger: automationTriggerSchema.optional(),
+    action: automationActionSchema.optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
+export const queryEventsSchema = z
+  .object({
+    type: z.string().trim().optional(),
+    taskId: z.string().trim().optional(),
+    since: z.string().trim().optional(),
+    limit: positiveIntegerString.optional(),
+  })
+  .strict();
+
+export const automationRunsQuerySchema = z
+  .object({
+    limit: positiveIntegerString.optional(),
+  })
+  .strict();
+
 export type Harness = z.infer<typeof harnessSchema>;
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;

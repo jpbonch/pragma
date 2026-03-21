@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { homedir } from "node:os";
@@ -77,6 +77,7 @@ import {
 import type { HarnessId, TaskStatus, ReasoningEffort } from "./conversation/types";
 import { EventBus, createEvent, EVENT_TYPES } from "./events";
 import type { PragmaEvent } from "./events";
+import { AutomationRegistry, rowToAutomation, automationToRow } from "./events/automations";
 import {
   agentSubmitTestCommandsSchema,
   agentSubmitTestingConfigSchema,
@@ -125,6 +126,10 @@ import {
   dbQuerySchema,
   createProcessSchema,
   updateProcessSchema,
+  createAutomationSchema,
+  updateAutomationSchema,
+  queryEventsSchema,
+  automationRunsQuerySchema,
 } from "./http/schemas";
 import { validateJson, validateQuery } from "./http/validators";
 import { workspaceMiddleware, type WorkspaceEnv } from "./http/middleware";
@@ -875,6 +880,16 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     );
   });
 
+  // Initialize automation registry and load from active workspace if available
+  const automationRegistry = new AutomationRegistry(eventBus);
+  {
+    const activeWs = await getActiveWorkspaceName();
+    if (activeWs) {
+      const db = await openDatabase(activeWs);
+      await automationRegistry.loadFromDatabase(db);
+    }
+  }
+
   await recoverOrphanedTasks();
   if (process.env.PRAGMA_SKIP_PROCESS_RECOVERY !== "1") {
     await recoverOrphanedProcesses();
@@ -980,6 +995,10 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   app.use("/workspace/outputs/files", workspaceMiddleware);
   app.use("/processes", workspaceMiddleware);
   app.use("/processes/*", workspaceMiddleware);
+  app.use("/automations/*", workspaceMiddleware);
+  app.use("/automations", workspaceMiddleware);
+  app.use("/events/*", workspaceMiddleware);
+  app.use("/events", workspaceMiddleware);
 
   const turnRunner = new TurnRunner({
     apiUrl,
@@ -6114,6 +6133,288 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
 
     return c.text(result.rows[0].content);
+  });
+
+  // ---- Automations API ----
+
+  app.get("/automations", async (c) => {
+    const db = c.get("db");
+    const result = await db.query<{
+      id: string;
+      name: string;
+      trigger_event_type: string;
+      trigger_filter_json: string | null;
+      action_type: string;
+      action_config_json: string;
+      enabled: boolean;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `SELECT id, name, trigger_event_type, trigger_filter_json,
+              action_type, action_config_json, enabled, created_at, updated_at
+       FROM workspace_automations ORDER BY created_at DESC`,
+    );
+    return c.json({ automations: result.rows.map(rowToAutomation) });
+  });
+
+  app.post("/automations", validateJson(createAutomationSchema), async (c) => {
+    const db = c.get("db");
+    const body = c.req.valid("json");
+    const id = `auto_${randomBytes(12).toString("hex")}`;
+    const { action_type, action_config_json } = automationToRow({
+      id,
+      name: body.name,
+      trigger: body.trigger,
+      action: body.action,
+      enabled: body.enabled ?? true,
+      createdAt: "",
+      updatedAt: "",
+    });
+
+    await db.query(
+      `INSERT INTO workspace_automations (id, name, trigger_event_type, trigger_filter_json, action_type, action_config_json, enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        id,
+        body.name,
+        body.trigger.eventType,
+        body.trigger.filter ? JSON.stringify(body.trigger.filter) : null,
+        action_type,
+        action_config_json,
+        body.enabled ?? true,
+      ],
+    );
+
+    // Fetch the created row to get timestamps
+    const created = await db.query<{
+      id: string;
+      name: string;
+      trigger_event_type: string;
+      trigger_filter_json: string | null;
+      action_type: string;
+      action_config_json: string;
+      enabled: boolean;
+      created_at: string;
+      updated_at: string;
+    }>(`SELECT * FROM workspace_automations WHERE id = $1`, [id]);
+    const automation = rowToAutomation(created.rows[0]);
+
+    automationRegistry.setDatabase(db);
+    automationRegistry.register(automation);
+    return c.json(automation, 201);
+  });
+
+  app.put("/automations/:id", validateJson(updateAutomationSchema), async (c) => {
+    const db = c.get("db");
+    const automationId = c.req.param("id");
+    const body = c.req.valid("json");
+
+    // Check automation exists
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM workspace_automations WHERE id = $1`,
+      [automationId],
+    );
+    if (existing.rows.length === 0) {
+      throw new PragmaError("AUTOMATION_NOT_FOUND", 404, `Automation not found: ${automationId}`);
+    }
+
+    const updates: string[] = [];
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (body.name !== undefined) {
+      updates.push(`name = $${paramIndex++}`);
+      params.push(body.name);
+    }
+    if (body.trigger !== undefined) {
+      updates.push(`trigger_event_type = $${paramIndex++}`);
+      params.push(body.trigger.eventType);
+      updates.push(`trigger_filter_json = $${paramIndex++}`);
+      params.push(body.trigger.filter ? JSON.stringify(body.trigger.filter) : null);
+    }
+    if (body.action !== undefined) {
+      const { type, ...config } = body.action;
+      updates.push(`action_type = $${paramIndex++}`);
+      params.push(type);
+      updates.push(`action_config_json = $${paramIndex++}`);
+      params.push(JSON.stringify(config));
+    }
+    if (body.enabled !== undefined) {
+      updates.push(`enabled = $${paramIndex++}`);
+      params.push(body.enabled);
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    params.push(automationId);
+
+    await db.query(
+      `UPDATE workspace_automations SET ${updates.join(", ")} WHERE id = $${paramIndex}`,
+      params,
+    );
+
+    // Fetch updated row
+    const updated = await db.query<{
+      id: string;
+      name: string;
+      trigger_event_type: string;
+      trigger_filter_json: string | null;
+      action_type: string;
+      action_config_json: string;
+      enabled: boolean;
+      created_at: string;
+      updated_at: string;
+    }>(`SELECT * FROM workspace_automations WHERE id = $1`, [automationId]);
+    const automation = rowToAutomation(updated.rows[0]);
+
+    // Re-register with updated config
+    automationRegistry.setDatabase(db);
+    automationRegistry.unregister(automationId);
+    automationRegistry.register(automation);
+
+    return c.json(automation);
+  });
+
+  app.delete("/automations/:id", async (c) => {
+    const db = c.get("db");
+    const automationId = c.req.param("id");
+
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM workspace_automations WHERE id = $1`,
+      [automationId],
+    );
+    if (existing.rows.length === 0) {
+      throw new PragmaError("AUTOMATION_NOT_FOUND", 404, `Automation not found: ${automationId}`);
+    }
+
+    automationRegistry.unregister(automationId);
+    await db.query(`DELETE FROM workspace_automations WHERE id = $1`, [automationId]);
+
+    return c.json({ ok: true });
+  });
+
+  app.get("/automations/:id/runs", validateQuery(automationRunsQuerySchema), async (c) => {
+    const db = c.get("db");
+    const automationId = c.req.param("id");
+    const query = c.req.valid("query");
+    const limit = query.limit ?? 50;
+
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM workspace_automations WHERE id = $1`,
+      [automationId],
+    );
+    if (existing.rows.length === 0) {
+      throw new PragmaError("AUTOMATION_NOT_FOUND", 404, `Automation not found: ${automationId}`);
+    }
+
+    const result = await db.query<{
+      id: string;
+      automation_id: string;
+      event_id: string | null;
+      status: string;
+      result_json: string | null;
+      executed_at: string;
+    }>(
+      `SELECT id, automation_id, event_id, status, result_json, executed_at
+       FROM automation_runs
+       WHERE automation_id = $1
+       ORDER BY executed_at DESC
+       LIMIT $2`,
+      [automationId, limit],
+    );
+
+    return c.json({
+      runs: result.rows.map((row) => ({
+        id: row.id,
+        automationId: row.automation_id,
+        eventId: row.event_id,
+        status: row.status,
+        result: row.result_json ? JSON.parse(row.result_json) : null,
+        executedAt: row.executed_at,
+      })),
+    });
+  });
+
+  // ---- Events API ----
+
+  app.get("/events", validateQuery(queryEventsSchema), async (c) => {
+    const db = c.get("db");
+    const query = c.req.valid("query");
+    const limit = Math.min(query.limit ?? 100, 1000);
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (query.type) {
+      conditions.push(`event_type = $${paramIndex++}`);
+      params.push(query.type);
+    }
+    if (query.taskId) {
+      conditions.push(`task_id = $${paramIndex++}`);
+      params.push(query.taskId);
+    }
+    if (query.since) {
+      conditions.push(`created_at > $${paramIndex++}`);
+      params.push(query.since);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    params.push(limit);
+
+    const result = await db.query<{
+      id: string;
+      event_type: string;
+      task_id: string | null;
+      thread_id: string | null;
+      turn_id: string | null;
+      workspace_name: string | null;
+      payload_json: string;
+      source: string;
+      created_at: string;
+    }>(
+      `SELECT id, event_type, task_id, thread_id, turn_id, workspace_name, payload_json, source, created_at
+       FROM pragma_events ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${paramIndex}`,
+      params,
+    );
+
+    return c.json({
+      events: result.rows.map((row) => ({
+        id: row.id,
+        type: row.event_type,
+        taskId: row.task_id,
+        threadId: row.thread_id,
+        turnId: row.turn_id,
+        workspaceName: row.workspace_name,
+        payload: JSON.parse(row.payload_json),
+        source: row.source,
+        createdAt: row.created_at,
+      })),
+    });
+  });
+
+  app.get("/events/stream", async (c) => {
+    const workspaceName = c.get("workspace");
+
+    return createSSEStream(c, {
+      setup: async (writeEvent) => {
+        await writeEvent("ready", { workspace: workspaceName, ts: new Date().toISOString() });
+        return eventBus.on("*", (event) => {
+          if (event.workspaceName === workspaceName) {
+            void writeEvent("event", {
+              id: event.id,
+              type: event.type,
+              taskId: event.taskId ?? null,
+              threadId: event.threadId ?? null,
+              payload: event.payload,
+              source: event.source,
+              timestamp: event.timestamp,
+            });
+          }
+        });
+      },
+    });
   });
 
   app.onError((error, c) => {
