@@ -6,7 +6,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { Client } from "pg";
 import { initializeWorkspaceGit } from "./conversation/gitWorkflow";
 import { ensureConversationSchema } from "./conversation/store";
-import { BUNDLED_SKILLS, PRAGMA_COMMANDS_SKILL_ID } from "./bundledSkills";
+import { BUNDLED_SKILLS } from "./bundledSkills";
 
 export const PRAGMA_DIR = join(homedir(), ".pragma");
 const ACTIVE_WORKSPACE_FILE = join(PRAGMA_DIR, "active_workspace");
@@ -70,6 +70,30 @@ Your task is to:
 - Make focused, minimal diffs.
 - Run builds/tests and fix failures before handoff.
 - Report what changed and any follow-up work.
+
+## Submitting test commands
+
+If you changed code, submit at least one runnable validation command for the task window.
+
+For richer testing UIs with multiple processes and panels, use \`submit-testing-config\`:
+
+\`\`\`
+pragma-so task submit-testing-config --config '<JSON>'
+\`\`\`
+
+The config JSON has: \`processes\` (array of {name, command, cwd?, ready_pattern?}) and \`panels\` (array of panel objects). Panel types: \`web-preview\` ({type, title, process, path?, devices?}), \`api-tester\` ({type, title, process, endpoints: [{method, path, description?, body?, headers?}]}), \`terminal\` ({type, title, command, cwd?}), \`log-viewer\` ({type, title, process}). Optional: \`setup\` (array of setup commands), \`layout\` ("tabs"|"grid").
+
+Example: \`--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'\`
+
+Fallback: for simple single-command cases, use:
+
+\`\`\`
+pragma-so task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]
+\`\`\`
+
+Include the exact run directory for each command (for example: \`--cwd "code/default/my-app"\`).
+
+Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). Do not submit lint/typecheck/build/test commands to the task window. For app tasks, the first submitted command must run the app/service (for example dev/start script with explicit host/port). Provide only commands the human can run safely in this workspace.
 `;
 
 const SCRIBE_AGENT_FILE = `# Scribe
@@ -154,6 +178,30 @@ You are **UI Designer**, an expert user interface designer who creates beautiful
 - **Focus on consistency**: Establish and follow systematic design tokens
 - **Think systematically**: Create component variations that scale across all breakpoints
 - **Ensure accessibility**: Design with keyboard navigation and screen reader support (WCAG AA: 4.5:1 contrast for normal text, 3:1 for large text)
+
+## Submitting test commands
+
+If you changed code, submit at least one runnable validation command for the task window.
+
+For richer testing UIs with multiple processes and panels, use \`submit-testing-config\`:
+
+\`\`\`
+pragma-so task submit-testing-config --config '<JSON>'
+\`\`\`
+
+The config JSON has: \`processes\` (array of {name, command, cwd?, ready_pattern?}) and \`panels\` (array of panel objects). Panel types: \`web-preview\` ({type, title, process, path?, devices?}), \`api-tester\` ({type, title, process, endpoints: [{method, path, description?, body?, headers?}]}), \`terminal\` ({type, title, command, cwd?}), \`log-viewer\` ({type, title, process}). Optional: \`setup\` (array of setup commands), \`layout\` ("tabs"|"grid").
+
+Example: \`--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'\`
+
+Fallback: for simple single-command cases, use:
+
+\`\`\`
+pragma-so task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]
+\`\`\`
+
+Include the exact run directory for each command (for example: \`--cwd "code/default/my-app"\`).
+
+Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). Do not submit lint/typecheck/build/test commands to the task window. For app tasks, the first submitted command must run the app/service (for example dev/start script with explicit host/port). Provide only commands the human can run safely in this workspace.
 `;
 
 type DefaultAgentSeed = {
@@ -1247,15 +1295,6 @@ async function ensureDefaultSkills(db: PGlite): Promise<void> {
     );
   }
 
-  // Assign pragma-commands skill to all worker agents (non-orchestrator)
-  for (const agent of DEFAULT_AGENT_SEEDS) {
-    if (agent.id !== DEFAULT_AGENT_ID) {
-      await db.query(
-        `INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [agent.id, PRAGMA_COMMANDS_SKILL_ID],
-      );
-    }
-  }
 }
 
 const DEFAULT_SCRIBE_AUTOMATION_ID = "auto_scribe_on_complete";

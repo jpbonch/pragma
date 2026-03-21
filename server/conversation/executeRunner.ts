@@ -619,6 +619,7 @@ WHERE id = $1
     let workerPrompt = buildWorkerPrompt({
       task,
       workerName: selectedWorker.name,
+      workerAgentId: selectedWorker.id,
       workerAgentFile: selectedWorker.agent_file ?? "",
       pragmaCliCommand: options.pragmaCliCommand,
       preferredCodePath,

@@ -174,6 +174,7 @@ export function composeOrchestratorTurn(input: {
 export function buildWorkerPrompt(input: {
   task: string;
   workerName: string;
+  workerAgentId?: string;
   workerAgentFile: string;
   pragmaCliCommand?: string;
   preferredCodePath?: string | null;
@@ -216,6 +217,23 @@ export function buildWorkerPrompt(input: {
     "Agent instructions:",
     agentFile || "(No agent file provided. Use pragmatic software engineering judgement.)",
   ];
+
+  // Escalation commands — always present for all workers
+  parts.push(
+    "## Escalation",
+    `If you need clarification: \`${cli} task ask-question --question "..." [--details "..."] [--option "..." --option "..."]\``,
+    `If you are blocked: \`${cli} task request-help --summary "..." [--details "..."]\``,
+    "After either command, STOP immediately.",
+  );
+
+  // db-query — only for the scribe (who may need to inspect task history)
+  if (input.workerAgentId === "pragma-scribe") {
+    parts.push(
+      "## Database queries",
+      `To inspect workspace state (tasks, events, conversation history), run read-only SQL queries: \`${cli} db-query --sql "<SELECT statement>"\``,
+      "Key tables: tasks, agents, conversation_threads, conversation_turns, conversation_messages, conversation_events.",
+    );
+  }
 
   const skillIndex = formatSkillIndex(input.skills, cli);
   if (skillIndex) {
