@@ -63,6 +63,7 @@ export type OpenPlanThreadListItem = {
   created_at: string;
   updated_at: string;
   task_id: string | null;
+  chat_title: string | null;
   latest_plan_assistant_message: string | null;
   first_user_message: string | null;
   has_completed_plan_turn: boolean;

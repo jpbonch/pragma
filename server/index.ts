@@ -3982,6 +3982,22 @@ WHERE id = $1
       }
     }
 
+    // Fire-and-forget: generate an AI title for the plan thread
+    db.query<{ user_message: string }>(
+      `SELECT user_message FROM conversation_turns WHERE thread_id = $1 AND mode = 'plan' ORDER BY created_at ASC LIMIT 1`,
+      [threadId],
+    ).then(async (result) => {
+      const userPrompt = result.rows[0]?.user_message;
+      if (!userPrompt) return;
+      const aiTitle = await generateTitle(db, userPrompt, "");
+      await updateChatThreadMetadata(db, {
+        threadId,
+        title: aiTitle,
+        lastMessageAt: new Date().toISOString(),
+        force: true,
+      });
+    }).catch(() => {});
+
     // Close the plan thread
     await closeThread(db, threadId);
 
@@ -4006,7 +4022,7 @@ WHERE id = $1
     await ensureConversationSchema(db);
     const pendingPlans = await listOpenPlanThreads(db, { limit, cursor });
     const plans = pendingPlans.map((plan) => {
-      const metadata = derivePendingPlanMetadata(plan.first_user_message);
+      const metadata = derivePendingPlanMetadata(plan.first_user_message, plan.chat_title);
       return {
         id: plan.id,
         plan_title: metadata.title,
@@ -6226,8 +6242,10 @@ function deriveChatTitle(userMessage: string, assistantMessage: string): string 
 
 function derivePendingPlanMetadata(
   firstUserMessage: string | null,
+  chatTitle?: string | null,
 ): { title: string; preview: string | null } {
-  const title = firstUserMessage ? truncateChatText(firstUserMessage, 80) : "";
+  const fallbackTitle = firstUserMessage ? truncateChatText(firstUserMessage, 80) : "";
+  const title = (chatTitle && chatTitle.trim()) || fallbackTitle;
   const preview = firstUserMessage ? truncateChatText(firstUserMessage, 140) : "";
 
   return {
