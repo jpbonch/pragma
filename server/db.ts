@@ -1025,6 +1025,50 @@ CREATE TABLE IF NOT EXISTS processes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS pragma_events (
+  id VARCHAR(64) PRIMARY KEY,
+  seq SERIAL,
+  event_type VARCHAR(128) NOT NULL,
+  task_id VARCHAR(64),
+  thread_id VARCHAR(64),
+  turn_id VARCHAR(64),
+  workspace_name VARCHAR(128),
+  payload_json TEXT NOT NULL,
+  source VARCHAR(128) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pragma_events_type ON pragma_events(event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pragma_events_task ON pragma_events(task_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pragma_events_seq ON pragma_events(seq ASC);
+`);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS workspace_automations (
+  id VARCHAR(64) PRIMARY KEY,
+  name TEXT NOT NULL,
+  trigger_event_type VARCHAR(128) NOT NULL,
+  trigger_filter_json TEXT,
+  action_type VARCHAR(32) NOT NULL,
+  action_config_json TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id VARCHAR(64) PRIMARY KEY,
+  automation_id VARCHAR(64) NOT NULL REFERENCES workspace_automations(id) ON DELETE CASCADE,
+  event_id VARCHAR(64),
+  status VARCHAR(16) NOT NULL,
+  result_json TEXT,
+  executed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id, executed_at DESC);
+`);
 }
 
 async function ensureTaskStatusEnumType(db: PGlite): Promise<void> {
