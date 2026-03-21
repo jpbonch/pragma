@@ -552,10 +552,12 @@ async function getTopLevelGitignoredEntries(
   for (const line of output.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // Extract top-level segment only (e.g. "node_modules/" from "node_modules/foo/bar")
-    const firstSlash = trimmed.indexOf("/");
-    const topLevel = firstSlash === -1 ? trimmed : trimmed.slice(0, firstSlash + 1);
-    const name = topLevel.replace(/\/$/, "");
+
+    // Only mirror actual top-level ignored entries. Nested ignored paths such
+    // as "ui/dist/" must not collapse to tracked parent directories like "ui".
+    const name = trimmed.replace(/\/$/, "");
+    if (name.includes("/")) continue;
+
     if (!name || seen.has(name) || excludedEntries.has(name)) continue;
     seen.add(name);
     entries.push(name);

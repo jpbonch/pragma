@@ -9,9 +9,12 @@ export function WebPreviewPanel({ panel, services, config, processStatuses }) {
   const svcStatus = svc?.id ? (processStatuses[svc.id] || svc.status) : null
   const isReady = svcStatus === 'ready'
 
-  const port = svc?.port || 3000
+  const processConfig = Array.isArray(config?.processes)
+    ? config.processes.find((proc) => proc?.name === processName)
+    : null
+  const port = svc?.port || processConfig?.port || panel.port || null
   const path = panel.path || '/'
-  const url = `http://localhost:${port}${path}`
+  const url = port ? `http://localhost:${port}${path}` : ''
 
   function handleRefresh() {
     setIframeKey(k => k + 1)
@@ -51,14 +54,16 @@ export function WebPreviewPanel({ panel, services, config, processStatuses }) {
         <button className="web-preview-device-btn" onClick={handleOpenExternal} title="Open in new tab">
           Open
         </button>
-        <span className="web-preview-url">{url}</span>
+        <span className="web-preview-url">{url || 'Waiting for process URL...'}</span>
       </div>
 
       <div className="web-preview-container">
-        {!isReady ? (
+        {!isReady || !url ? (
           <div className="web-preview-waiting">
             <span className="conv-thinking-dot" />
-            <span style={{ marginLeft: 8 }}>Waiting for server to be ready...</span>
+            <span style={{ marginLeft: 8 }}>
+              {!port ? 'Waiting for process port...' : 'Waiting for server to be ready...'}
+            </span>
           </div>
         ) : (
           <div className={`web-preview-frame ${device}`}>
