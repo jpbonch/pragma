@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
-import type { AdapterSendTurnInput, AdapterSendTurnResult, ConversationAdapter } from "../types";
+import type { AdapterSendTurnInput, AdapterSendTurnResult, ConversationAdapter, ReasoningEffort } from "../types";
 import { registerAdapter } from "../adapterRegistry";
 import {
   runAdapterCommand,
-  withReasoningEffort,
   readString,
   readObject,
   readArray,
@@ -86,8 +85,23 @@ const claudeAdapter: ConversationAdapter = {
   },
 };
 
+/**
+ * Map Pragma reasoning effort to Claude CLI --effort values.
+ * Claude CLI accepts: low | medium | high | max
+ * Pragma has: low | medium | high | extra_high
+ */
+function mapClaudeEffort(effort: ReasoningEffort | undefined): string {
+  switch (effort) {
+    case "low": return "low";
+    case "high": return "high";
+    case "extra_high": return "max";
+    case "medium":
+    default:
+      return "medium";
+  }
+}
+
 function buildClaudeArgs(input: AdapterSendTurnInput): string[] {
-  const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
   const resolvedCwd = resolve(input.cwd);
   const args = [
     "-p",
@@ -102,6 +116,8 @@ function buildClaudeArgs(input: AdapterSendTurnInput): string[] {
     resolvedCwd,
     "--model",
     input.modelId,
+    "--effort",
+    mapClaudeEffort(input.reasoningEffort),
   ];
 
   if (input.mode === "chat") {
@@ -116,7 +132,7 @@ function buildClaudeArgs(input: AdapterSendTurnInput): string[] {
     }
   }
 
-  args.push("--", prompt);
+  args.push("--", input.prompt);
   return args;
 }
 

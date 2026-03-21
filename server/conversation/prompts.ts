@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import type { ReasoningEffort } from "./types";
 
 type WorkerCandidate = {
   id: string;
@@ -12,7 +11,6 @@ type WorkerCandidate = {
 export function buildPrompt(
   mode: "chat" | "plan" | "execute",
   message: string,
-  reasoningEffort: ReasoningEffort = "medium",
   pragmaCliCommand = "pragma-so",
   options: {
     planCandidates?: WorkerCandidate[];
@@ -23,7 +21,6 @@ export function buildPrompt(
   } = {},
 ): string {
   const cleanMessage = message.trim();
-  const reasoningLine = formatReasoningInstruction(reasoningEffort);
   const cli = pragmaCliCommand.trim() || "pragma-so";
 
   if (mode === "chat") {
@@ -51,7 +48,6 @@ export function buildPrompt(
     chatParts.push(
       "Use exploratory probing when useful to understand existing code, context, and constraints before acting.",
       "Answer clearly and concisely.",
-      reasoningLine,
     );
 
     const historyBlock = options.conversationHistory
@@ -123,7 +119,6 @@ export function buildPrompt(
       "- In the execution plan, direct task-specific deliverables (reports/docs/assets) to `outputs/$PRAGMA_TASK_ID/`, not `context/`.",
       "- Reserve `context/` only for enduring project knowledge that should outlive a single task.",
       "- Write the plan as your natural response with clear steps.",
-      reasoningLine,
       "User request:",
       cleanMessage,
     ].join("\n\n");
@@ -133,7 +128,6 @@ export function buildPrompt(
     "You are executing a software task end-to-end.",
     "Begin with exploratory probing as needed so you understand existing structure, context, and constraints.",
     "Use tools as needed and provide a concise final result.",
-    reasoningLine,
     "Task:",
     cleanMessage,
   ].join("\n\n");
@@ -144,12 +138,10 @@ export function composeOrchestratorTurn(input: {
   task: string;
   candidates: WorkerCandidate[];
   forcedRecipientAgentId?: string | null;
-  reasoningEffort?: ReasoningEffort;
   pragmaCliCommand?: string;
   skills?: Array<{ name: string; description: string | null }>;
 }): string {
   const forced = input.forcedRecipientAgentId?.trim() || "";
-  const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
   const cli = input.pragmaCliCommand?.trim() || "pragma-so";
   const candidateLines = input.candidates.map((candidate, index) => {
     const desc = candidate.description ? `; description=${candidate.description}` : "";
@@ -176,8 +168,6 @@ export function composeOrchestratorTurn(input: {
     parts.push(`Forced recipient: ${forced}`);
   }
 
-  parts.push(reasoningLine);
-
   return parts.join("\n\n");
 }
 
@@ -185,7 +175,6 @@ export function buildWorkerPrompt(input: {
   task: string;
   workerName: string;
   workerAgentFile: string;
-  reasoningEffort?: ReasoningEffort;
   pragmaCliCommand?: string;
   preferredCodePath?: string | null;
   taskWorkspaceDir?: string;
@@ -194,7 +183,6 @@ export function buildWorkerPrompt(input: {
 }): string {
   const agentFile = input.workerAgentFile.trim();
   const task = input.task.trim();
-  const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
   const cli = input.pragmaCliCommand?.trim() || "pragma-so";
   const preferredCodePath = input.preferredCodePath?.trim() || "";
   const taskWorkspaceDir = input.taskWorkspaceDir?.trim() || "";
@@ -222,7 +210,6 @@ export function buildWorkerPrompt(input: {
     "- Do not place source code files at workspace root.",
     "Git workflow: You are working in an isolated git worktree on a task branch. Do not run git commit, push, or checkout. Your file changes are automatically committed and merged when the task is approved. Subdirectories under code/ may be independent git repos — run git commands inside them, not at the workspace root.",
     "Before making changes, check if the project has uninstalled dependencies (e.g. missing node_modules/, .venv/, vendor/, etc.) and install them using the appropriate package manager.",
-    reasoningLine,
     "Shared context: the `context/` directory contains markdown knowledge files that help agents understand the project.",
     "Context files should describe **enduring project knowledge** — things that are true about the codebase regardless of any single task. Good examples: overall architecture, how modules connect, deployment setup, testing conventions, non-obvious constraints. Bad examples: what a specific task changed, CSS values, implementation details that are obvious from reading the code. If a future agent could learn it in 30 seconds by reading the relevant file, it does not belong in context. Only create or update context files when you have genuine project-level insight to add. Most tasks should NOT produce context files.",
     input.contextIndex ? `Current context files:\n${input.contextIndex}` : "(No context files yet.)",
@@ -287,17 +274,4 @@ function formatSkillIndex(
     `Available skills (use \`${cli} agent get-skill --name "<name>"\` to read full instructions):`,
     ...lines,
   ].join("\n");
-}
-
-function formatReasoningInstruction(reasoningEffort: ReasoningEffort): string {
-  if (reasoningEffort === "extra_high") {
-    return "Reasoning effort: extra high. Think deeply, consider alternatives, and verify assumptions.";
-  }
-  if (reasoningEffort === "high") {
-    return "Reasoning effort: high. Use thorough reasoning and check edge cases.";
-  }
-  if (reasoningEffort === "low") {
-    return "Reasoning effort: low. Prefer fast, direct reasoning and concise output.";
-  }
-  return "Reasoning effort: medium. Balance depth and speed.";
 }

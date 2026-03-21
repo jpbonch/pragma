@@ -1,5 +1,4 @@
 import type {
-  AdapterSendTurnInput,
   AdapterSendTurnResult,
   ConversationAdapter,
 } from "./types";
@@ -141,19 +140,6 @@ export async function runAdapterCommand(input: RunAdapterCommandInput): Promise<
     sessionId: state.sessionId,
     finalText: state.finalText.trim(),
   };
-}
-
-export function withReasoningEffort(
-  prompt: string,
-  reasoningEffort: AdapterSendTurnInput["reasoningEffort"],
-): string {
-  const effort = reasoningEffort ?? "medium";
-  if (effort === "medium") {
-    return prompt;
-  }
-  const readable =
-    effort === "extra_high" ? "extra high" : effort;
-  return `Reasoning effort is ${readable}. Follow that effort level in your internal reasoning depth.\n\n${prompt}`;
 }
 
 export function safeJsonParse(text: string): unknown {

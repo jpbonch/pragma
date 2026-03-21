@@ -190,7 +190,7 @@ async function runTurn(
       }
     }
 
-    let prompt = buildPrompt(input.mode, input.message, input.reasoningEffort, callbacks.pragmaCliCommand, {
+    let prompt = buildPrompt(input.mode, input.message, callbacks.pragmaCliCommand, {
       planCandidates: planPromptCandidates.map((candidate) => ({
         id: candidate.id,
         name: candidate.name,

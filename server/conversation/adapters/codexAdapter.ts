@@ -1,9 +1,8 @@
 import { resolve } from "node:path";
-import type { AdapterSendTurnInput, AdapterSendTurnResult, ConversationAdapter } from "../types";
+import type { AdapterSendTurnInput, AdapterSendTurnResult, ConversationAdapter, ReasoningEffort } from "../types";
 import { registerAdapter } from "../adapterRegistry";
 import {
   runAdapterCommand,
-  withReasoningEffort,
   readString,
   readObject,
   appendText,
@@ -62,13 +61,30 @@ const codexAdapter: ConversationAdapter = {
   },
 };
 
+/**
+ * Map Pragma reasoning effort to Codex CLI model_reasoning_effort values.
+ * Codex CLI accepts: minimal | low | medium | high | xhigh
+ * Pragma has: low | medium | high | extra_high
+ */
+function mapCodexEffort(effort: ReasoningEffort | undefined): string {
+  switch (effort) {
+    case "low": return "low";
+    case "high": return "high";
+    case "extra_high": return "xhigh";
+    case "medium":
+    default:
+      return "medium";
+  }
+}
+
 function buildCodexArgs(input: AdapterSendTurnInput): string[] {
-  const prompt = withReasoningEffort(input.prompt, input.reasoningEffort);
   const resolvedCwd = resolve(input.cwd);
   const topLevelArgs =
     input.mode === "chat"
       ? ["-s", "read-only", "-a", "never", "-C", resolvedCwd]
       : ["-C", resolvedCwd];
+
+  topLevelArgs.push("-c", `model_reasoning_effort=${mapCodexEffort(input.reasoningEffort)}`);
 
   const execSandboxArgs =
     input.mode === "chat" ? [] : ["-s", "danger-full-access"];
@@ -84,7 +100,7 @@ function buildCodexArgs(input: AdapterSendTurnInput): string[] {
       "--model",
       input.modelId,
       input.sessionId,
-      prompt,
+      input.prompt,
     ];
   }
 
@@ -96,7 +112,7 @@ function buildCodexArgs(input: AdapterSendTurnInput): string[] {
     "--skip-git-repo-check",
     "--model",
     input.modelId,
-    prompt,
+    input.prompt,
   ];
 }
 

@@ -362,7 +362,6 @@ WHERE id = $1
           modelLabel: worker.model_label,
         })),
         forcedRecipientAgentId: requestedRecipientId,
-        reasoningEffort,
         pragmaCliCommand: options.pragmaCliCommand,
         skills: orchestratorSkills,
       });
@@ -621,7 +620,6 @@ WHERE id = $1
       task,
       workerName: selectedWorker.name,
       workerAgentFile: selectedWorker.agent_file ?? "",
-      reasoningEffort,
       pragmaCliCommand: options.pragmaCliCommand,
       preferredCodePath,
       taskWorkspaceDir,
