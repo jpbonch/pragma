@@ -241,6 +241,7 @@ export default function App() {
         const taskId = typeof event?.task_id === 'string' ? event.task_id : ''
         const status = typeof event?.status === 'string' ? event.status : ''
         const threadId = typeof event?.thread_id === 'string' ? event.thread_id : ''
+        const title = typeof event?.title === 'string' ? event.title : ''
 
         if (taskId && status) {
           setTasks((prev) =>
@@ -248,6 +249,7 @@ export default function App() {
               if (task.id !== taskId) return task
               const updates = { ...task, status }
               if (threadId && !task.thread_id) updates.thread_id = threadId
+              if (title) updates.title = title
               return updates
             }),
           )

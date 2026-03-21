@@ -1395,13 +1395,17 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         await writeEvent("ready", { workspace: workspaceName, ts: new Date().toISOString() });
         return eventBus.on(EVENT_TYPES.TASK_STATUS_CHANGED, (event) => {
           if (event.workspaceName === workspaceName) {
-            void writeEvent("task_status_changed", {
+            const sseData: Record<string, unknown> = {
               task_id: event.taskId,
               thread_id: event.threadId,
               status: event.payload.status,
               changed_at: event.payload.changed_at ?? event.timestamp,
               source: event.source,
-            });
+            };
+            if (typeof event.payload.title === "string") {
+              sseData.title = event.payload.title;
+            }
+            void writeEvent("task_status_changed", sseData);
           }
         });
       },
@@ -4078,13 +4082,19 @@ VALUES ($1, $2, 'planning', NULL, NULL, NULL)
       // Fire-and-forget: generate an AI title from the prompt
       generateTitle(db, body.message, "").then(async (aiTitle) => {
         await updateTaskTitle(db, planTaskId, aiTitle);
+        await updateChatThreadMetadata(db, {
+          threadId,
+          title: aiTitle,
+          lastMessageAt: new Date().toISOString(),
+          force: true,
+        });
         const row = await db.query<{ status: TaskStatus }>(
           `SELECT status FROM tasks WHERE id = $1 LIMIT 1`,
           [planTaskId],
         );
         const currentStatus = row.rows[0]?.status;
         if (currentStatus) {
-          emitTaskStatus(workspaceName, planTaskId, currentStatus, "title_generated");
+          emitTaskStatus(workspaceName, planTaskId, currentStatus, "title_generated", undefined, { title: aiTitle });
         }
       }).catch(() => {});
 
