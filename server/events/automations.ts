@@ -19,6 +19,7 @@ export interface Automation {
 export type AutomationAction =
   | { type: "webhook"; url: string; headers?: Record<string, string>; method?: string }
   | { type: "create_task"; title: string; assignedTo?: string }
+  | { type: "execute_task"; prompt: string; recipientAgentId?: string }
   | { type: "log"; message?: string };
 
 function matchesFilter(
@@ -27,7 +28,13 @@ function matchesFilter(
 ): boolean {
   if (!filter) return true;
   for (const key of Object.keys(filter)) {
-    if (payload[key] !== filter[key]) return false;
+    const expected = filter[key];
+    // Support { $ne: value } for not-equal checks
+    if (expected && typeof expected === "object" && "$ne" in expected) {
+      if (payload[key] === expected.$ne) return false;
+    } else {
+      if (payload[key] !== expected) return false;
+    }
   }
   return true;
 }
@@ -44,6 +51,7 @@ async function executeAction(
   automation: Automation,
   event: PragmaEvent,
   db: PGlite,
+  apiUrl: string,
 ): Promise<{ status: string; result: Record<string, any> }> {
   const action = automation.action;
 
@@ -82,6 +90,30 @@ async function executeAction(
         [taskId, title, action.assignedTo ?? null],
       );
       return { status: "success", result: { taskId } };
+    }
+
+    case "execute_task": {
+      const prompt = applyTemplateVars(action.prompt, event);
+      const body: Record<string, string> = { prompt };
+      if (action.recipientAgentId) {
+        body.recipient_agent_id = action.recipientAgentId;
+      }
+      try {
+        const response = await fetch(`${apiUrl}/tasks/execute`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const text = await response.text().catch(() => "");
+          return { status: "error", result: { statusCode: response.status, error: text } };
+        }
+        const data = (await response.json()) as Record<string, unknown>;
+        return { status: "success", result: { taskId: data.task_id } };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { status: "error", result: { error: message } };
+      }
     }
 
     case "log": {
@@ -166,6 +198,7 @@ export class AutomationRegistry {
   private automations = new Map<string, Automation>();
   private db: PGlite | null = null;
   private scheduleTimer: ReturnType<typeof setInterval> | null = null;
+  private apiUrl: string = "";
 
   constructor(eventBus: EventBus) {
     this.eventBus = eventBus;
@@ -173,6 +206,10 @@ export class AutomationRegistry {
 
   setDatabase(db: PGlite): void {
     this.db = db;
+  }
+
+  setApiUrl(url: string): void {
+    this.apiUrl = url;
   }
 
   async loadFromDatabase(db: PGlite): Promise<void> {
@@ -222,9 +259,10 @@ export class AutomationRegistry {
         if (!matchesFilter(automation.trigger.filter, event.payload)) return;
         if (!this.db) return;
         const db = this.db;
+        const apiUrl = this.apiUrl;
         void (async () => {
           try {
-            const { status, result } = await executeAction(automation, event, db);
+            const { status, result } = await executeAction(automation, event, db, apiUrl);
             await recordRun(db, automation.id, event.id, status, result);
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
@@ -328,7 +366,7 @@ export class AutomationRegistry {
 
       // Execute the action
       try {
-        const { status, result } = await executeAction(automation, syntheticEvent, db);
+        const { status, result } = await executeAction(automation, syntheticEvent, db, this.apiUrl);
         await recordRun(db, automation.id, syntheticEvent.id, status, result);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -368,6 +406,9 @@ export function rowToAutomation(row: AutomationRow): Automation {
       break;
     case "create_task":
       action = { type: "create_task", title: config.title, assignedTo: config.assignedTo };
+      break;
+    case "execute_task":
+      action = { type: "execute_task", prompt: config.prompt, recipientAgentId: config.recipientAgentId };
       break;
     case "log":
       action = { type: "log", message: config.message };

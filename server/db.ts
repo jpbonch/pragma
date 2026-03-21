@@ -12,6 +12,7 @@ export const PRAGMA_DIR = join(homedir(), ".pragma");
 const ACTIVE_WORKSPACE_FILE = join(PRAGMA_DIR, "active_workspace");
 const RESERVED_ROOT_NAMES = new Set(["db", "workspace", "worktrees"]);
 export const DEFAULT_AGENT_ID = "pragma-orchestrator";
+export const SCRIBE_AGENT_ID = "pragma-scribe";
 const OPEN_DATABASES = new Map<string, Promise<PGlite>>();
 
 const DEFAULT_HARNESS_MODELS: Record<string, { label: string; id: string }> = {
@@ -69,6 +70,36 @@ Your task is to:
 - Make focused, minimal diffs.
 - Run builds/tests and fix failures before handoff.
 - Report what changed and any follow-up work.
+`;
+
+const SCRIBE_AGENT_FILE = `# Scribe
+
+You are the Scribe agent. After every completed task, you review what happened and extract **enduring project knowledge** into the workspace's \`context/\` folder.
+
+## What to extract
+
+- **Decisions & constraints** — Choices made (or discovered) during the task that would affect how future work is approached. Why something is done a certain way, especially when the reason isn't obvious.
+- **Process & conventions** — Unwritten rules, preferred workflows, naming schemes, formatting standards, or stakeholder preferences that aren't captured in any existing documentation.
+- **Dependencies & relationships** — People, teams, tools, services, accounts, data sources, or external systems involved — and how they connect. Who owns what. What breaks if something changes.
+- **Gotchas & edge cases** — Non-obvious pitfalls, exceptions to general rules, things that almost went wrong, counterintuitive behaviors, or common misunderstandings.
+- **Key facts & definitions** — Domain-specific terminology, metrics, thresholds, or reference data that an agent would need to do related work correctly.
+
+## What NOT to extract
+
+- What the task accomplished (the task record already captures that).
+- Information that's obvious from reading the relevant files or documents.
+- General domain knowledge an LLM would already know.
+- Vague observations ("the project is complex", "stakeholders were helpful").
+- Temporary state that will be stale within days (unless it's a deadline).
+
+## Output
+
+- Create or update markdown files in the \`context/\` directory.
+- Use descriptive filenames (e.g. \`context/deployment-setup.md\`, \`context/auth-conventions.md\`).
+- Keep each file focused on one topic. Merge into existing files when the topic already exists.
+- If there is nothing meaningful to extract, report that and do not create files.
+
+Return a concise final result listing which context files were created or updated, or state that no updates were needed.
 `;
 
 const UI_DESIGNER_AGENT_FILE = `# UI Designer
@@ -167,6 +198,17 @@ const DEFAULT_AGENT_SEEDS: DefaultAgentSeed[] = [
     status: "idle",
     agent_file: UI_DESIGNER_AGENT_FILE,
     emoji: "🎨",
+    harness: "claude_code",
+    model_label: "Opus 4.6",
+    model_id: "opus",
+  },
+  {
+    id: SCRIBE_AGENT_ID,
+    name: "Scribe",
+    description: "Reviews completed tasks and updates the context folder with enduring project knowledge.",
+    status: "idle",
+    agent_file: SCRIBE_AGENT_FILE,
+    emoji: "📝",
     harness: "claude_code",
     model_label: "Opus 4.6",
     model_id: "opus",
@@ -437,6 +479,7 @@ export async function initializeDatabase(workspaceName: string, orchestratorHarn
     await ensureDefaultAgents(db, orchestratorHarness);
     await ensureDefaultHuman(db);
     await ensureConversationSchema(db);
+    await ensureDefaultAutomations(db);
   } finally {
     await db.close();
   }
@@ -571,6 +614,7 @@ async function initializeWorkspaceDatabase(dbDir: string): Promise<PGlite> {
   await ensureDefaultHuman(db);
   await ensureDefaultSkills(db);
   await ensureConversationSchema(db);
+  await ensureDefaultAutomations(db);
   return db;
 }
 
@@ -1212,6 +1256,28 @@ async function ensureDefaultSkills(db: PGlite): Promise<void> {
       );
     }
   }
+}
+
+const DEFAULT_SCRIBE_AUTOMATION_ID = "auto_scribe_on_complete";
+
+async function ensureDefaultAutomations(db: PGlite): Promise<void> {
+  await db.query(
+    `INSERT INTO workspace_automations
+       (id, name, trigger_event_type, trigger_filter_json, trigger_type, action_type, action_config_json, enabled)
+     VALUES ($1, $2, $3, $4, 'event', $5, $6, true)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      DEFAULT_SCRIBE_AUTOMATION_ID,
+      "Scribe: update context after task completion",
+      "task.completed",
+      JSON.stringify({ assigned_to: { $ne: SCRIBE_AGENT_ID } }),
+      "execute_task",
+      JSON.stringify({
+        prompt: "A task was just completed (task ID: {{event.taskId}}). Review what happened in that task — look at its changes, conversations, and outcomes — then update the context/ folder with any enduring project knowledge worth preserving. If there is nothing meaningful to extract, say so and do not create files.",
+        recipientAgentId: SCRIBE_AGENT_ID,
+      }),
+    ],
+  );
 }
 
 async function pathExists(path: string): Promise<boolean> {

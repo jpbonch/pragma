@@ -35,6 +35,7 @@ const TRIGGER_OPTIONS = [
 const ACTION_TYPES = [
   { value: 'webhook', label: 'Webhook' },
   { value: 'create_task', label: 'Create Task' },
+  { value: 'execute_task', label: 'Execute Task' },
   { value: 'log', label: 'Log' },
 ]
 
@@ -140,6 +141,28 @@ function ActionConfigForm({ actionType, config, onChange }) {
           placeholder="agent-id (optional)"
           value={config.agent_id || ''}
           onChange={(e) => onChange({ ...config, agent_id: e.target.value })}
+        />
+      </div>
+    )
+  }
+
+  if (actionType === 'execute_task') {
+    return (
+      <div className="aut-action-fields">
+        <label className="aut-field-label">Prompt</label>
+        <textarea
+          className="aut-textarea"
+          placeholder="Review task {{event.taskId}} and update context..."
+          value={config.prompt || ''}
+          rows={4}
+          onChange={(e) => onChange({ ...config, prompt: e.target.value })}
+        />
+        <label className="aut-field-label">Recipient agent ID (optional)</label>
+        <input
+          className="aut-input"
+          placeholder="agent-id (optional, skips orchestrator)"
+          value={config.recipientAgentId || ''}
+          onChange={(e) => onChange({ ...config, recipientAgentId: e.target.value })}
         />
       </div>
     )

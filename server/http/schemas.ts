@@ -516,6 +516,14 @@ const createTaskActionSchema = z
   })
   .strict();
 
+const executeTaskActionSchema = z
+  .object({
+    type: z.literal("execute_task"),
+    prompt: nonEmptyString,
+    recipientAgentId: nonEmptyString.optional(),
+  })
+  .strict();
+
 const logActionSchema = z
   .object({
     type: z.literal("log"),
@@ -526,6 +534,7 @@ const logActionSchema = z
 const automationActionSchema = z.discriminatedUnion("type", [
   webhookActionSchema,
   createTaskActionSchema,
+  executeTaskActionSchema,
   logActionSchema,
 ]);
 

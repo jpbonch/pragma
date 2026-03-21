@@ -229,7 +229,7 @@ async function completeChainTasks(
   db: PGlite,
   workspacePaths: ReturnType<typeof getWorkspacePaths>,
   chainTaskIds: string[],
-  emitTaskStatus: (workspaceName: string, taskId: string, status: TaskStatus, source: string) => void,
+  emitTaskStatus: (workspaceName: string, taskId: string, status: TaskStatus, source: string, threadId?: string, extra?: Record<string, unknown>) => void,
   executeRunner: { abort(taskId: string): void },
   workspaceName: string,
   source: string,
@@ -238,11 +238,15 @@ async function completeChainTasks(
     await syncTaskOutputsBackToWorkspace({ workspacePaths, taskId: chainId });
     const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
     await mkdir(mergedOutputDir, { recursive: true });
+    const taskRow = await db.query<{ assigned_to: string | null }>(
+      `SELECT assigned_to FROM tasks WHERE id = $1 LIMIT 1`,
+      [chainId],
+    );
     await db.query(
       `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
       [chainId, mergedOutputDir],
     );
-    emitTaskStatus(workspaceName, chainId, "completed", source);
+    emitTaskStatus(workspaceName, chainId, "completed", source, undefined, { assigned_to: taskRow.rows[0]?.assigned_to ?? null });
     executeRunner.abort(chainId);
     await deleteTaskWorktree({ workspacePaths, taskId: chainId });
   }
@@ -896,6 +900,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     await recoverOrphanedProcesses();
   }
   const apiUrl = process.env.PRAGMA_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
+  automationRegistry.setApiUrl(apiUrl);
   const pragmaCliCommand = resolvePragmaCliCommand(__dirname);
   const executeRunner = new ExecuteRunner({
     apiUrl,
@@ -947,13 +952,15 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     status: TaskStatus,
     source: string,
     threadId?: string,
+    extra?: Record<string, unknown>,
   ): void => {
+    const basePayload = { status, changed_at: new Date().toISOString(), ...extra };
     eventBus.emit(createEvent({
       type: EVENT_TYPES.TASK_STATUS_CHANGED,
       taskId,
       threadId,
       workspaceName,
-      payload: { status, changed_at: new Date().toISOString() },
+      payload: basePayload,
       source,
     }));
 
@@ -964,7 +971,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         taskId,
         threadId,
         workspaceName,
-        payload: { status, changed_at: new Date().toISOString() },
+        payload: basePayload,
         source,
       }));
     } else if (status === "failed") {
@@ -973,7 +980,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         taskId,
         threadId,
         workspaceName,
-        payload: { status, changed_at: new Date().toISOString() },
+        payload: basePayload,
         source,
       }));
     }
@@ -2233,7 +2240,7 @@ WHERE id = $1
 `,
         [taskId, nextStatus, mergedOutputDir],
       );
-      emitTaskStatus(workspaceName, taskId, nextStatus, "review_mark_completed");
+      emitTaskStatus(workspaceName, taskId, nextStatus, "review_mark_completed", undefined, { assigned_to: task.assigned_to ?? null });
       executeRunner.abort(taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
 
@@ -2297,11 +2304,15 @@ WHERE id = $1
         // Mark all chain tasks as completed
         for (const chainId of chainTaskIds) {
           const mergedOutputDir = getTaskMainOutputDir(workspacePaths, chainId);
+          const chainTask = await db.query<{ assigned_to: string | null }>(
+            `SELECT assigned_to FROM tasks WHERE id = $1 LIMIT 1`,
+            [chainId],
+          );
           await db.query(
             `UPDATE tasks SET status = 'completed', output_dir = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
             [chainId, mergedOutputDir],
           );
-          emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action");
+          emitTaskStatus(workspaceName, chainId, "completed", "review_chain_action", undefined, { assigned_to: chainTask.rows[0]?.assigned_to ?? null });
         }
 
         await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
@@ -2363,7 +2374,7 @@ WHERE id = $1
         `UPDATE tasks SET status = $2, output_dir = $3, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
         [taskId, nextStatus, mergedOutputDir],
       );
-      emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+      emitTaskStatus(workspaceName, taskId, nextStatus, "review_action", undefined, { assigned_to: task.assigned_to ?? null });
       executeRunner.abort(taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
       return c.json({ ok: true, status: nextStatus, merge_state: "no_changes", conflicts: [] });
@@ -2390,7 +2401,7 @@ WHERE id = $1
 `,
         [taskId, nextStatus, mergedOutputDir],
       );
-      emitTaskStatus(workspaceName, taskId, nextStatus, "review_action");
+      emitTaskStatus(workspaceName, taskId, nextStatus, "review_action", undefined, { assigned_to: task.assigned_to ?? null });
       await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
       executeRunner.abort(taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
