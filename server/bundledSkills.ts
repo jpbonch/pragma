@@ -14,67 +14,7 @@ export interface BundledSkill {
 const BT = "`";
 const BT3 = "```";
 
-export const PRAGMA_COMMANDS_SKILL_ID = "skill_bundled_cmds";
-
 export const BUNDLED_SKILLS: BundledSkill[] = [
-  {
-    id: PRAGMA_COMMANDS_SKILL_ID,
-    name: "pragma-commands",
-    description:
-      "Full Pragma CLI reference for worker agents. Covers asking questions, requesting help, submitting testing configs, and running database queries.",
-    content: `---
-name: pragma-commands
-description: Full Pragma CLI reference for worker agents.
----
-
-# Pragma CLI Commands
-
-## Asking questions
-
-If you need clarification from the human, run:
-
-${BT3}
-pragma-so task ask-question --question "<question>" [--details "<optional context>"] [--option "<choice>" --option "<choice>" ...]
-${BT3}
-
-Use --option flags when there are a small number of concrete choices (2-5). Omit --option for open-ended questions.
-
-## Requesting help
-
-If you are blocked and need human help, run:
-
-${BT3}
-pragma-so task request-help --summary "<short summary>" [--details "<optional context>"]
-${BT3}
-
-After either CLI escalation command, stop doing further work. Do not ask for clarification/help only in plain text without calling the CLI.
-
-## Submitting testing config
-
-If you changed code, submit a testing config for the task window so the reviewer can validate your changes. Services start immediately on submission.
-
-${BT3}
-pragma-so task submit-testing-config --config-file <path>
-${BT3}
-
-Or inline: ${BT}pragma-so task submit-testing-config --config '<JSON>'${BT}
-
-The config JSON uses ${BT}services${BT} (array of service objects). Each service has: ${BT}command${BT} (required), ${BT}cwd${BT}? , ${BT}name${BT}? (auto-generated if omitted), and ${BT}panels${BT} (array of panel objects, min 1). Panel types: ${BT}web-preview${BT} ({type, title, path?, devices?}), ${BT}api-tester${BT} ({type, title, endpoints: [{method, path, description?, body?, headers?}]}), ${BT}terminal${BT} ({type, title, command, cwd?}), ${BT}log-viewer${BT} ({type, title}). Optional top-level: ${BT}setup${BT} (array of setup commands), ${BT}layout${BT} ("tabs"|"grid").
-
-Example: ${BT}--config '{"services":[{"command":"npm run dev","cwd":"code/my-app","name":"server","panels":[{"type":"web-preview","title":"App"}]}]}'${BT}
-
-Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). For app tasks, the testing config should run the app/service (for example dev/start script with explicit host/port).
-
-## Database queries
-
-To inspect workspace state (tasks, events, conversation history), run read-only SQL queries:
-
-${BT3}
-pragma-so db-query --sql "<SELECT statement>"
-${BT3}
-
-Key tables: tasks, agents, conversation_threads, conversation_turns, conversation_messages, conversation_events.`,
-  },
   {
     id: "skill_bundled_docx",
     name: "docx",
