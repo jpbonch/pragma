@@ -535,7 +535,7 @@ export function ConnectionsView() {
     <section className="cn">
       <div className="cn-header">
         <div className="cn-header-inner">
-          <h1 className="cn-title">Skills &amp; Connections</h1>
+          <h1 className="cn-title">Skills</h1>
         </div>
       </div>
 
