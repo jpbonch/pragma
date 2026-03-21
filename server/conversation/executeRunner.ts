@@ -19,7 +19,7 @@ import {
 } from "./gitWorkflow";
 import type { TaskGitState } from "./gitWorkflow";
 import { runCommand } from "../process/runCommand";
-import { buildConversationHistoryBlock, buildOrchestratorPrompt, buildWorkerPrompt } from "./prompts";
+import { buildConversationHistoryBlock, composeOrchestratorTurn, buildWorkerPrompt } from "./prompts";
 import {
   closeThread,
   completeTurn,
@@ -351,7 +351,8 @@ WHERE id = $1
 
       const orchestratorSkills = await listAgentSkills(db, orchestrator.id);
 
-      const orchestratorPrompt = buildOrchestratorPrompt({
+      const orchestratorPrompt = composeOrchestratorTurn({
+        agentFile: orchestrator.agent_file ?? "",
         task,
         candidates: workers.map((worker) => ({
           id: worker.id,

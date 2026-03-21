@@ -139,7 +139,8 @@ export function buildPrompt(
   ].join("\n\n");
 }
 
-export function buildOrchestratorPrompt(input: {
+export function composeOrchestratorTurn(input: {
+  agentFile: string;
   task: string;
   candidates: WorkerCandidate[];
   forcedRecipientAgentId?: string | null;
@@ -150,39 +151,32 @@ export function buildOrchestratorPrompt(input: {
   const forced = input.forcedRecipientAgentId?.trim() || "";
   const reasoningLine = formatReasoningInstruction(input.reasoningEffort ?? "medium");
   const cli = input.pragmaCliCommand?.trim() || "pragma-so";
-  const selectRecipientCommand = `${cli} task select-recipient --agent-id <candidate_id> --reason "<one sentence reason>"`;
   const candidateLines = input.candidates.map((candidate, index) => {
     const desc = candidate.description ? `; description=${candidate.description}` : "";
     return `${index + 1}. id=${candidate.id}; name=${candidate.name}${desc}; harness=${candidate.harness}; model=${candidate.modelLabel}`;
   });
 
   const parts = [
-    "You are an Orchestrator.",
-    "Your only task is to pick the best worker agent for the task below.",
-    "Do not execute the task.",
+    input.agentFile.trim(),
     `Use this Pragma CLI command prefix: ${cli}`,
-    "Call exactly one CLI command to persist the selected worker:",
-    selectRecipientCommand,
-    "Rules:",
-    "- You MUST execute the command exactly once.",
-    "- agent-id MUST be one of the listed candidate ids.",
-    "- reason must be one sentence.",
-    "- Do not output JSON tags or any RECIPIENT payload.",
-    reasoningLine,
-    forced
-      ? `- A recipient was manually requested. You MUST choose this exact agent id: ${forced}`
-      : "- If no candidate is suitable, still choose the closest match.",
-    "Task:",
-    input.task.trim(),
-    "Candidate workers:",
-    candidateLines.length > 0 ? candidateLines.join("\n") : "(none)",
-    "After the command succeeds, return a concise plain-text confirmation.",
   ];
 
   const skillIndex = formatSkillIndex(input.skills, cli);
   if (skillIndex) {
     parts.push(skillIndex);
   }
+
+  parts.push(
+    "---",
+    `Task: ${input.task.trim()}`,
+    `Candidates:\n${candidateLines.length > 0 ? candidateLines.join("\n") : "(none)"}`,
+  );
+
+  if (forced) {
+    parts.push(`Forced recipient: ${forced}`);
+  }
+
+  parts.push(reasoningLine);
 
   return parts.join("\n\n");
 }
@@ -204,11 +198,6 @@ export function buildWorkerPrompt(input: {
   const cli = input.pragmaCliCommand?.trim() || "pragma-so";
   const preferredCodePath = input.preferredCodePath?.trim() || "";
   const taskWorkspaceDir = input.taskWorkspaceDir?.trim() || "";
-  const askQuestionCommand = `${cli} task ask-question --question "<question>" [--details "<optional context>"] [--option "<choice>" --option "<choice>" ...]`;
-  const requestHelpCommand = `${cli} task request-help --summary "<short summary>" [--details "<optional context>"]`;
-  const submitTestsCommand = `${cli} task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]`;
-  const submitTestingConfigCommand = `${cli} task submit-testing-config --config '<JSON>'`;
-  const dbQueryCommand = `${cli} db-query --sql "<SELECT statement>"`;
   const codePathPolicyLine = preferredCodePath
     ? taskWorkspaceDir
       ? `- Put code/source changes under \`${join(taskWorkspaceDir, preferredCodePath)}/\` (relative: \`${preferredCodePath}/\`) unless the task explicitly targets another repo inside this task workspace.`
@@ -233,27 +222,6 @@ export function buildWorkerPrompt(input: {
     "- Do not place source code files at workspace root.",
     "Git workflow: You are working in an isolated git worktree on a task branch. Do not run git commit, push, or checkout. Your file changes are automatically committed and merged when the task is approved. Subdirectories under code/ may be independent git repos — run git commands inside them, not at the workspace root.",
     "Before making changes, check if the project has uninstalled dependencies (e.g. missing node_modules/, .venv/, vendor/, etc.) and install them using the appropriate package manager.",
-    "If you need clarification from the human, run:",
-    askQuestionCommand,
-    "Use --option flags when there are a small number of concrete choices (2-5). Omit --option for open-ended questions.",
-    "If you are blocked and need human help, run:",
-    requestHelpCommand,
-    "If you changed code, submit at least one runnable validation command for the task window.",
-    `For richer testing UIs with multiple processes and panels, use \`submit-testing-config\`:`,
-    submitTestingConfigCommand,
-    `The config JSON has: \`processes\` (array of {name, command, cwd?, ready_pattern?}) and \`panels\` (array of panel objects). Panel types: \`web-preview\` ({type, title, process, path?, devices?}), \`api-tester\` ({type, title, process, endpoints: [{method, path, description?, body?, headers?}]}), \`terminal\` ({type, title, command, cwd?}), \`log-viewer\` ({type, title, process}). Optional: \`setup\` (array of setup commands), \`layout\` ("tabs"|"grid").`,
-    `Example: \`--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'\``,
-    `Fallback: for simple single-command cases, use:`,
-    "Include the exact run directory for each command (for example: `--cwd \"code/default/my-app\"`):",
-    submitTestsCommand,
-    "Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification).",
-    "Do not submit lint/typecheck/build/test commands to the task window.",
-    "For app tasks, the first submitted command must run the app/service (for example dev/start script with explicit host/port).",
-    "Provide only commands the human can run safely in this workspace.",
-    "After either CLI escalation command, stop doing further work.",
-    "Do not ask for clarification/help only in plain text without calling the CLI.",
-    "To inspect workspace state (tasks, events, conversation history), run read-only SQL queries:",
-    dbQueryCommand,
     reasoningLine,
     "Shared context: the `context/` directory contains markdown knowledge files that help agents understand the project.",
     "Context files should describe **enduring project knowledge** — things that are true about the codebase regardless of any single task. Good examples: overall architecture, how modules connect, deployment setup, testing conventions, non-obvious constraints. Bad examples: what a specific task changed, CSS values, implementation details that are obvious from reading the code. If a future agent could learn it in 30 seconds by reading the relevant file, it does not belong in context. Only create or update context files when you have genuine project-level insight to add. Most tasks should NOT produce context files.",

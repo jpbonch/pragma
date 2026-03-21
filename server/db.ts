@@ -6,7 +6,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { Client } from "pg";
 import { initializeWorkspaceGit } from "./conversation/gitWorkflow";
 import { ensureConversationSchema } from "./conversation/store";
-import { BUNDLED_SKILLS } from "./bundledSkills";
+import { BUNDLED_SKILLS, PRAGMA_COMMANDS_SKILL_ID } from "./bundledSkills";
 
 export const PRAGMA_DIR = join(homedir(), ".pragma");
 const ACTIVE_WORKSPACE_FILE = join(PRAGMA_DIR, "active_workspace");
@@ -42,27 +42,22 @@ type DbOwnerLock = {
 
 export const DEFAULT_AGENT_FILE = `# Orchestrator
 
-You are the orchestrator agent for Pragma.
+You are the Orchestrator agent for Pragma.
 
-Your task is to:
-- Plan tasks into clear, ordered steps.
-- Spawn specialized agents to execute those steps.
-- Coordinate progress across agents.
-- Track status, risks, and blockers.
-- Produce concise updates and a final combined result.
+Your only job is to pick the single best worker agent for each incoming task. You do NOT execute the task yourself.
 
-## Pragma Commands
-- \`pragma-so setup\`: Calls the API setup endpoint. This only bootstraps \`~/.pragma\`.
-- \`pragma-so create-task <title> [--status <status>] [--assigned-to <agent_id>] [--output-dir <path>]\`: Calls the API to create a row in the \`tasks\` table. Default status is \`queued\`.
-- \`pragma-so list-tasks [--status <status>] [--limit <n>]\`: Calls the API to list tasks from newest to oldest.
-- \`pragma-so task select-recipient --agent-id <id> --reason "<text>"\`: Persist orchestrator recipient selection.
-- \`pragma-so task plan-select-recipient --agent-id <id> --reason "<text>"\`: Persist recipient selection for the current plan turn.
-- \`pragma-so task ask-question --question "<text>" [--details "<text>"]\`: Ask the human a blocking question.
-- \`pragma-so task request-help --summary "<text>" [--details "<text>"]\`: Escalate for human help.
-- \`pragma-so db-query --sql "<SELECT statement>"\`: Run a read-only SQL query against the workspace database. Key tables: tasks, agents, conversation_threads, conversation_turns, conversation_messages, conversation_events.
-- \`pragma-so server [--port <n>]\`: Starts the Pragma API server.
-- \`pragma-so ui [--port <n>] [--api-url <url>]\`: Starts the Pragma UI.
-- \`pragma-so\` (no args): Starts server + UI and opens the UI.
+## Rules
+- You MUST call exactly one CLI command per turn: \`select-recipient\`.
+- The \`--agent-id\` MUST be one of the listed candidate ids.
+- The \`--reason\` must be one sentence.
+- Do not output JSON tags or any RECIPIENT payload.
+- If no candidate is a perfect fit, still choose the closest match.
+- After the command succeeds, return a concise plain-text confirmation.
+
+## select-recipient command
+\`\`\`
+pragma-so task select-recipient --agent-id <candidate_id> --reason "<one sentence reason>"
+\`\`\`
 `;
 
 const CODER_AGENT_FILE = `# Coder
@@ -1188,6 +1183,16 @@ async function ensureDefaultSkills(db: PGlite): Promise<void> {
        ON CONFLICT (id) DO NOTHING`,
       [skill.id, skill.name, skill.description, skill.content],
     );
+  }
+
+  // Assign pragma-commands skill to all worker agents (non-orchestrator)
+  for (const agent of DEFAULT_AGENT_SEEDS) {
+    if (agent.id !== DEFAULT_AGENT_ID) {
+      await db.query(
+        `INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [agent.id, PRAGMA_COMMANDS_SKILL_ID],
+      );
+    }
   }
 }
 

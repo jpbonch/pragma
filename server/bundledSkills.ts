@@ -14,7 +14,75 @@ export interface BundledSkill {
 const BT = "`";
 const BT3 = "```";
 
+export const PRAGMA_COMMANDS_SKILL_ID = "skill_bundled_cmds";
+
 export const BUNDLED_SKILLS: BundledSkill[] = [
+  {
+    id: PRAGMA_COMMANDS_SKILL_ID,
+    name: "pragma-commands",
+    description:
+      "Full Pragma CLI reference for worker agents. Covers asking questions, requesting help, submitting test commands, testing configs, and running database queries.",
+    content: `---
+name: pragma-commands
+description: Full Pragma CLI reference for worker agents.
+---
+
+# Pragma CLI Commands
+
+## Asking questions
+
+If you need clarification from the human, run:
+
+${BT3}
+pragma-so task ask-question --question "<question>" [--details "<optional context>"] [--option "<choice>" --option "<choice>" ...]
+${BT3}
+
+Use --option flags when there are a small number of concrete choices (2-5). Omit --option for open-ended questions.
+
+## Requesting help
+
+If you are blocked and need human help, run:
+
+${BT3}
+pragma-so task request-help --summary "<short summary>" [--details "<optional context>"]
+${BT3}
+
+After either CLI escalation command, stop doing further work. Do not ask for clarification/help only in plain text without calling the CLI.
+
+## Submitting test commands
+
+If you changed code, submit at least one runnable validation command for the task window.
+
+For richer testing UIs with multiple processes and panels, use ${BT}submit-testing-config${BT}:
+
+${BT3}
+pragma-so task submit-testing-config --config '<JSON>'
+${BT3}
+
+The config JSON has: ${BT}processes${BT} (array of {name, command, cwd?, ready_pattern?}) and ${BT}panels${BT} (array of panel objects). Panel types: ${BT}web-preview${BT} ({type, title, process, path?, devices?}), ${BT}api-tester${BT} ({type, title, process, endpoints: [{method, path, description?, body?, headers?}]}), ${BT}terminal${BT} ({type, title, command, cwd?}), ${BT}log-viewer${BT} ({type, title, process}). Optional: ${BT}setup${BT} (array of setup commands), ${BT}layout${BT} ("tabs"|"grid").
+
+Example: ${BT}--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'${BT}
+
+Fallback: for simple single-command cases, use:
+
+${BT3}
+pragma-so task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]
+${BT3}
+
+Include the exact run directory for each command (for example: ${BT}--cwd "code/default/my-app"${BT}).
+
+Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). Do not submit lint/typecheck/build/test commands to the task window. For app tasks, the first submitted command must run the app/service (for example dev/start script with explicit host/port). Provide only commands the human can run safely in this workspace.
+
+## Database queries
+
+To inspect workspace state (tasks, events, conversation history), run read-only SQL queries:
+
+${BT3}
+pragma-so db-query --sql "<SELECT statement>"
+${BT3}
+
+Key tables: tasks, agents, conversation_threads, conversation_turns, conversation_messages, conversation_events.`,
+  },
   {
     id: "skill_bundled_docx",
     name: "docx",
