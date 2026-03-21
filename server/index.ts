@@ -787,14 +787,6 @@ async function recoverOrphanedTasks(): Promise<void> {
         eventName: "error",
         payload: { code: "SERVER_RESTART", message: "Server restarted while turn was in progress" },
       });
-      EventBus.getInstance().emit(createEvent({
-        type: EVENT_TYPES.ERROR,
-        threadId: turn.thread_id,
-        turnId: turn.id,
-        workspaceName,
-        payload: { code: "SERVER_RESTART", message: "Server restarted while turn was in progress" },
-        source: "recovery",
-      }));
     }
 
     // 2. Fail orphaned tasks in active execution states
@@ -6227,7 +6219,20 @@ VALUES ($1, $2, 'queued', $3, NULL, NULL, $4)
     }
   });
 
-  const shutdown = () => {
+  const shutdown = async () => {
+    // Fail all running turns gracefully before exit
+    const workspaces = await listWorkspaceNames();
+    for (const workspaceName of workspaces) {
+      const db = await openDatabase(workspaceName);
+      const running = await db.query<{ id: string }>(
+        `SELECT id FROM conversation_turns WHERE status = 'running'`,
+      );
+      for (const turn of running.rows) {
+        await failTurn(db, turn.id, "Server shutting down");
+      }
+    }
+
+    // Then kill runtime services
     for (const [, store] of RUNTIME_SERVICES_BY_WORKSPACE) {
       for (const service of store.values()) {
         if (service.status === "running" || service.status === "ready") {
