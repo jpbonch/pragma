@@ -40,6 +40,13 @@ const ACTION_TYPES = [
   { value: 'log', label: 'Log' },
 ]
 
+const REASONING_EFFORTS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'extra_high', label: 'Extra High' },
+]
+
 const SCHEDULE_PRESETS = [
   { label: 'Every minute', cron: '* * * * *' },
   { label: 'Every 5 minutes', cron: '*/5 * * * *' },
@@ -182,28 +189,16 @@ function ActionConfigForm({ actionType, config, onChange, agents }) {
           label="Recipient agent"
           emptyLabel="None (Orchestrator decides)"
         />
-      </div>
-    )
-  }
-
-  if (actionType === 'execute_task') {
-    return (
-      <div className="aut-action-fields">
-        <label className="aut-field-label">Prompt</label>
-        <textarea
-          className="aut-textarea"
-          placeholder="Review task {{event.taskId}} and update context..."
-          value={config.prompt || ''}
-          rows={4}
-          onChange={(e) => onChange({ ...config, prompt: e.target.value })}
-        />
-        <label className="aut-field-label">Recipient agent ID (optional)</label>
-        <input
-          className="aut-input"
-          placeholder="agent-id (optional, skips orchestrator)"
-          value={config.recipientAgentId || ''}
-          onChange={(e) => onChange({ ...config, recipientAgentId: e.target.value })}
-        />
+        <label className="aut-field-label">Reasoning effort</label>
+        <select
+          className="aut-select"
+          value={config.reasoningEffort || 'high'}
+          onChange={(e) => onChange({ ...config, reasoningEffort: e.target.value })}
+        >
+          {REASONING_EFFORTS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
       </div>
     )
   }

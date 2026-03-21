@@ -19,7 +19,7 @@ export interface Automation {
 export type AutomationAction =
   | { type: "webhook"; url: string; headers?: Record<string, string>; method?: string }
   | { type: "create_task"; title: string; assignedTo?: string }
-  | { type: "execute_task"; prompt: string; recipientAgentId?: string }
+  | { type: "execute_task"; prompt: string; recipientAgentId?: string; reasoningEffort?: "low" | "medium" | "high" | "extra_high" }
   | { type: "log"; message?: string };
 
 function matchesFilter(
@@ -96,6 +96,7 @@ async function executeAction(
     case "execute_task": {
       const prompt = applyTemplateVars(action.prompt, event);
       const body: Record<string, string> = { prompt };
+      body.reasoning_effort = action.reasoningEffort ?? "high";
       if (action.recipientAgentId) {
         body.recipient_agent_id = action.recipientAgentId;
       }
@@ -414,7 +415,7 @@ export function rowToAutomation(row: AutomationRow): Automation {
       action = { type: "create_task", title: config.title, assignedTo: config.assignedTo };
       break;
     case "execute_task":
-      action = { type: "execute_task", prompt: config.prompt, recipientAgentId: config.recipientAgentId };
+      action = { type: "execute_task", prompt: config.prompt, recipientAgentId: config.recipientAgentId, reasoningEffort: config.reasoningEffort };
       break;
     case "log":
       action = { type: "log", message: config.message };

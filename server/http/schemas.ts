@@ -452,7 +452,7 @@ export const updateProcessSchema = z
   })
   .strict();
 
-const automationActionTypeSchema = z.enum(["webhook", "create_task", "log"]);
+const automationActionTypeSchema = z.enum(["webhook", "create_task", "execute_task", "log"]);
 
 const automationTriggerTypeSchema = z.enum(["event", "schedule"]);
 
@@ -491,6 +491,7 @@ const executeTaskActionSchema = z
     type: z.literal("execute_task"),
     prompt: nonEmptyString,
     recipientAgentId: nonEmptyString.optional(),
+    reasoningEffort: reasoningEffortSchema.optional().default("high"),
   })
   .strict();
 
