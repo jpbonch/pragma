@@ -1,18 +1,15 @@
 import { useState } from 'react'
 
-export function WebPreviewPanel({ panel, services, config, processStatuses }) {
+export function WebPreviewPanel({ panel, services, processStatuses }) {
   const [device, setDevice] = useState('desktop')
   const [iframeKey, setIframeKey] = useState(0)
 
-  const processName = panel.process || ''
-  const svc = services[processName]
+  const serviceName = panel._serviceName || ''
+  const svc = services[serviceName]
   const svcStatus = svc?.id ? (processStatuses[svc.id] || svc.status) : null
   const isReady = svcStatus === 'ready'
 
-  const processConfig = Array.isArray(config?.processes)
-    ? config.processes.find((proc) => proc?.name === processName)
-    : null
-  const port = svc?.port || processConfig?.port || panel.port || null
+  const port = svc?.port || null
   const path = panel.path || '/'
   const url = port ? `http://localhost:${port}${path}` : ''
 

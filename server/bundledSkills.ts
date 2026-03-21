@@ -51,15 +51,17 @@ After either CLI escalation command, stop doing further work. Do not ask for cla
 
 ## Submitting testing config
 
-If you changed code, submit a testing config for the task window so the reviewer can validate your changes.
+If you changed code, submit a testing config for the task window so the reviewer can validate your changes. Services start immediately on submission.
 
 ${BT3}
-pragma-so task submit-testing-config --config '<JSON>'
+pragma-so task submit-testing-config --config-file <path>
 ${BT3}
 
-The config JSON has: ${BT}processes${BT} (array of {name, command, cwd?, ready_pattern?}) and ${BT}panels${BT} (array of panel objects). Panel types: ${BT}web-preview${BT} ({type, title, process, path?, devices?}), ${BT}api-tester${BT} ({type, title, process, endpoints: [{method, path, description?, body?, headers?}]}), ${BT}terminal${BT} ({type, title, command, cwd?}), ${BT}log-viewer${BT} ({type, title, process}). Optional: ${BT}setup${BT} (array of setup commands), ${BT}layout${BT} ("tabs"|"grid").
+Or inline: ${BT}pragma-so task submit-testing-config --config '<JSON>'${BT}
 
-Example: ${BT}--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'${BT}
+The config JSON uses ${BT}services${BT} (array of service objects). Each service has: ${BT}command${BT} (required), ${BT}cwd${BT}? , ${BT}name${BT}? (auto-generated if omitted), and ${BT}panels${BT} (array of panel objects, min 1). Panel types: ${BT}web-preview${BT} ({type, title, path?, devices?}), ${BT}api-tester${BT} ({type, title, endpoints: [{method, path, description?, body?, headers?}]}), ${BT}terminal${BT} ({type, title, command, cwd?}), ${BT}log-viewer${BT} ({type, title}). Optional top-level: ${BT}setup${BT} (array of setup commands), ${BT}layout${BT} ("tabs"|"grid").
+
+Example: ${BT}--config '{"services":[{"command":"npm run dev","cwd":"code/my-app","name":"server","panels":[{"type":"web-preview","title":"App"}]}]}'${BT}
 
 Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). For app tasks, the testing config should run the app/service (for example dev/start script with explicit host/port).
 

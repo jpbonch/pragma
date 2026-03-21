@@ -5,8 +5,8 @@ export function LogViewerPanel({ panel, services, processLogs }) {
   const [autoScroll, setAutoScroll] = useState(true)
   const contentRef = useRef(null)
 
-  const processName = panel.process || ''
-  const svc = services[processName]
+  const serviceName = panel._serviceName || ''
+  const svc = services[serviceName]
   const serviceId = svc?.id || null
 
   const rawLogs = serviceId && processLogs[serviceId] ? processLogs[serviceId] : []

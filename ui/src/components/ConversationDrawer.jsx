@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
 import { PlanProposalPanel } from './PlanProposalPanel'
-import { fetchTaskPlan, fetchTaskTestingConfig } from '../api'
+import { fetchTaskPlan, fetchTaskTestingConfig, fetchTaskTestingServices } from '../api'
 import { useSplitPane } from '../hooks/useSplitPane'
 
 const HEADER_STATUS_LABELS = {
@@ -124,6 +124,7 @@ export function ConversationDrawer({
   const [hasChanges, setHasChanges] = useState(null)
   const [hasOutputFiles, setHasOutputFiles] = useState(null)
   const [testingConfig, setTestingConfig] = useState(null)
+  const [initialTestingServices, setInitialTestingServices] = useState(null)
   const showOutputPanel = Boolean(taskId) && (mode === 'chat' || mode === 'execute')
   const showProposalPanel = mode === 'plan' && planProposal != null && Array.isArray(planProposal.tasks) && planProposal.tasks.length > 0
   const splitStorageKey = showProposalPanel ? 'pragma.layout.planSplitPct' : 'pragma.layout.taskSplitPct'
@@ -183,6 +184,7 @@ export function ConversationDrawer({
       setHasChanges(null)
       setHasOutputFiles(null)
       setTestingConfig(null)
+      setInitialTestingServices(null)
     }
   }, [open])
 
@@ -195,6 +197,16 @@ export function ConversationDrawer({
       })
       .catch(() => {
         if (!cancelled) setTestingConfig(null)
+      })
+    void fetchTaskTestingServices(taskId)
+      .then(data => {
+        if (!cancelled) {
+          const svcMap = data?.services && typeof data.services === 'object' ? data.services : {}
+          setInitialTestingServices(Object.keys(svcMap).length > 0 ? svcMap : null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setInitialTestingServices(null)
       })
     return () => { cancelled = true }
   }, [open, taskId, showOutputPanel, entries.length, taskStatus])
@@ -676,6 +688,7 @@ export function ConversationDrawer({
                   runtimeServiceError={runtimeServiceError}
                   onStopRuntimeService={onStopRuntimeService}
                   testingConfig={testingConfig}
+                  initialTestingServices={initialTestingServices}
                   onTestingConfigUpdated={setTestingConfig}
                 />
                 <div className="conv-execute-actions">

@@ -191,6 +191,7 @@ export function OutputPanel({
   runtimeServiceError = '',
   onStopRuntimeService,
   testingConfig = null,
+  initialTestingServices = null,
   onTestingConfigUpdated,
 }) {
   const [tab, setTab] = useState('outputs')
@@ -508,7 +509,7 @@ export function OutputPanel({
 
       {tab === 'testing' && testingConfig && (
         <div className="output-tab-body output-testing-body">
-          <TestingPane taskId={taskId} config={testingConfig} onConfigUpdated={onTestingConfigUpdated} />
+          <TestingPane taskId={taskId} config={testingConfig} onConfigUpdated={onTestingConfigUpdated} initialServices={initialTestingServices} />
         </div>
       )}
     </div>

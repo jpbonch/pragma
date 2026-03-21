@@ -32,8 +32,8 @@ function EndpointCard({ taskId, endpoint, panel, services, processStatuses, defa
   const path = endpoint.path || '/'
   const description = endpoint.description || ''
 
-  const processName = panel.process || ''
-  const svc = services[processName]
+  const serviceName = panel._serviceName || ''
+  const svc = services[serviceName]
   const svcStatus = svc?.id ? (processStatuses[svc.id] || svc.status) : null
   const isReady = svcStatus === 'ready'
 
@@ -62,7 +62,7 @@ function EndpointCard({ taskId, endpoint, panel, services, processStatuses, defa
 
     try {
       const result = await proxyTestingRequest(taskId, {
-        process_name: processName,
+        process_name: serviceName,
         method,
         path,
         headers: Object.keys(hdrs).length > 0 ? hdrs : undefined,

@@ -641,9 +641,7 @@ function startRuntimeService(input: {
   requestedCwd: string;
   absoluteCwd: string;
   env: NodeJS.ProcessEnv;
-  readyPattern?: string;
   port?: number;
-  healthcheck?: string;
 }): RuntimeServiceRecord {
   const serviceId = `svc_${randomUUID().slice(0, 12)}`;
   const startedAt = new Date().toISOString();
@@ -680,34 +678,36 @@ function startRuntimeService(input: {
   service.pid = typeof child.pid === "number" ? child.pid : null;
   service._child = child;
 
-  let readyPatternRegex: RegExp | null = null;
-  if (input.readyPattern) {
-    try {
-      readyPatternRegex = new RegExp(input.readyPattern);
-    } catch {
-      // Invalid regex - ignore.
-    }
-  }
-
-  const checkReadyPattern = (text: string): void => {
-    if (readyPatternRegex && service.status === "running") {
-      if (readyPatternRegex.test(text)) {
-        readyPatternRegex = null;
-        updateRuntimeServiceStatus(service, "ready", null);
-      }
-    }
-  };
-
   child.stdout?.on("data", (chunk) => {
     const text = String(chunk ?? "");
     appendRuntimeServiceLog(service, "stdout", text);
-    checkReadyPattern(text);
   });
   child.stderr?.on("data", (chunk) => {
     const text = String(chunk ?? "");
     appendRuntimeServiceLog(service, "stderr", text);
-    checkReadyPattern(text);
   });
+
+  if (input.port) {
+    const pollTimer = setInterval(async () => {
+      if (service.status !== "running") {
+        clearInterval(pollTimer);
+        return;
+      }
+      try {
+        await fetch(`http://127.0.0.1:${input.port}`, {
+          signal: AbortSignal.timeout(2000),
+        });
+        clearInterval(pollTimer);
+        if (service.status === "running") {
+          updateRuntimeServiceStatus(service, "ready", null);
+        }
+      } catch {
+        // Not ready yet, keep polling
+      }
+    }, 500);
+
+    child.on("exit", () => clearInterval(pollTimer));
+  }
   child.on("error", (error) => {
     appendRuntimeServiceLog(service, "system", `[spawn error] ${errorMessage(error)}\n`);
     if (service.status === "running" || service.status === "ready") {
@@ -2718,6 +2718,108 @@ WHERE id = $1
     return c.json({ ok: true, assigned_to: selectedAgentId });
   });
 
+  // Migrate old-format testing configs (processes + top-level panels) to new format (services with nested panels)
+  function migrateTestingConfig(raw: any): any {
+    if (raw && Array.isArray(raw.processes) && Array.isArray(raw.panels)) {
+      const services = raw.processes.map((proc: any) => ({
+        command: proc.command,
+        cwd: proc.cwd,
+        name: proc.name,
+        panels: raw.panels
+          .filter((p: any) => p.process === proc.name || p.type === "terminal")
+          .map((p: any) => {
+            const { process: _, ...rest } = p;
+            return rest;
+          }),
+      }));
+      return { setup: raw.setup, services, layout: raw.layout };
+    }
+    return raw;
+  }
+
+  async function startTestingServices(
+    workspaceName: string,
+    taskId: string,
+    config: any,
+    db: any,
+  ): Promise<Record<string, RuntimeServiceSummary>> {
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
+
+    if (config.setup && config.setup.length > 0) {
+      for (const setupCmd of config.setup) {
+        const setupResult = await runShellCommandDetailed({
+          command: setupCmd,
+          cwd: runRoot,
+          env: {
+            ...process.env,
+            PRAGMA_WORKSPACE_NAME: workspaceName,
+            PRAGMA_TASK_ID: taskId,
+          },
+        });
+        if (setupResult.exitCode !== 0) {
+          throw new PragmaError(
+            "TESTING_SETUP_FAILED",
+            500,
+            `Setup command failed: ${setupCmd}\n${setupResult.stderr || setupResult.stdout}`,
+          );
+        }
+      }
+    }
+
+    const services: Record<string, RuntimeServiceSummary> = {};
+    const svcList: Array<{ command: string; cwd?: string; name?: string; panels?: any[] }> = config.services || [];
+    for (let i = 0; i < svcList.length; i++) {
+      const svc = svcList[i];
+      const svcName = svc.name || `service-${i}`;
+      const processCwd = svc.cwd
+        ? await resolveTaskCommandCwd(runRoot, svc.cwd)
+        : runRoot;
+
+      const port = await getRandomFreePort();
+
+      const env = {
+        ...process.env,
+        PORT: String(port),
+        PRAGMA_WORKSPACE_NAME: workspaceName,
+        PRAGMA_TASK_ID: taskId,
+      };
+
+      // Rewrite command for frameworks that don't read PORT
+      let command = svc.command;
+      if (/\bvite\b|webpack-dev-server/.test(command)) {
+        command += ` --port ${port}`;
+      }
+      if (/\bvite\b|\bnext\b/.test(command)) {
+        command += ` --host 127.0.0.1`;
+      }
+
+      const service = startRuntimeService({
+        workspaceName,
+        taskId,
+        label: svcName,
+        command,
+        requestedCwd: svc.cwd || ".",
+        absoluteCwd: processCwd,
+        env,
+        port,
+      });
+
+      // Track task-level processes in the processes table
+      const taskProcessId = `proc_${randomUUID().slice(0, 12)}`;
+      service.process_db_id = taskProcessId;
+      void db.query(
+        `INSERT INTO processes (id, workspace, folder_name, label, command, cwd, type, status, pid, task_id, started_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'service', 'running', $7, $8, CURRENT_TIMESTAMP)`,
+        [taskProcessId, workspaceName, "", svcName, command, svc.cwd || ".", service.pid, taskId],
+      );
+
+      services[svcName] = toRuntimeServiceSummary(service);
+    }
+
+    return services;
+  }
+
   app.post(
     "/tasks/:taskId/agent/testing-config",
     validateJson(agentSubmitTestingConfigSchema),
@@ -2758,6 +2860,15 @@ LIMIT 1
         [taskId, JSON.stringify(body.config)],
       );
 
+      // Auto-start services after saving config
+      let services: Record<string, RuntimeServiceSummary> = {};
+      let autoStartError: string | null = null;
+      try {
+        services = await startTestingServices(workspaceName, taskId, body.config, db);
+      } catch (err) {
+        autoStartError = err instanceof Error ? err.message : String(err);
+      }
+
       const thread = await getThreadByTaskId(db, taskId);
       if (thread) {
         const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
@@ -2768,6 +2879,7 @@ LIMIT 1
           eventName: "worker_testing_config_submitted",
           payload: {
             config: body.config,
+            services,
             agent_id: body.agent_id ?? task.assigned_to ?? null,
           },
         });
@@ -2780,7 +2892,7 @@ LIMIT 1
         }));
       }
 
-      return c.json({ ok: true });
+      return c.json({ ok: true, services, ...(autoStartError ? { error: autoStartError } : {}) });
     },
   );
 
@@ -2800,7 +2912,7 @@ LIMIT 1
     let config: unknown = null;
     if (row.testing_config_json) {
       try {
-        config = JSON.parse(row.testing_config_json);
+        config = migrateTestingConfig(JSON.parse(row.testing_config_json));
       } catch {
         config = null;
       }
@@ -2852,96 +2964,14 @@ LIMIT 1
       throw new PragmaError("NO_TESTING_CONFIG", 400, "No testing config found for this task.");
     }
 
-    let config: {
-      setup?: string[];
-      processes: Array<{
-        name: string;
-        command: string;
-        cwd?: string;
-        port?: number;
-        healthcheck?: string;
-        ready_pattern?: string;
-      }>;
-    };
+    let config: any;
     try {
-      config = JSON.parse(row.testing_config_json);
+      config = migrateTestingConfig(JSON.parse(row.testing_config_json));
     } catch {
       throw new PragmaError("INVALID_TESTING_CONFIG", 400, "Testing config JSON is invalid.");
     }
 
-    const workspacePaths = getWorkspacePaths(workspaceName);
-    const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
-
-    if (config.setup && config.setup.length > 0) {
-      for (const setupCmd of config.setup) {
-        const setupResult = await runShellCommandDetailed({
-          command: setupCmd,
-          cwd: runRoot,
-          env: {
-            ...process.env,
-            PRAGMA_WORKSPACE_NAME: workspaceName,
-            PRAGMA_TASK_ID: taskId,
-          },
-        });
-        if (setupResult.exitCode !== 0) {
-          throw new PragmaError(
-            "TESTING_SETUP_FAILED",
-            500,
-            `Setup command failed: ${setupCmd}\n${setupResult.stderr || setupResult.stdout}`,
-          );
-        }
-      }
-    }
-
-    const services: Record<string, RuntimeServiceSummary> = {};
-    for (const proc of config.processes) {
-      const processCwd = proc.cwd
-        ? await resolveTaskCommandCwd(runRoot, proc.cwd)
-        : runRoot;
-
-      const port = await getRandomFreePort();
-
-      const env = {
-        ...process.env,
-        PORT: String(port),
-        PRAGMA_WORKSPACE_NAME: workspaceName,
-        PRAGMA_TASK_ID: taskId,
-      };
-
-      // Rewrite command for frameworks that don't read PORT
-      let command = proc.command;
-      if (/\bvite\b|webpack-dev-server/.test(command)) {
-        command += ` --port ${port}`;
-      }
-      if (/\bvite\b|\bnext\b/.test(command)) {
-        command += ` --host 127.0.0.1`;
-      }
-
-      const service = startRuntimeService({
-        workspaceName,
-        taskId,
-        label: proc.name,
-        command,
-        requestedCwd: proc.cwd || ".",
-        absoluteCwd: processCwd,
-        env,
-        readyPattern: proc.ready_pattern,
-        port,
-        healthcheck: proc.healthcheck,
-      });
-
-      // Track task-level processes in the processes table
-      const taskProcessId = `proc_${randomUUID().slice(0, 12)}`;
-      service.process_db_id = taskProcessId;
-      void db.query(
-        `INSERT INTO processes (id, workspace, folder_name, label, command, cwd, type, status, pid, task_id, started_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'service', 'running', $7, $8, CURRENT_TIMESTAMP)`,
-        [taskProcessId, workspaceName, "", proc.name, command, proc.cwd || ".", service.pid, taskId],
-      );
-
-      services[proc.name] = toRuntimeServiceSummary(service);
-    }
-
+    const services = await startTestingServices(workspaceName, taskId, config, db);
     return c.json({ ok: true, services });
   });
 
@@ -2964,6 +2994,19 @@ LIMIT 1
     );
 
     return c.json({ ok: true });
+  });
+
+  app.get("/tasks/:taskId/testing/services", async (c) => {
+    const workspaceName = c.get("workspace");
+    const taskId = c.req.param("taskId");
+    const store = getWorkspaceServiceStore(workspaceName);
+    const services: Record<string, RuntimeServiceSummary> = {};
+    for (const service of store.values()) {
+      if (service.task_id === taskId) {
+        services[service.label] = toRuntimeServiceSummary(service);
+      }
+    }
+    return c.json({ services });
   });
 
   app.post(

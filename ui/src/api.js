@@ -907,6 +907,10 @@ export async function fetchTaskTestingConfig(taskId) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing-config`)
 }
 
+export async function fetchTaskTestingServices(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/services`)
+}
+
 export async function updateTaskTestingConfig(taskId, config) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing-config`, {
     method: 'PUT',

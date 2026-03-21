@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { startTaskTesting, stopTaskTesting, openRuntimeServiceStream, updateTaskTestingConfig } from '../api'
+import { startTaskTesting, stopTaskTesting, openRuntimeServiceStream, updateTaskTestingConfig, fetchTaskTestingServices } from '../api'
 import { ApiTesterPanel } from './testing/ApiTesterPanel'
 import { WebPreviewPanel } from './testing/WebPreviewPanel'
 import { TerminalPanel } from './testing/TerminalPanel'
@@ -19,7 +19,7 @@ function ProcessBadge({ name, status }) {
   )
 }
 
-export function TestingPane({ taskId, config, onConfigUpdated }) {
+export function TestingPane({ taskId, config, onConfigUpdated, initialServices }) {
   const [services, setServices] = useState({})
   const [started, setStarted] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -33,8 +33,12 @@ export function TestingPane({ taskId, config, onConfigUpdated }) {
   const [editSaving, setEditSaving] = useState(false)
   const cleanupRef = useRef([])
 
-  const panels = Array.isArray(config?.panels) ? config.panels : []
-  const processes = Array.isArray(config?.processes) ? config.processes : []
+  const panels = Array.isArray(config?.services)
+    ? config.services.flatMap((svc, i) =>
+        (svc.panels || []).map(p => ({ ...p, _serviceName: svc.name || `service-${i}` }))
+      )
+    : []
+  const services_list = Array.isArray(config?.services) ? config.services : []
 
   useEffect(() => {
     return () => {
@@ -44,6 +48,45 @@ export function TestingPane({ taskId, config, onConfigUpdated }) {
       cleanupRef.current = []
     }
   }, [])
+
+  useEffect(() => {
+    if (!taskId) return
+    let cancelled = false
+    // Check for already-running services (auto-started on config submission)
+    const initSvcs = initialServices && typeof initialServices === 'object' && Object.keys(initialServices).length > 0
+      ? initialServices
+      : null
+    if (initSvcs) {
+      setServices(initSvcs)
+      setStarted(true)
+      const initialStatuses = {}
+      for (const [, svc] of Object.entries(initSvcs)) {
+        if (svc && svc.id) {
+          initialStatuses[svc.id] = svc.status || 'running'
+          subscribeToService(svc.id)
+        }
+      }
+      setProcessStatuses(initialStatuses)
+      return
+    }
+    void fetchTaskTestingServices(taskId).then(data => {
+      if (cancelled) return
+      const svcMap = data?.services && typeof data.services === 'object' ? data.services : {}
+      if (Object.keys(svcMap).length > 0) {
+        setServices(svcMap)
+        setStarted(true)
+        const initialStatuses = {}
+        for (const [, svc] of Object.entries(svcMap)) {
+          if (svc && svc.id) {
+            initialStatuses[svc.id] = svc.status || 'running'
+            subscribeToService(svc.id)
+          }
+        }
+        setProcessStatuses(initialStatuses)
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [taskId])
 
   function subscribeToService(serviceId) {
     const cleanup = openRuntimeServiceStream(serviceId, {
@@ -106,8 +149,8 @@ export function TestingPane({ taskId, config, onConfigUpdated }) {
     setProcessLogs({})
   }
 
-  function getServiceStatus(processName) {
-    const svc = services[processName]
+  function getServiceStatus(serviceName) {
+    const svc = services[serviceName]
     if (!svc || !svc.id) return null
     return processStatuses[svc.id] || svc.status || 'running'
   }
@@ -153,7 +196,7 @@ export function TestingPane({ taskId, config, onConfigUpdated }) {
       return <ApiTesterPanel taskId={taskId} panel={panel} services={services} processStatuses={processStatuses} />
     }
     if (type === 'web-preview') {
-      return <WebPreviewPanel taskId={taskId} panel={panel} services={services} config={config} processStatuses={processStatuses} />
+      return <WebPreviewPanel taskId={taskId} panel={panel} services={services} processStatuses={processStatuses} />
     }
     if (type === 'terminal') {
       return <TerminalPanel taskId={taskId} panel={panel} services={services} processStatuses={processStatuses} />
@@ -179,13 +222,16 @@ export function TestingPane({ taskId, config, onConfigUpdated }) {
           </button>
         )}
         <div className="testing-process-badges">
-          {processes.map(proc => (
-            <ProcessBadge
-              key={proc.name}
-              name={proc.name}
-              status={started ? (getServiceStatus(proc.name) || 'starting') : 'stopped'}
-            />
-          ))}
+          {services_list.map((svc, i) => {
+            const svcName = svc.name || `service-${i}`
+            return (
+              <ProcessBadge
+                key={svcName}
+                name={svc.name || svc.command}
+                status={started ? (getServiceStatus(svcName) || 'starting') : 'stopped'}
+              />
+            )
+          })}
         </div>
         <button className="testing-edit-btn" onClick={handleEditOpen} disabled={editing} title="Edit testing config">
           Edit Config

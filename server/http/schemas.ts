@@ -247,15 +247,6 @@ export const createCodeFolderCopySchema = z
   })
   .strict();
 
-const testingProcessSchema = z.object({
-  name: nonEmptyString,
-  command: nonEmptyString,
-  cwd: nonEmptyString.optional(),
-  port: z.number().int().positive().optional(), // Ignored — server assigns ports automatically
-  healthcheck: z.string().optional(),
-  ready_pattern: z.string().optional(),
-}).strict();
-
 const apiEndpointSchema = z.object({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]),
   path: nonEmptyString,
@@ -268,7 +259,6 @@ const apiEndpointSchema = z.object({
 const apiTesterPanelSchema = z.object({
   type: z.literal("api-tester"),
   title: nonEmptyString,
-  process: nonEmptyString,
   base_url: z.string().optional(),
   endpoints: z.array(apiEndpointSchema).min(1),
 }).strict();
@@ -276,7 +266,6 @@ const apiTesterPanelSchema = z.object({
 const webPreviewPanelSchema = z.object({
   type: z.literal("web-preview"),
   title: nonEmptyString,
-  process: nonEmptyString,
   path: z.string().optional(),
   devices: z.array(z.enum(["desktop", "tablet", "mobile"])).optional(),
 }).strict();
@@ -292,7 +281,6 @@ const terminalPanelSchema = z.object({
 const logViewerPanelSchema = z.object({
   type: z.literal("log-viewer"),
   title: nonEmptyString,
-  process: nonEmptyString,
 }).strict();
 
 const testingPanelSchema = z.discriminatedUnion("type", [
@@ -302,10 +290,16 @@ const testingPanelSchema = z.discriminatedUnion("type", [
   logViewerPanelSchema,
 ]);
 
+const testingServiceSchema = z.object({
+  command: nonEmptyString,
+  cwd: nonEmptyString.optional(),
+  name: nonEmptyString.optional(),
+  panels: z.array(testingPanelSchema).min(1),
+}).strict();
+
 export const testingConfigSchema = z.object({
   setup: z.array(z.string()).optional(),
-  processes: z.array(testingProcessSchema).min(1),
-  panels: z.array(testingPanelSchema).min(1),
+  services: z.array(testingServiceSchema).min(1),
   layout: z.enum(["tabs", "grid"]).optional(),
 }).strict();
 
