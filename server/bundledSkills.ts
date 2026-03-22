@@ -372,53 +372,6 @@ ${BT3}
 - Formulas are preserved but not evaluated - use scripts/recalc.py to update values`,
   },
   {
-    id: "skill_bundled_dcoa",
-    name: "doc-coauthoring",
-    description:
-      "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content.",
-    content: `---
-name: doc-coauthoring
-description: Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers.
----
-
-# Doc Co-Authoring Workflow
-
-This skill provides a structured workflow for guiding users through collaborative document creation. Act as an active guide, walking users through three stages: Context Gathering, Refinement & Structure, and Reader Testing.
-
-## Stage 1: Context Gathering
-
-**Goal:** Close the gap between what the user knows and what Claude knows.
-
-### Initial Questions
-1. What type of document is this?
-2. Who's the primary audience?
-3. What's the desired impact when someone reads this?
-4. Is there a template or specific format to follow?
-5. Any other constraints or context to know?
-
-Then encourage the user to dump all relevant context.
-
-## Stage 2: Refinement & Structure
-
-**Goal:** Build the document section by section through brainstorming, curation, and iterative refinement.
-
-For each section:
-1. Ask clarifying questions about what to include
-2. Brainstorm 5-20 options
-3. User indicates what to keep/remove/combine
-4. Draft the section
-5. Refine through surgical edits
-
-## Stage 3: Reader Testing
-
-**Goal:** Test the document with a fresh Claude (no context) to verify it works for readers.
-
-1. Predict reader questions
-2. Test with sub-agent or fresh conversation
-3. Run additional checks for ambiguity and contradictions
-4. Fix any gaps found`,
-  },
-  {
     id: "skill_bundled_jnb0",
     name: "jupyter-notebook",
     description:
