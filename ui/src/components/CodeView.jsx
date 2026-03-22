@@ -32,7 +32,6 @@ export function CodeView({
   const [pushingFolder, setPushingFolder] = useState(null)
   const [pushError, setPushError] = useState('')
   const [pushSuccess, setPushSuccess] = useState('')
-  const [activeTab, setActiveTab] = useState('repositories')
 
   const folderItems = useMemo(() => {
     if (!Array.isArray(folders)) return []
@@ -128,14 +127,6 @@ export function CodeView({
       <div className="cv-header">
         <div className="cv-header-inner">
           <h1 className="cv-title">Code</h1>
-          <div className="cv-tab-bar">
-            <button
-              className={`cv-tab${activeTab === 'repositories' ? ' cv-tab-active' : ''}`}
-              onClick={() => setActiveTab('repositories')}
-            >
-              Repositories
-            </button>
-          </div>
         </div>
       </div>
 
