@@ -801,8 +801,8 @@ LIMIT 1
       if (isBackgroundTask) {
         await autoMergeBackgroundTask(db, input, paths, gitState, workerResult.sessionId, notifyTaskStatus, options);
       } else {
-        // Post-completion gate: if agent made code changes but didn't start any services,
-        // re-run once to prompt it to start services for the reviewer.
+        // Post-completion gate: if agent made code changes but didn't start services
+        // or create preview.html, re-run once with a combined follow-up message.
         if (!input.isStartServiceRetry && !input.isPreviewRetry) {
           const repoDiffs = await buildRepoDiffEntries({
             workspacePaths: paths,
@@ -812,50 +812,13 @@ LIMIT 1
           const hasCodeChanges = repoDiffs.some((entry) => entry.diff.trim().length > 0);
 
           if (hasCodeChanges) {
-            // --- start-service check ---
+            // --- check both services and preview at once ---
             const servicesResult = await db.query<{ id: string }>(
               `SELECT id FROM task_services WHERE task_id = $1 LIMIT 1`,
               [input.taskId],
             );
             const hasServices = servicesResult.rows.length > 0;
 
-            if (!hasServices) {
-              const startServiceMessage = `You made code changes but did not start any services for the reviewer to test. Start your app now so the reviewer can interact with it.
-
-Use the command:
-
-pragma-so task start-service --name "<service-name>" --command "<start command>" --cwd "<working directory>" --port <port> --url <url>
-
-For example, for a Vite app:
-
-pragma-so task start-service --name "frontend" --command "npm run dev -- --port 3001" --cwd "./code/myapp" --port 3001 --url "http://localhost:3001"
-
-Start all services needed to interact with your changes, then finish.`;
-
-              await reopenThread(db, input.threadId);
-
-              runExecuteTask(
-                {
-                  workspaceName: input.workspaceName,
-                  taskId: input.taskId,
-                  threadId: input.threadId,
-                  prompt: task,
-                  requestedRecipientAgentId: selectedWorker.id,
-                  reasoningEffort: input.reasoningEffort,
-                  resumeWorkerSessionId: workerResult.sessionId,
-                  followUpMessage: startServiceMessage,
-                  isStartServiceRetry: true,
-                },
-                options,
-              ).catch((err: unknown) => {
-                const msg = err instanceof Error ? err.message : String(err);
-                console.error(`Start-service retry failed: ${msg}`);
-              });
-
-              return;
-            }
-
-            // --- preview.html check ---
             const previewPath = join(outputDir, "preview.html");
             let hasPreview = false;
             try {
@@ -865,14 +828,34 @@ Start all services needed to interact with your changes, then finish.`;
               hasPreview = false;
             }
 
-            if (!hasPreview) {
-              const previewMessage = `You made code changes but did not create a preview.html file. Create outputs/$PRAGMA_TASK_ID/preview.html so the reviewer can interact with your work in the review UI.
+            if (!hasServices || !hasPreview) {
+              const parts: string[] = [];
 
-- If you started a web app service: create an HTML page with a full-viewport <iframe> pointing at the service URL. Use style="width:100%;height:100vh;border:none;".
-- If you built an API: create an HTML page with forms/buttons to test each endpoint, with a response display area.
-- If you generated static output: bundle it as self-contained HTML.
+              if (!hasServices) {
+                parts.push(`You made code changes but did not start any services for the reviewer to test. Start your app now so the reviewer can interact with it.
 
-This file is required. Create it now and then finish.`;
+Use the command:
+
+pragma-so task start-service --name "<service-name>" --command "<start command>" --cwd "<working directory>" --port <port> --url <url>
+
+For example, for a Vite app:
+
+pragma-so task start-service --name "frontend" --command "npm run dev -- --port 3001" --cwd "./code/myapp" --port 3001 --url "http://localhost:3001"
+
+Start all services needed to interact with your changes.`);
+              }
+
+              if (!hasPreview) {
+                parts.push(`Create outputs/$PRAGMA_TASK_ID/preview.html so the reviewer can interact with your work in the review UI.
+
+- Web app with a running service: full-viewport \`<iframe>\` pointing at the service URL. Use style="width:100%;height:100vh;border:none;".
+- API with no frontend: a minimal form-based UI to hit each endpoint and display responses.
+- Static output: the content itself, rendered directly.
+
+This file is required.`);
+              }
+
+              parts.push("Do this now, then finish.");
 
               await reopenThread(db, input.threadId);
 
@@ -885,13 +868,14 @@ This file is required. Create it now and then finish.`;
                   requestedRecipientAgentId: selectedWorker.id,
                   reasoningEffort: input.reasoningEffort,
                   resumeWorkerSessionId: workerResult.sessionId,
-                  followUpMessage: previewMessage,
+                  followUpMessage: parts.join("\n\n"),
+                  isStartServiceRetry: true,
                   isPreviewRetry: true,
                 },
                 options,
               ).catch((err: unknown) => {
                 const msg = err instanceof Error ? err.message : String(err);
-                console.error(`Preview retry failed: ${msg}`);
+                console.error(`Service/preview retry failed: ${msg}`);
               });
 
               return;
