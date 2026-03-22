@@ -37,6 +37,7 @@ const ACTION_TYPES = [
   { value: 'webhook', label: 'Webhook' },
   { value: 'create_task', label: 'Create Task' },
   { value: 'execute_task', label: 'Execute Task' },
+  { value: 'execute_background_task', label: 'Execute Background Task' },
   { value: 'log', label: 'Log' },
 ]
 
@@ -171,7 +172,7 @@ function ActionConfigForm({ actionType, config, onChange, agents }) {
     )
   }
 
-  if (actionType === 'execute_task') {
+  if (actionType === 'execute_task' || actionType === 'execute_background_task') {
     return (
       <div className="aut-action-fields">
         <label className="aut-field-label">Prompt</label>

@@ -758,68 +758,79 @@ LIMIT 1
       // Auto-merge: the user already approved, agent just resolved conflicts
       await autoMergeAfterConflictResolution(db, input, paths, gitState, workerResult.sessionId, notifyTaskStatus, options);
     } else if (!isWaitingForHumanResponseStatus(currentStatus)) {
-      await db.query(
-        `
+      // Check if this is a background task — auto-merge without human review
+      const bgCheck = await db.query<{ background: boolean }>(
+        `SELECT background FROM tasks WHERE id = $1 LIMIT 1`,
+        [input.taskId],
+      );
+      const isBackgroundTask = bgCheck.rows[0]?.background === true;
+
+      if (isBackgroundTask) {
+        await autoMergeBackgroundTask(db, input, paths, gitState, workerResult.sessionId, notifyTaskStatus, options);
+      } else {
+        await db.query(
+          `
 UPDATE tasks
 SET status = 'pending_review',
     session_id = $2
 WHERE id = $1
 `,
-        [input.taskId, workerResult.sessionId],
-      );
-      await notifyTaskStatus("pending_review", "execute_runner");
-
-      // Trigger follow-up task execution if one exists
-      // Re-query followup_task_id from DB since it may have been set while this task was running
-      const followupCheck = await db.query<{ followup_task_id: string | null }>(
-        `SELECT followup_task_id FROM tasks WHERE id = $1 LIMIT 1`,
-        [input.taskId],
-      );
-      const followupTaskId = followupCheck.rows[0]?.followup_task_id;
-      if (followupTaskId) {
-        const followupResult = await db.query<{
-          id: string;
-          status: string;
-          plan: string | null;
-        }>(
-          `SELECT id, status, plan FROM tasks WHERE id = $1 LIMIT 1`,
-          [followupTaskId],
+          [input.taskId, workerResult.sessionId],
         );
-        const followup = followupResult.rows[0];
-        if (followup && followup.status === "queued") {
-          const followupThread = await getThreadByTaskId(db, followupTaskId);
-          if (followupThread) {
-            const followupTurn = await getFirstExecuteTurn(db, followupThread.id);
-            const followupPrompt = followup.plan || followupTurn?.user_message || "";
-            if (followupPrompt.trim()) {
-              // Fire-and-forget: start the follow-up task
-              runExecuteTask(
-                {
-                  workspaceName: input.workspaceName,
-                  taskId: followupTaskId,
-                  threadId: followupThread.id,
-                  prompt: followupPrompt,
-                  reasoningEffort: input.reasoningEffort,
-                },
-                options,
-              ).catch(async (err: unknown) => {
-                const msg = err instanceof Error ? err.message : String(err);
-                console.error(`Follow-up task execution failed: ${msg}`);
-                try {
-                  const errDb = await openDatabase(input.workspaceName);
-                  await errDb.query(
-                    `UPDATE tasks SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
-                    [followupTaskId],
-                  );
-                  await options.onTaskStatusChanged?.({
+        await notifyTaskStatus("pending_review", "execute_runner");
+
+        // Trigger follow-up task execution if one exists
+        // Re-query followup_task_id from DB since it may have been set while this task was running
+        const followupCheck = await db.query<{ followup_task_id: string | null }>(
+          `SELECT followup_task_id FROM tasks WHERE id = $1 LIMIT 1`,
+          [input.taskId],
+        );
+        const followupTaskId = followupCheck.rows[0]?.followup_task_id;
+        if (followupTaskId) {
+          const followupResult = await db.query<{
+            id: string;
+            status: string;
+            plan: string | null;
+          }>(
+            `SELECT id, status, plan FROM tasks WHERE id = $1 LIMIT 1`,
+            [followupTaskId],
+          );
+          const followup = followupResult.rows[0];
+          if (followup && followup.status === "queued") {
+            const followupThread = await getThreadByTaskId(db, followupTaskId);
+            if (followupThread) {
+              const followupTurn = await getFirstExecuteTurn(db, followupThread.id);
+              const followupPrompt = followup.plan || followupTurn?.user_message || "";
+              if (followupPrompt.trim()) {
+                // Fire-and-forget: start the follow-up task
+                runExecuteTask(
+                  {
                     workspaceName: input.workspaceName,
                     taskId: followupTaskId,
                     threadId: followupThread.id,
-                    status: "failed",
-                    source: "followup_start_failed",
-                  });
-                } catch { /* best-effort */ }
-              });
+                    prompt: followupPrompt,
+                    reasoningEffort: input.reasoningEffort,
+                  },
+                  options,
+                ).catch(async (err: unknown) => {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  console.error(`Follow-up task execution failed: ${msg}`);
+                  try {
+                    const errDb = await openDatabase(input.workspaceName);
+                    await errDb.query(
+                      `UPDATE tasks SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+                      [followupTaskId],
+                    );
+                    await options.onTaskStatusChanged?.({
+                      workspaceName: input.workspaceName,
+                      taskId: followupTaskId,
+                      threadId: followupThread.id,
+                      status: "failed",
+                      source: "followup_start_failed",
+                    });
+                  } catch { /* best-effort */ }
+                });
+              }
             }
           }
         }
@@ -1209,6 +1220,89 @@ async function autoMergeAfterConflictResolution(
       [input.taskId],
     );
     await notifyTaskStatus("needs_fix", "auto_merge_conflict");
+  }
+}
+
+async function autoMergeBackgroundTask(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  input: EnqueueExecuteInput,
+  paths: ReturnType<typeof getWorkspacePaths>,
+  gitState: TaskGitState,
+  sessionId: string,
+  notifyTaskStatus: (status: TaskStatus, source: string) => Promise<void>,
+  options: {
+    apiUrl: string;
+    pragmaCliCommand: string;
+    onTaskStatusChanged?: (input: TaskStatusChangedInput) => void | Promise<void>;
+    onThreadUpdated?: (input: ThreadUpdatedInput) => void | Promise<void>;
+  },
+): Promise<void> {
+  await db.query(
+    `UPDATE tasks SET status = 'merging', session_id = $2 WHERE id = $1`,
+    [input.taskId, sessionId],
+  );
+  await notifyTaskStatus("merging", "background_auto_merge");
+
+  const taskResult = await db.query<{ title: string }>(
+    `SELECT title FROM tasks WHERE id = $1 LIMIT 1`,
+    [input.taskId],
+  );
+  const taskTitle = taskResult.rows[0]?.title;
+
+  const mergeResult = await mergeApprovedTask({
+    workspacePaths: paths,
+    taskId: input.taskId,
+    taskTitle,
+    gitState,
+  });
+
+  if (mergeResult.conflicts.length === 0) {
+    // Merge succeeded
+    const mergedOutputDir = getTaskMainOutputDir(paths, input.taskId);
+    await db.query(
+      `UPDATE tasks SET status = 'completed', output_dir = $2, session_id = $3, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [input.taskId, mergedOutputDir, sessionId],
+    );
+    await notifyTaskStatus("completed", "background_auto_merge");
+
+    await saveDiffSnapshot({ db, workspacePaths: paths, taskId: input.taskId, gitState });
+    ACTIVE_TASK_ABORTS.delete(input.taskId);
+    await deleteTaskWorktree({ workspacePaths: paths, taskId: input.taskId });
+  } else {
+    // Conflicts — re-run the agent to resolve them
+    const conflictFiles = mergeResult.conflicts
+      .flatMap((c) => c.files.map((f) => `${c.repo_path}: ${f}`))
+      .join(", ");
+    const retryPrompt = `Your background task had merge conflicts. Please resolve the following conflicts and complete the merge:\n\nConflicted files: ${conflictFiles}\n\nResolve all conflicts, then confirm the merge is complete.`;
+
+    // Re-enqueue execution to let the agent resolve conflicts
+    runExecuteTask(
+      {
+        workspaceName: input.workspaceName,
+        taskId: input.taskId,
+        threadId: input.threadId,
+        prompt: retryPrompt,
+        reasoningEffort: input.reasoningEffort,
+      },
+      options,
+    ).catch(async (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Background task conflict resolution failed: ${msg}`);
+      try {
+        const errDb = await openDatabase(input.workspaceName);
+        await errDb.query(
+          `UPDATE tasks SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [input.taskId],
+        );
+        await options.onTaskStatusChanged?.({
+          workspaceName: input.workspaceName,
+          taskId: input.taskId,
+          threadId: input.threadId,
+          status: "failed",
+          source: "background_conflict_resolution_failed",
+        });
+      } catch { /* best-effort */ }
+    });
   }
 }
 

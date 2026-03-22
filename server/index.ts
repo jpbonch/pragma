@@ -1307,6 +1307,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         followup_task_id: row.followup_task_id,
         predecessor_task_id: row.predecessor_task_id,
         thread_id: row.thread_id,
+        background: row.background,
         failure_message: extractTaskFailureMessage(row.failure_payload_json),
       })),
     });
@@ -2076,19 +2077,20 @@ VALUES ($1, $2, $3, $4, $5, $6)
         }
       }
 
+      const isBackground = body.background === true;
       await db.query(
         `
-INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan)
-VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3)
+INSERT INTO tasks (id, title, status, assigned_to, output_dir, session_id, plan, background)
+VALUES ($1, $2, 'queued', NULL, NULL, NULL, $3, $4)
 `,
-        [taskId, fallbackTitle, prompt],
+        [taskId, fallbackTitle, prompt, isBackground],
       );
       emitTaskStatus(workspaceName, taskId, "queued", "execute_created");
       eventBus.emit(createEvent({
         type: EVENT_TYPES.TASK_CREATED,
         taskId,
         workspaceName,
-        payload: { status: "queued", title: fallbackTitle },
+        payload: { status: "queued", title: fallbackTitle, background: isBackground },
         source: "execute_created",
       }));
 

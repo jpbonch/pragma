@@ -20,6 +20,7 @@ export type AutomationAction =
   | { type: "webhook"; url: string; headers?: Record<string, string>; method?: string }
   | { type: "create_task"; title: string; assignedTo?: string }
   | { type: "execute_task"; prompt: string; recipientAgentId?: string; reasoningEffort?: "low" | "medium" | "high" | "extra_high" }
+  | { type: "execute_background_task"; prompt: string; recipientAgentId?: string; reasoningEffort?: "low" | "medium" | "high" | "extra_high" }
   | { type: "log"; message?: string };
 
 function matchesFilter(
@@ -93,12 +94,16 @@ async function executeAction(
       return { status: "success", result: { taskId } };
     }
 
-    case "execute_task": {
+    case "execute_task":
+    case "execute_background_task": {
       const prompt = applyTemplateVars(action.prompt, event);
-      const body: Record<string, string> = { prompt };
+      const body: Record<string, string | boolean> = { prompt };
       body.reasoning_effort = action.reasoningEffort ?? "high";
       if (action.recipientAgentId) {
         body.recipient_agent_id = action.recipientAgentId;
+      }
+      if (action.type === "execute_background_task") {
+        body.background = true;
       }
       try {
         const response = await fetch(`${apiUrl}/tasks/execute`, {
@@ -416,6 +421,9 @@ export function rowToAutomation(row: AutomationRow): Automation {
       break;
     case "execute_task":
       action = { type: "execute_task", prompt: config.prompt, recipientAgentId: config.recipientAgentId, reasoningEffort: config.reasoningEffort };
+      break;
+    case "execute_background_task":
+      action = { type: "execute_background_task", prompt: config.prompt, recipientAgentId: config.recipientAgentId, reasoningEffort: config.reasoningEffort };
       break;
     case "log":
       action = { type: "log", message: config.message };

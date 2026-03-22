@@ -998,6 +998,11 @@ WHERE id IN ('pragma-coder', 'pragma-ui-designer')
 `);
 
   await db.exec(`
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS background BOOLEAN NOT NULL DEFAULT FALSE
+`);
+
+  await db.exec(`
 CREATE TABLE IF NOT EXISTS humans (
   id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR(64),
   emoji VARCHAR(32) NOT NULL,
@@ -1243,6 +1248,12 @@ async function ensureDefaultSkills(db: PGlite): Promise<void> {
 const DEFAULT_SCRIBE_AUTOMATION_ID = "auto_scribe_on_complete";
 
 async function ensureDefaultAutomations(db: PGlite): Promise<void> {
+  // Migrate existing scribe automation from execute_task to execute_background_task
+  await db.query(
+    `UPDATE workspace_automations SET action_type = 'execute_background_task' WHERE id = $1 AND action_type = 'execute_task'`,
+    [DEFAULT_SCRIBE_AUTOMATION_ID],
+  );
+
   await db.query(
     `INSERT INTO workspace_automations
        (id, name, trigger_event_type, trigger_filter_json, trigger_type, action_type, action_config_json, enabled)
@@ -1253,7 +1264,7 @@ async function ensureDefaultAutomations(db: PGlite): Promise<void> {
       "Scribe: update context after task completion",
       "task.completed",
       JSON.stringify({ assigned_to: { $ne: SCRIBE_AGENT_ID } }),
-      "execute_task",
+      "execute_background_task",
       JSON.stringify({
         prompt: "A task was just completed (task ID: {{event.taskId}}). Review what happened in that task — look at its changes, conversations, and outcomes — then update the context/ folder with any enduring project knowledge worth preserving. If there is nothing meaningful to extract, say so and do not create files.",
         recipientAgentId: SCRIBE_AGENT_ID,

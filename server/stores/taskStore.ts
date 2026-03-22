@@ -14,6 +14,7 @@ export type TaskListRow = {
   predecessor_task_id: string | null;
   thread_id: string | null;
   failure_payload_json: string | null;
+  background: boolean;
 };
 
 export type TaskDetailRow = {
@@ -43,6 +44,7 @@ SELECT j.id,
        j.completed_at,
        j.followup_task_id,
        j.predecessor_task_id,
+       j.background,
        latest_thread.id AS thread_id,
        latest_error.payload_json AS failure_payload_json
 FROM tasks j
