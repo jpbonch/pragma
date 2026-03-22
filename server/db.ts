@@ -990,12 +990,14 @@ DROP COLUMN IF EXISTS testing_config_json
 
   // Strip ## Testing sections from pragma-coder and pragma-ui-designer agent_file values
   // (removed from defaults but existing rows used ON CONFLICT DO NOTHING)
-  await db.query(`
-UPDATE agents
-SET agent_file = regexp_replace(agent_file, E'\n\n## Testing\n.*', '', 's')
-WHERE id IN ('pragma-coder', 'pragma-ui-designer')
-  AND agent_file LIKE '%## Testing%'
-`);
+  await db.query(
+    `UPDATE agents SET agent_file = $1 WHERE id = 'pragma-coder' AND agent_file LIKE '%## Testing%'`,
+    [CODER_AGENT_FILE]
+  );
+  await db.query(
+    `UPDATE agents SET agent_file = $1 WHERE id = 'pragma-ui-designer' AND agent_file LIKE '%## Testing%'`,
+    [UI_DESIGNER_AGENT_FILE]
+  );
 
   await db.exec(`
 ALTER TABLE tasks
