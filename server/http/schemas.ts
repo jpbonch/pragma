@@ -352,26 +352,6 @@ export const dbQuerySchema = z
   })
   .strict();
 
-const processTypeSchema = z.enum(["service", "script"]);
-
-export const createProcessSchema = z
-  .object({
-    label: nonEmptyString,
-    command: nonEmptyString,
-    cwd: nonEmptyString,
-    type: processTypeSchema,
-  })
-  .strict();
-
-export const updateProcessSchema = z
-  .object({
-    label: nonEmptyString.optional(),
-    command: nonEmptyString.optional(),
-    cwd: nonEmptyString.optional(),
-    type: processTypeSchema.optional(),
-  })
-  .strict();
-
 const automationActionTypeSchema = z.enum(["webhook", "create_task", "execute_task", "log"]);
 
 const automationTriggerTypeSchema = z.enum(["event", "schedule"]);

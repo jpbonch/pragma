@@ -6,7 +6,6 @@ import {
   fetchCodeFolders,
   fetchRuntimeServices,
   openRuntimeServiceStream,
-  fetchProcesses,
 } from '../api'
 import { errorText } from '../lib/conversationUtils'
 
@@ -34,9 +33,6 @@ export function useWorkspace() {
   const [selectedServiceId, setSelectedServiceId] = useState('')
   const [runtimeServiceLogsById, setRuntimeServiceLogsById] = useState(() => ({}))
   const [runtimeServiceStreamError, setRuntimeServiceStreamError] = useState('')
-  const [processes, setProcesses] = useState([])
-  const [processesLoading, setProcessesLoading] = useState(false)
-
   const runtimeServicesPollTimerRef = useRef(null)
   const runtimeServiceStreamCloseRef = useRef(null)
 
@@ -81,21 +77,6 @@ export function useWorkspace() {
       setCodeError(errorText(error))
     } finally {
       setCodeLoading(false)
-    }
-  }
-
-  async function loadProcesses() {
-    setProcessesLoading(true)
-    try {
-      const next = await fetchProcesses()
-      setProcesses(next)
-    } catch (error) {
-      if (error instanceof ApiError && error.code === 'NO_ACTIVE_WORKSPACE') {
-        setProcesses([])
-        return
-      }
-    } finally {
-      setProcessesLoading(false)
     }
   }
 
@@ -144,8 +125,6 @@ export function useWorkspace() {
     setSelectedServiceId('')
     setRuntimeServiceLogsById({})
     setRuntimeServiceStreamError('')
-    setProcesses([])
-    setProcessesLoading(false)
     runtimeServiceStreamCloseRef.current?.()
     runtimeServiceStreamCloseRef.current = null
     if (runtimeServicesPollTimerRef.current) {
@@ -171,7 +150,6 @@ export function useWorkspace() {
     }
     runtimeServicesPollTimerRef.current = setInterval(() => {
       void loadRuntimeServices()
-      void loadProcesses()
     }, 3000)
 
     return () => {
@@ -273,8 +251,7 @@ export function useWorkspace() {
     codeFolders, setCodeFolders, codeLoading, setCodeLoading, codeError, setCodeError,
     runtimeServices, selectedServiceId, setSelectedServiceId,
     runtimeServiceLogsById, runtimeServiceStreamError, setRuntimeServiceStreamError,
-    processes, processesLoading,
-    refreshWorkspaces, loadContext, loadCode, loadProcesses, loadRuntimeServices,
+    refreshWorkspaces, loadContext, loadCode, loadRuntimeServices,
     upsertRuntimeService, clearWorkspaceData,
     runtimeServicesPollTimerRef,
   }

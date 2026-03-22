@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { GitBranch, GitCommit, ArrowUpCircle, FolderGit2, Globe, Copy, FolderOpen, Upload, AlertCircle, Check, Play, Square, Trash2, Plus, Search, TerminalSquare } from 'lucide-react'
+import { GitBranch, GitCommit, ArrowUpCircle, FolderGit2, Globe, Copy, FolderOpen, Upload, AlertCircle, Check } from 'lucide-react'
 
 function timeAgo(value) {
   if (typeof value !== 'string' || !value.trim()) return ''
@@ -13,146 +13,6 @@ function timeAgo(value) {
   return parsed.toLocaleDateString()
 }
 
-function ProcessList({ folderName, processes, onStartProcess, onStopProcess, onAddProcess, onDeleteProcess, onDetectProcesses }) {
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [addLabel, setAddLabel] = useState('')
-  const [addCommand, setAddCommand] = useState('')
-  const [addCwd, setAddCwd] = useState('.')
-  const [addType, setAddType] = useState('service')
-  const [addLoading, setAddLoading] = useState(false)
-  const [addError, setAddError] = useState('')
-  const [actionLoading, setActionLoading] = useState('')
-  const [detectLoading, setDetectLoading] = useState(false)
-
-  const folderProcesses = useMemo(() => {
-    if (!Array.isArray(processes)) return []
-    // Show only processes explicitly assigned to this folder (not workspace-level with empty folder_name)
-    return processes.filter((p) => p && p.folder_name && p.folder_name === folderName && !p.task_id)
-  }, [processes, folderName])
-
-  async function handleAdd(event) {
-    event.preventDefault()
-    if (!addLabel.trim() || !addCommand.trim() || addLoading) return
-    setAddLoading(true)
-    setAddError('')
-    try {
-      await onAddProcess(folderName, { label: addLabel.trim(), command: addCommand.trim(), cwd: addCwd.trim() || '.', type: addType })
-      setAddLabel('')
-      setAddCommand('')
-      setAddCwd('.')
-      setAddType('service')
-      setShowAddForm(false)
-    } catch (err) {
-      setAddError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setAddLoading(false)
-    }
-  }
-
-  async function handleStart(processId) {
-    if (actionLoading) return
-    setActionLoading(processId)
-    try { await onStartProcess(processId) } catch {} finally { setActionLoading('') }
-  }
-
-  async function handleStop(processId) {
-    if (actionLoading) return
-    setActionLoading(processId)
-    try { await onStopProcess(processId) } catch {} finally { setActionLoading('') }
-  }
-
-  async function handleDelete(processId) {
-    if (actionLoading) return
-    setActionLoading(processId)
-    try { await onDeleteProcess(processId) } catch {} finally { setActionLoading('') }
-  }
-
-  async function handleDetect() {
-    if (detectLoading) return
-    setDetectLoading(true)
-    try { await onDetectProcesses(folderName) } catch {} finally { setDetectLoading(false) }
-  }
-
-  return (
-    <div className="cv-processes">
-      <div className="cv-processes-header">
-        <TerminalSquare size={13} />
-        <span className="cv-processes-title">Processes</span>
-        <div className="cv-processes-actions">
-          <button className="cv-proc-btn cv-proc-btn-ghost" onClick={handleDetect} disabled={detectLoading} title="Auto-detect start commands">
-            <Search size={12} />
-            <span>{detectLoading ? 'Detecting...' : 'Detect'}</span>
-          </button>
-          <button className="cv-proc-btn cv-proc-btn-ghost" onClick={() => setShowAddForm(!showAddForm)} title="Add process">
-            <Plus size={12} />
-            <span>Add</span>
-          </button>
-        </div>
-      </div>
-
-      {folderProcesses.length === 0 && !showAddForm && (
-        <div className="cv-processes-empty">No processes configured</div>
-      )}
-
-      {folderProcesses.map((proc) => {
-        const isRunning = proc.status === 'running'
-        const isExited = proc.status === 'exited'
-        const isBusy = actionLoading === proc.id
-        return (
-          <div key={proc.id} className="cv-proc-row">
-            <span className={`cv-proc-dot ${isRunning ? 'running' : ''} ${isExited ? 'exited' : ''}`} />
-            <div className="cv-proc-info">
-              <span className="cv-proc-label">{proc.label}</span>
-              <span className="cv-proc-command">{proc.command}</span>
-            </div>
-            <span className={`cv-proc-type-badge cv-proc-type-${proc.type}`}>{proc.type}</span>
-            <div className="cv-proc-actions">
-              {isRunning ? (
-                <button className="cv-proc-btn cv-proc-btn-stop" onClick={() => handleStop(proc.id)} disabled={isBusy} title="Stop">
-                  <Square size={11} />
-                </button>
-              ) : (
-                <button className="cv-proc-btn cv-proc-btn-start" onClick={() => handleStart(proc.id)} disabled={isBusy} title="Start">
-                  <Play size={11} />
-                </button>
-              )}
-              <button className="cv-proc-btn cv-proc-btn-delete" onClick={() => handleDelete(proc.id)} disabled={isBusy} title="Delete">
-                <Trash2 size={11} />
-              </button>
-            </div>
-          </div>
-        )
-      })}
-
-      {showAddForm && (
-        <form className="cv-proc-add-form" onSubmit={handleAdd}>
-          <div className="cv-proc-add-row">
-            <input className="cv-input cv-proc-add-input" placeholder="Label" value={addLabel} onChange={(e) => setAddLabel(e.target.value)} disabled={addLoading} />
-            <select className="cv-input cv-proc-add-select" value={addType} onChange={(e) => setAddType(e.target.value)} disabled={addLoading}>
-              <option value="service">service</option>
-              <option value="script">script</option>
-            </select>
-          </div>
-          <input className="cv-input cv-proc-add-input" placeholder="Command (e.g. npm run dev)" value={addCommand} onChange={(e) => setAddCommand(e.target.value)} disabled={addLoading} />
-          <div className="cv-proc-add-row">
-            <input className="cv-input cv-proc-add-input" placeholder="cwd (relative, default .)" value={addCwd} onChange={(e) => setAddCwd(e.target.value)} disabled={addLoading} />
-            <button className="cv-btn cv-btn-primary cv-proc-add-submit" type="submit" disabled={addLoading || !addLabel.trim() || !addCommand.trim()}>
-              {addLoading ? 'Adding...' : 'Add'}
-            </button>
-            <button className="cv-btn cv-btn-secondary" type="button" onClick={() => setShowAddForm(false)} disabled={addLoading}>Cancel</button>
-          </div>
-          {addError && (
-            <div className="cv-inline-error">
-              <AlertCircle size={13} />
-              <span>{addError}</span>
-            </div>
-          )}
-        </form>
-      )}
-    </div>
-  )
-}
-
 export function CodeView({
   folders,
   loading,
@@ -161,14 +21,6 @@ export function CodeView({
   onCopyLocalFolder,
   onPickLocalFolder,
   onPushFolder,
-  processes,
-  processesLoading,
-  onStartProcess,
-  onStopProcess,
-  onAddProcess,
-  onUpdateProcess,
-  onDeleteProcess,
-  onDetectProcesses,
 }) {
   const [gitUrl, setGitUrl] = useState('')
   const [cloneLoading, setCloneLoading] = useState(false)
@@ -394,15 +246,6 @@ export function CodeView({
                       </div>
                     )}
 
-                    <ProcessList
-                      folderName={folder.name}
-                      processes={processes}
-                      onStartProcess={onStartProcess}
-                      onStopProcess={onStopProcess}
-                      onAddProcess={onAddProcess}
-                      onDeleteProcess={onDeleteProcess}
-                      onDetectProcesses={onDetectProcesses}
-                    />
                   </div>
                 ))}
               </div>

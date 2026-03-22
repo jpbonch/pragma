@@ -27,13 +27,6 @@ import {
   setActiveWorkspace,
   stopTask,
   stopRuntimeService as stopRuntimeServiceApi,
-  createProcess as createProcessApi,
-  createWorkspaceProcess as createWorkspaceProcessApi,
-  updateProcess as updateProcessApi,
-  deleteProcess as deleteProcessApi,
-  startProcess as startProcessApi,
-  stopProcess as stopProcessApi,
-  detectProcesses as detectProcessesApi,
   streamConversationTurn,
   setTaskRecipient,
   updateAgent,
@@ -96,8 +89,7 @@ export default function App() {
     codeFolders, codeLoading, codeError,
     runtimeServices, selectedServiceId, setSelectedServiceId,
     runtimeServiceLogsById, runtimeServiceStreamError,
-    processes, processesLoading,
-    refreshWorkspaces, loadContext, loadCode, loadProcesses, loadRuntimeServices,
+    refreshWorkspaces, loadContext, loadCode, loadRuntimeServices,
     upsertRuntimeService, clearWorkspaceData,
   } = workspace
 
@@ -329,7 +321,7 @@ export default function App() {
   async function loadWorkspaceData() {
     await Promise.all([
       loadTasks(), loadAgents(), loadHumans(),
-      loadContext(), loadCode(), loadProcesses(), loadPlans(), loadChats(),
+      loadContext(), loadCode(), loadPlans(), loadChats(),
       loadRuntimeServices(),
     ])
   }
@@ -422,14 +414,11 @@ export default function App() {
   async function handleCloneCodeRepo(gitUrl) {
     await cloneCodeRepo(gitUrl)
     await loadCode()
-    // Detection runs async on server; poll processes after a delay
-    setTimeout(() => { void loadProcesses() }, 3000)
   }
 
   async function handleCopyCodeFolderFromLocal(localPath) {
     await copyCodeFolderFromLocal(localPath)
     await loadCode()
-    setTimeout(() => { void loadProcesses() }, 3000)
   }
 
   async function handlePickLocalCodeFolder() {
@@ -442,46 +431,6 @@ export default function App() {
   async function handlePushCodeFolder(folderName) {
     await pushCodeFolder(folderName)
     await loadCode()
-  }
-
-  async function handleAddProcess(folderName, config) {
-    await createProcessApi(folderName, config)
-    await loadProcesses()
-  }
-
-  async function handleAddWorkspaceProcess(config) {
-    await createWorkspaceProcessApi(config)
-    await loadProcesses()
-  }
-
-  async function handleUpdateProcess(processId, updates) {
-    await updateProcessApi(processId, updates)
-    await loadProcesses()
-  }
-
-  async function handleDeleteProcess(processId) {
-    await deleteProcessApi(processId)
-    await loadProcesses()
-  }
-
-  async function handleStartProcess(processId) {
-    const result = await startProcessApi(processId)
-    await loadProcesses()
-    if (result?.service) {
-      upsertRuntimeService(result.service)
-    }
-  }
-
-  async function handleStopProcess(processId) {
-    await stopProcessApi(processId)
-    await loadProcesses()
-    await loadRuntimeServices()
-  }
-
-  async function handleDetectProcesses(folderName) {
-    await detectProcessesApi(folderName)
-    // Detection is async on server, poll after a delay
-    setTimeout(() => { void loadProcesses() }, 2000)
   }
 
   // --- Agent handlers ---
@@ -535,7 +484,6 @@ export default function App() {
 
     setSelectedServiceId(serviceId)
 
-    // Repo-level processes have empty task_id — just select the service for log viewing
     if (!taskId) return
 
     const existingTask = tasks.find((task) => task?.id === taskId)
@@ -554,7 +502,7 @@ export default function App() {
       await handleOpenTaskConversation(refreshedTask, { serviceId })
       return
     }
-    setWorkspaceError(`Task not found for process task ${taskId}.`)
+    setWorkspaceError(`Task not found for service task ${taskId}.`)
   }
 
   // --- Task handlers ---
@@ -1209,14 +1157,9 @@ export default function App() {
         activeChatId={activeTab === 'active-chat' && conversation.open && conversation.mode === 'chat' ? conversation.threadId : ''}
         services={visibleRuntimeServices}
         activeServiceId={selectedServiceId}
-        processes={processes}
         onOpenChat={(threadId) => { void handleOpenChat(threadId) }}
         onOpenService={(service) => { void handleOpenRuntimeService(service) }}
         onStopService={(serviceId) => { void handleStopRuntimeService(serviceId) }}
-        onStartProcess={(processId) => { void handleStartProcess(processId) }}
-        onStopProcess={(processId) => { void handleStopProcess(processId) }}
-        onAddProcess={(config) => { void handleAddWorkspaceProcess(config) }}
-        onDeleteProcess={(processId) => { void handleDeleteProcess(processId) }}
         onHideChat={handleHideChat}
         onNewChat={handleNewChat}
         onSelectWorkspace={handleSelectWorkspace}
@@ -1347,14 +1290,6 @@ export default function App() {
             onCopyLocalFolder={handleCopyCodeFolderFromLocal}
             onPickLocalFolder={handlePickLocalCodeFolder}
             onPushFolder={handlePushCodeFolder}
-            processes={processes}
-            processesLoading={processesLoading}
-            onStartProcess={handleStartProcess}
-            onStopProcess={handleStopProcess}
-            onAddProcess={handleAddProcess}
-            onUpdateProcess={handleUpdateProcess}
-            onDeleteProcess={handleDeleteProcess}
-            onDetectProcesses={handleDetectProcesses}
           />
         )}
         {activeTab === 'files' && <FilesView />}
