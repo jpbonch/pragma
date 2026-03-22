@@ -1963,6 +1963,48 @@ select { cursor: pointer; }
   background: #fcfcfb;
 }
 
+/* System-generated follow-up messages */
+.conv-msg-system {
+  justify-content: flex-start;
+}
+
+.conv-msg-system-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+  background: #FFF3E0;
+  color: #E65100;
+}
+
+.conv-msg-system-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.conv-msg-system-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #B0AFA8;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.conv-msg-system-text {
+  font-size: 13px;
+  color: #787774;
+  line-height: 1.45;
+  padding: 8px 12px;
+  background: #F7F6F3;
+  border-radius: 10px;
+  border-left: 3px solid #E0DEDA;
+}
+
 /* Tool events - inline, compact */
 .conv-tool {
   display: flex;

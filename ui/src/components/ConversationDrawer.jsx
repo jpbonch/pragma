@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ArrowLeft, X, Sparkles, User, Info, Square, ChevronRight, Plus, ArrowLeftRight, Trash2 } from 'lucide-react'
+import { ArrowUp, ArrowLeft, X, Sparkles, User, Info, Square, ChevronRight, Plus, ArrowLeftRight, Trash2, Settings } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { OutputPanel } from './OutputPanel'
@@ -331,6 +331,20 @@ export function ConversationDrawer({
         <div key={entry.id} className="conv-status">
           <Info size={12} strokeWidth={2} />
           <span>{entry.content}</span>
+        </div>
+      )
+    }
+
+    if (entry.type === 'system') {
+      return (
+        <div key={entry.id} className="conv-msg conv-msg-system">
+          <div className="conv-msg-system-icon">
+            <Settings size={14} strokeWidth={2} />
+          </div>
+          <div className="conv-msg-system-body">
+            <div className="conv-msg-system-label">System</div>
+            <div className="conv-msg-system-text">{entry.content}</div>
+          </div>
         </div>
       )
     }

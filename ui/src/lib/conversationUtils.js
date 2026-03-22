@@ -367,7 +367,7 @@ export function buildEntriesFromThreadData(data, agentById) {
     if (!message || typeof message !== 'object') {
       continue
     }
-    if (message.role !== 'user' && message.role !== 'assistant') {
+    if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system') {
       continue
     }
     if (typeof message.content !== 'string') {

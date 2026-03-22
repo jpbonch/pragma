@@ -49,6 +49,7 @@ type EnqueueExecuteInput = {
   followUpMessage?: string | null;
   isStartServiceRetry?: boolean;
   isPreviewRetry?: boolean;
+  isSystemPrompt?: boolean;
 };
 
 async function killTaskServicePids(
@@ -330,7 +331,7 @@ WHERE id = $1
       id: userMessageId,
       threadId: input.threadId,
       turnId,
-      role: "user",
+      role: input.isSystemPrompt || (isResume && input.followUpMessage) ? "system" : "user",
       content: task,
     });
 
@@ -1401,6 +1402,7 @@ async function autoMergeBackgroundTask(
         threadId: input.threadId,
         prompt: retryPrompt,
         reasoningEffort: input.reasoningEffort,
+        isSystemPrompt: true,
       },
       options,
     ).catch(async (err: unknown) => {
