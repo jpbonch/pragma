@@ -699,61 +699,9 @@ export function ConnectionsView() {
               </div>
             )}
 
-            {/* Two-column: Skills left, Connector Skills right */}
+            {/* Stacked: Connector Skills on top, Skills below */}
             <div className="cn-columns">
-              {/* Left column: Skill Catalog */}
-              <div className="cn-col">
-                <div className="cn-section">
-                  <div className="cn-section-header">
-                    <h2 className="cn-section-title">Skills</h2>
-                    <button
-                      className="cn-create-skill-btn"
-                      onClick={() => setShowCreateModal(true)}
-                    >
-                      <Plus size={14} strokeWidth={2} />
-                      <span>New Skill</span>
-                    </button>
-                  </div>
-                  <p className="cn-section-desc">Saved prompts that teach your agents new abilities. Create your own or use the bundled skills to give agents specialized knowledge and behaviors.</p>
-                  <div className="cn-list">
-                    {installed.map((skill) => (
-                        <div key={skill.id} className="cn-skill-block">
-                          <div
-                            className="cn-row cn-row--clickable"
-                            onClick={() => setViewingSkill(skill)}
-                          >
-                            <div className="cn-row-left">
-                              <span className="cn-row-name">{skill.name}</span>
-                              {skill.description && (
-                                <span className="cn-row-desc">{skill.description}</span>
-                              )}
-                            </div>
-                            <div className="cn-row-actions" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                className="cn-remove-btn"
-                                onClick={() => handleRemove(skill)}
-                                disabled={removing === skill.id}
-                              >
-                                {removing === skill.id ? (
-                                  <div className="cn-spinner-sm" />
-                                ) : (
-                                  <Trash2 size={13} />
-                                )}
-                                <span>{removing === skill.id ? 'Removing...' : 'Remove'}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                    ))}
-
-                    {installed.length === 0 && (
-                      <div className="cn-list-empty">No skills available</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Right column: Connector Skills */}
+              {/* Connector Skills */}
               <div className="cn-col">
                 <div className="cn-section">
                   <div className="cn-section-header">
@@ -901,6 +849,58 @@ export function ConnectionsView() {
 
                     {connectors.length === 0 && (
                       <div className="cn-list-empty">No connector skills available</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Skills */}
+              <div className="cn-col">
+                <div className="cn-section">
+                  <div className="cn-section-header">
+                    <h2 className="cn-section-title">Skills</h2>
+                    <button
+                      className="cn-create-skill-btn"
+                      onClick={() => setShowCreateModal(true)}
+                    >
+                      <Plus size={14} strokeWidth={2} />
+                      <span>New Skill</span>
+                    </button>
+                  </div>
+                  <p className="cn-section-desc">Saved prompts that teach your agents new abilities. Create your own or use the bundled skills to give agents specialized knowledge and behaviors.</p>
+                  <div className="cn-list">
+                    {installed.map((skill) => (
+                        <div key={skill.id} className="cn-skill-block">
+                          <div
+                            className="cn-row cn-row--clickable"
+                            onClick={() => setViewingSkill(skill)}
+                          >
+                            <div className="cn-row-left">
+                              <span className="cn-row-name">{skill.name}</span>
+                              {skill.description && (
+                                <span className="cn-row-desc">{skill.description}</span>
+                              )}
+                            </div>
+                            <div className="cn-row-actions" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                className="cn-remove-btn"
+                                onClick={() => handleRemove(skill)}
+                                disabled={removing === skill.id}
+                              >
+                                {removing === skill.id ? (
+                                  <div className="cn-spinner-sm" />
+                                ) : (
+                                  <Trash2 size={13} />
+                                )}
+                                <span>{removing === skill.id ? 'Removing...' : 'Remove'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                    ))}
+
+                    {installed.length === 0 && (
+                      <div className="cn-list-empty">No skills available</div>
                     )}
                   </div>
                 </div>

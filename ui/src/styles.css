@@ -6670,12 +6670,11 @@ select { cursor: pointer; }
   padding: 6px 12px 2px;
 }
 
-/* Two-column layout */
+/* Stacked layout: connector skills above, normal skills below */
 .cn-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 16px;
-  align-items: start;
 }
 .cn-col { min-width: 0; }
 .cn-col .cn-section { margin-bottom: 0; }
