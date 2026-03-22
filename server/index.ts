@@ -683,6 +683,35 @@ function startRuntimeService(input: {
   return service;
 }
 
+function waitForServiceReady(
+  service: RuntimeServiceRecord,
+  timeoutMs = 60_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Already ready or terminal
+    if (service.status === "ready") return resolve();
+    if (service.status === "exited" || service.status === "stopped") {
+      return reject(new Error(`Service exited before becoming ready (status=${service.status})`));
+    }
+
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (service.status === "ready") {
+        clearInterval(timer);
+        return resolve();
+      }
+      if (service.status === "exited" || service.status === "stopped") {
+        clearInterval(timer);
+        return reject(new Error(`Service exited before becoming ready (status=${service.status})`));
+      }
+      if (Date.now() - start > timeoutMs) {
+        clearInterval(timer);
+        return reject(new Error("Timed out waiting for service to become ready"));
+      }
+    }, 300);
+  });
+}
+
 function stopRuntimeService(service: RuntimeServiceRecord): void {
   if (service.status !== "running" && service.status !== "ready") {
     return;
@@ -2351,13 +2380,13 @@ WHERE id = $1
     // Check if already running
     const store = getWorkspaceServiceStore(workspaceName);
     for (const service of store.values()) {
-      if (service.task_id === taskId && service.label === "__testing_app__" && service.status === "running") {
+      if (service.task_id === taskId && service.label === "__testing_app__" && (service.status === "running" || service.status === "ready")) {
         return c.json({ ok: true, port: service.port, already_running: true });
       }
     }
 
     const port = await getRandomFreePort();
-    const command = `npx vite --host 127.0.0.1 --port ${port}`;
+    const command = `npm install && npx vite --host 127.0.0.1 --port ${port}`;
     const absoluteCwd = testingDir;
 
     const service = startRuntimeService({
@@ -2375,6 +2404,8 @@ WHERE id = $1
       },
       port,
     });
+
+    await waitForServiceReady(service);
 
     return c.json({ ok: true, port: service.port });
   });
@@ -2407,13 +2438,13 @@ WHERE id = $1
     // Check if already running
     const store = getWorkspaceServiceStore(workspaceName);
     for (const service of store.values()) {
-      if (service.task_id === "__workspace__" && service.label === "__testing_app__" && service.status === "running") {
+      if (service.task_id === "__workspace__" && service.label === "__testing_app__" && (service.status === "running" || service.status === "ready")) {
         return c.json({ ok: true, port: service.port, already_running: true });
       }
     }
 
     const port = await getRandomFreePort();
-    const command = `npx vite --host 127.0.0.1 --port ${port}`;
+    const command = `npm install && npx vite --host 127.0.0.1 --port ${port}`;
     const absoluteCwd = testingDir;
 
     const service = startRuntimeService({
@@ -2430,6 +2461,8 @@ WHERE id = $1
       },
       port,
     });
+
+    await waitForServiceReady(service);
 
     return c.json({ ok: true, port: service.port });
   });
