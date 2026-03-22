@@ -988,6 +988,15 @@ ALTER TABLE tasks
 DROP COLUMN IF EXISTS testing_config_json
 `);
 
+  // Strip ## Testing sections from pragma-coder and pragma-ui-designer agent_file values
+  // (removed from defaults but existing rows used ON CONFLICT DO NOTHING)
+  await db.query(`
+UPDATE agents
+SET agent_file = regexp_replace(agent_file, E'\n\n## Testing\n.*', '', 's')
+WHERE id IN ('pragma-coder', 'pragma-ui-designer')
+  AND agent_file LIKE '%## Testing%'
+`);
+
   await db.exec(`
 CREATE TABLE IF NOT EXISTS humans (
   id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR(64),
