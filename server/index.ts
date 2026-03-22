@@ -117,6 +117,7 @@ import {
   configureConnectorSchema,
   createCustomConnectorSchema,
   updateCustomConnectorSchema,
+  agentStartServiceSchema,
   assignAgentConnectorSchema,
   dbQuerySchema,
   createAutomationSchema,
@@ -237,6 +238,7 @@ async function completeChainTasks(
     );
     emitTaskStatus(workspaceName, chainId, "completed", source, undefined, { assigned_to: taskRow.rows[0]?.assigned_to ?? null });
     executeRunner.abort(chainId);
+    killTaskServices(workspaceName, chainId);
     await deleteTaskWorktree({ workspacePaths, taskId: chainId });
   }
 }
@@ -745,6 +747,15 @@ function stopRuntimeService(service: RuntimeServiceRecord): void {
       updateRuntimeServiceStatus(service, "stopped", service.exit_code ?? -1);
     }
   }, 5000);
+}
+
+function killTaskServices(workspaceName: string, taskId: string): void {
+  const store = getWorkspaceServiceStore(workspaceName);
+  for (const service of store.values()) {
+    if (service.task_id === taskId) {
+      stopRuntimeService(service);
+    }
+  }
 }
 
 async function recoverOrphanedTasks(): Promise<void> {
@@ -1747,6 +1758,7 @@ WHERE id = $1
       );
       emitTaskStatus(workspaceName, taskId, nextStatus, "review_mark_completed", undefined, { assigned_to: task.assigned_to ?? null });
       executeRunner.abort(taskId);
+      killTaskServices(workspaceName, taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
 
       return c.json({
@@ -1824,6 +1836,7 @@ WHERE id = $1
 
         for (const chainId of chainTaskIds) {
           executeRunner.abort(chainId);
+          killTaskServices(workspaceName, chainId);
           await deleteTaskWorktree({ workspacePaths, taskId: chainId });
         }
 
@@ -1881,6 +1894,7 @@ WHERE id = $1
       );
       emitTaskStatus(workspaceName, taskId, nextStatus, "review_action", undefined, { assigned_to: task.assigned_to ?? null });
       executeRunner.abort(taskId);
+      killTaskServices(workspaceName, taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
       return c.json({ ok: true, status: nextStatus, merge_state: "no_changes", conflicts: [] });
     }
@@ -1909,6 +1923,7 @@ WHERE id = $1
       emitTaskStatus(workspaceName, taskId, nextStatus, "review_action", undefined, { assigned_to: task.assigned_to ?? null });
       await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
       executeRunner.abort(taskId);
+      killTaskServices(workspaceName, taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
 
       if (pushAfterMerge) {
@@ -1996,6 +2011,7 @@ WHERE id = $1
     emitTaskStatus(workspaceName, taskId, "cancelled", "task_deleted");
 
     executeRunner.abort(taskId);
+    killTaskServices(workspaceName, taskId);
     await deleteTaskWorktree({ workspacePaths, taskId });
     await rm(getTaskMainOutputDir(workspacePaths, taskId), { recursive: true, force: true });
 
@@ -2505,6 +2521,58 @@ WHERE id = $1
     }
 
     return c.json({ ok: true, status: "waiting_for_help_response" });
+  });
+
+  app.post("/tasks/:taskId/agent/start-service", validateJson(agentStartServiceSchema), async (c) => {
+    const workspaceName = c.get("workspace");
+    const taskId = c.req.param("taskId");
+    const body = c.req.valid("json");
+
+    const db = c.get("db");
+    const taskResult = await db.query<{ id: string; status: TaskStatus }>(
+      `SELECT id, status FROM tasks WHERE id = $1 LIMIT 1`,
+      [taskId],
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
+    }
+    if (task.status !== "running" && task.status !== "merging") {
+      throw new PragmaError("TASK_NOT_RUNNING", 409, `Task is not running: ${taskId}`);
+    }
+
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const taskWorkspaceDir = join(workspacePaths.worktreesDir, taskId, "workspace");
+    const absoluteCwd = resolve(taskWorkspaceDir, body.cwd);
+
+    const service = startRuntimeService({
+      workspaceName,
+      taskId,
+      label: body.name,
+      command: body.command,
+      requestedCwd: body.cwd,
+      absoluteCwd,
+      env: process.env,
+      port: body.port,
+    });
+
+    const serviceId = service.id;
+    const pid = service.pid;
+    const url = body.url ?? (body.port ? `http://localhost:${body.port}` : null);
+
+    await db.query(
+      `INSERT INTO task_services (id, task_id, name, command, cwd, port, url, pid, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running')`,
+      [serviceId, taskId, body.name, body.command, body.cwd, body.port ?? null, url, pid],
+    );
+
+    return c.json({
+      id: serviceId,
+      name: body.name,
+      port: body.port ?? null,
+      url,
+      pid,
+    });
   });
 
   app.post("/tasks/:taskId/stop", validateJson(stopTaskSchema), async (c) => {
@@ -3313,6 +3381,7 @@ WHERE id = $1
         emitTaskStatus(workspaceName, thread.task_id, "cancelled", "plan_deleted");
 
         executeRunner.abort(thread.task_id);
+        killTaskServices(workspaceName, thread.task_id);
         const workspacePaths = getWorkspacePaths(workspaceName);
         await deleteTaskWorktree({ workspacePaths, taskId: thread.task_id });
       }

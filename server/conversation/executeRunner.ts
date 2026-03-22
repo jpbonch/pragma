@@ -8,6 +8,7 @@ import { getConnectorBinDir } from "../connectorBinaries";
 import { CONNECTOR_REGISTRY, OAUTH_PROXY_URL } from "../connectorRegistry";
 import { getConversationAdapter } from "./adapters";
 import {
+  buildRepoDiffEntries,
   checkpointTaskRepos,
   deleteTaskWorktree,
   getTaskMainOutputDir,
@@ -46,7 +47,31 @@ type EnqueueExecuteInput = {
   skipOrchestratorSelection?: boolean;
   resumeWorkerSessionId?: string | null;
   followUpMessage?: string | null;
+  isStartServiceRetry?: boolean;
 };
+
+async function killTaskServicePids(
+  db: Awaited<ReturnType<typeof openDatabase>>,
+  taskId: string,
+): Promise<void> {
+  const result = await db.query<{ pid: number | null }>(
+    `SELECT pid FROM task_services WHERE task_id = $1 AND status = 'running'`,
+    [taskId],
+  );
+  for (const row of result.rows) {
+    if (row.pid && row.pid > 0) {
+      try {
+        process.kill(row.pid, "SIGTERM");
+      } catch {
+        // Process may already be gone
+      }
+    }
+  }
+  await db.query(
+    `UPDATE task_services SET status = 'stopped' WHERE task_id = $1 AND status = 'running'`,
+    [taskId],
+  );
+}
 
 type AgentRow = {
   id: string;
@@ -775,6 +800,63 @@ LIMIT 1
       if (isBackgroundTask) {
         await autoMergeBackgroundTask(db, input, paths, gitState, workerResult.sessionId, notifyTaskStatus, options);
       } else {
+        // Post-completion gate: if agent made code changes but didn't start any services,
+        // re-run once to prompt it to start services for the reviewer.
+        if (!input.isStartServiceRetry) {
+          const repoDiffs = await buildRepoDiffEntries({
+            workspacePaths: paths,
+            taskId: input.taskId,
+            gitState,
+          });
+          const hasCodeChanges = repoDiffs.some((entry) => entry.diff.trim().length > 0);
+
+          if (hasCodeChanges) {
+            const servicesResult = await db.query<{ id: string }>(
+              `SELECT id FROM task_services WHERE task_id = $1 LIMIT 1`,
+              [input.taskId],
+            );
+            const hasServices = servicesResult.rows.length > 0;
+
+            if (!hasServices) {
+              const startServiceMessage = `You made code changes but did not start any services for the reviewer to test. Start your app now so the reviewer can interact with it.
+
+Use the command:
+
+pragma-so task start-service --name "<service-name>" --command "<start command>" --cwd "<working directory>" --port <port> --url <url>
+
+For example, for a Vite app:
+
+pragma-so task start-service --name "frontend" --command "npm run dev -- --port 3001" --cwd "./code/myapp" --port 3001 --url "http://localhost:3001"
+
+Start all services needed to interact with your changes, then finish.`;
+
+              // Re-open thread and re-run the worker with the follow-up message
+              await reopenThread(db, input.threadId);
+
+              runExecuteTask(
+                {
+                  workspaceName: input.workspaceName,
+                  taskId: input.taskId,
+                  threadId: input.threadId,
+                  prompt: task,
+                  requestedRecipientAgentId: selectedWorker.id,
+                  reasoningEffort: input.reasoningEffort,
+                  resumeWorkerSessionId: workerResult.sessionId,
+                  followUpMessage: startServiceMessage,
+                  isStartServiceRetry: true,
+                },
+                options,
+              ).catch((err: unknown) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                console.error(`Start-service retry failed: ${msg}`);
+              });
+
+              // Return early — the retry will handle setting pending_review
+              return;
+            }
+          }
+        }
+
         await db.query(
           `
 UPDATE tasks
@@ -867,6 +949,7 @@ WHERE id = $1
 `,
       [input.taskId],
     );
+    await killTaskServicePids(db, input.taskId);
     await notifyTaskStatus("failed", "execute_runner");
   } finally {
     ACTIVE_TASK_ABORTS.delete(input.taskId);
@@ -1204,6 +1287,7 @@ async function autoMergeAfterConflictResolution(
 
     for (const chainId of chainTaskIds) {
       ACTIVE_TASK_ABORTS.delete(chainId);
+      await killTaskServicePids(db, chainId);
       await deleteTaskWorktree({ workspacePaths: paths, taskId: chainId });
     }
 
@@ -1274,6 +1358,7 @@ async function autoMergeBackgroundTask(
 
     await saveDiffSnapshot({ db, workspacePaths: paths, taskId: input.taskId, gitState });
     ACTIVE_TASK_ABORTS.delete(input.taskId);
+    await killTaskServicePids(db, input.taskId);
     await deleteTaskWorktree({ workspacePaths: paths, taskId: input.taskId });
   } else {
     // Conflicts — re-run the agent to resolve them

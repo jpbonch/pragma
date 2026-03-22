@@ -252,6 +252,17 @@ export const serviceStdinSchema = z.object({
   text: nonEmptyString,
 }).strict();
 
+export const agentStartServiceSchema = z
+  .object({
+    name: nonEmptyString,
+    command: nonEmptyString,
+    cwd: nonEmptyString,
+    port: z.number().int().min(1).max(65535).optional(),
+    url: nonEmptyString.optional(),
+    turn_id: nonEmptyString.optional(),
+  })
+  .strict();
+
 export const createContextFileSchema = z
   .object({
     name: nonEmptyString,

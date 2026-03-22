@@ -352,6 +352,58 @@ taskCommand
   );
 
 taskCommand
+  .command("start-service")
+  .description("Start a service for the current task so the reviewer can interact with it")
+  .requiredOption("--name <name>", "Service name")
+  .requiredOption("--command <cmd>", "Command to start the service")
+  .requiredOption("--cwd <dir>", "Working directory (relative to task worktree)")
+  .option("--port <port>", "Port the service listens on")
+  .option("--url <url>", "URL where the service is accessible")
+  .option("--task-id <id>", "Task id")
+  .option("--turn-id <id>", "Turn id")
+  .option("--api-url <url>", "Pragma API base URL")
+  .action(
+    async (options: {
+      name: string;
+      command: string;
+      cwd: string;
+      port?: string;
+      url?: string;
+      taskId?: string;
+      turnId?: string;
+      apiUrl?: string;
+    }) => {
+      const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
+      const port = options.port ? parsePort(options.port) : undefined;
+      const result = await apiRequest<{
+        id: string;
+        name: string;
+        port: number | null;
+        url: string | null;
+        pid: number | null;
+      }>(
+        apiUrl,
+        `/tasks/${encodeURIComponent(taskId)}/agent/start-service`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: options.name,
+            command: options.command,
+            cwd: options.cwd,
+            port,
+            url: options.url,
+            turn_id: turnId,
+          }),
+        },
+      );
+
+      const displayUrl = result.url || (result.port ? `http://localhost:${result.port}` : "N/A");
+      console.log(`Started service "${result.name}" (pid ${result.pid}) at ${displayUrl}`);
+    },
+  );
+
+taskCommand
   .command("plan-summary")
   .description("Submit structured plan summary for the current plan turn")
   .requiredOption("--title <text>", "Plan title")

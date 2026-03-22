@@ -1124,6 +1124,22 @@ CREATE TABLE IF NOT EXISTS automation_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id, executed_at DESC);
 `);
+
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS task_services (
+  id VARCHAR(64) PRIMARY KEY,
+  task_id VARCHAR(64) NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  command TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  port INTEGER,
+  url TEXT,
+  pid INTEGER,
+  status VARCHAR(32) NOT NULL DEFAULT 'running',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_task_services_task ON task_services(task_id);
+`);
 }
 
 async function ensureTaskStatusEnumType(db: PGlite): Promise<void> {
