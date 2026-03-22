@@ -79,8 +79,6 @@ import { EventBus, createEvent, EVENT_TYPES } from "./events";
 import type { PragmaEvent } from "./events";
 import { AutomationRegistry, rowToAutomation, automationToRow, type AutomationRow } from "./events/automations";
 import {
-  agentSubmitTestingConfigSchema,
-  updateTestingConfigSchema,
   agentAskQuestionSchema,
   agentRequestHelpSchema,
   agentSelectRecipientSchema,
@@ -107,7 +105,6 @@ import {
   planSelectRecipientSchema,
   executePlanProposalSchema,
   reviewTaskSchema,
-  testingProxyRequestSchema,
   serviceStdinSchema,
   setActiveWorkspaceSchema,
   setTaskRecipientSchema,
@@ -2722,352 +2719,64 @@ WHERE id = $1
     return c.json({ ok: true, assigned_to: selectedAgentId });
   });
 
-  // Migrate old-format testing configs (processes + top-level panels) to new format (services with nested panels)
-  function migrateTestingConfig(raw: any): any {
-    if (raw && Array.isArray(raw.processes) && Array.isArray(raw.panels)) {
-      const services = raw.processes.map((proc: any) => ({
-        command: proc.command,
-        cwd: proc.cwd,
-        name: proc.name,
-        panels: raw.panels
-          .filter((p: any) => p.process === proc.name || p.type === "terminal")
-          .map((p: any) => {
-            const { process: _, ...rest } = p;
-            return rest;
-          }),
-      }));
-      return { setup: raw.setup, services, layout: raw.layout };
-    }
-    return raw;
-  }
-
-  async function startTestingServices(
-    workspaceName: string,
-    taskId: string,
-    config: any,
-    db: any,
-  ): Promise<Record<string, RuntimeServiceSummary>> {
-    const workspacePaths = getWorkspacePaths(workspaceName);
-    const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
-
-    if (config.setup && config.setup.length > 0) {
-      for (const setupCmd of config.setup) {
-        const setupResult = await runShellCommandDetailed({
-          command: setupCmd,
-          cwd: runRoot,
-          env: {
-            ...process.env,
-            PRAGMA_WORKSPACE_NAME: workspaceName,
-            PRAGMA_TASK_ID: taskId,
-          },
-        });
-        if (setupResult.exitCode !== 0) {
-          throw new PragmaError(
-            "TESTING_SETUP_FAILED",
-            500,
-            `Setup command failed: ${setupCmd}\n${setupResult.stderr || setupResult.stdout}`,
-          );
-        }
-      }
-    }
-
-    const services: Record<string, RuntimeServiceSummary> = {};
-    const svcList: Array<{ command: string; cwd?: string; name?: string; panels?: any[] }> = config.services || [];
-    for (let i = 0; i < svcList.length; i++) {
-      const svc = svcList[i];
-      const svcName = svc.name || `service-${i}`;
-      const processCwd = svc.cwd
-        ? await resolveTaskCommandCwd(runRoot, svc.cwd)
-        : runRoot;
-
-      const port = await getRandomFreePort();
-
-      const env = {
-        ...process.env,
-        PORT: String(port),
-        PRAGMA_WORKSPACE_NAME: workspaceName,
-        PRAGMA_TASK_ID: taskId,
-      };
-
-      // Rewrite command for frameworks that don't read PORT
-      let command = svc.command;
-      if (/\bvite\b|webpack-dev-server/.test(command)) {
-        command += ` --port ${port}`;
-      }
-      if (/\bvite\b|\bnext\b/.test(command)) {
-        command += ` --host 127.0.0.1`;
-      }
-
-      const service = startRuntimeService({
-        workspaceName,
-        taskId,
-        label: svcName,
-        command,
-        requestedCwd: svc.cwd || ".",
-        absoluteCwd: processCwd,
-        env,
-        port,
-      });
-
-      // Track task-level processes in the processes table
-      const taskProcessId = `proc_${randomUUID().slice(0, 12)}`;
-      service.process_db_id = taskProcessId;
-      void db.query(
-        `INSERT INTO processes (id, workspace, folder_name, label, command, cwd, type, status, pid, task_id, started_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'service', 'running', $7, $8, CURRENT_TIMESTAMP)`,
-        [taskProcessId, workspaceName, "", svcName, command, svc.cwd || ".", service.pid, taskId],
-      );
-
-      services[svcName] = toRuntimeServiceSummary(service);
-    }
-
-    return services;
-  }
-
-  app.post(
-    "/tasks/:taskId/agent/testing-config",
-    validateJson(agentSubmitTestingConfigSchema),
-    async (c) => {
-      const workspaceName = c.get("workspace");
-      const taskId = c.req.param("taskId");
-      const body = c.req.valid("json");
-
-      const db = c.get("db");
-      await ensureConversationSchema(db);
-      const taskResult = await db.query<{
-        id: string;
-        status: TaskStatus;
-        assigned_to: string | null;
-      }>(
-        `
-SELECT id, status, assigned_to
-FROM tasks
-WHERE id = $1
-LIMIT 1
-`,
-        [taskId],
-      );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-      if (task.status !== "running" && task.status !== "pending_review") {
-        throw new PragmaError(
-          "TASK_NOT_ACCEPTING_TESTING_CONFIG",
-          409,
-          `Task cannot accept testing config in status: ${task.status}`,
-        );
-      }
-
-      await db.query(
-        `UPDATE tasks SET testing_config_json = $2 WHERE id = $1`,
-        [taskId, JSON.stringify(body.config)],
-      );
-
-      // Auto-start services after saving config
-      let services: Record<string, RuntimeServiceSummary> = {};
-      let autoStartError: string | null = null;
-      try {
-        services = await startTestingServices(workspaceName, taskId, body.config, db);
-      } catch (err) {
-        autoStartError = err instanceof Error ? err.message : String(err);
-      }
-
-      const thread = await getThreadByTaskId(db, taskId);
-      if (thread) {
-        const latestExecuteTurn = await getLatestExecuteTurn(db, thread.id);
-        await insertEvent(db, {
-          id: `evt_${randomUUID().slice(0, 12)}`,
-          threadId: thread.id,
-          turnId: body.turn_id || latestExecuteTurn?.id || null,
-          eventName: "worker_testing_config_submitted",
-          payload: {
-            config: body.config,
-            services,
-            agent_id: body.agent_id ?? task.assigned_to ?? null,
-          },
-        });
-        eventBus.emit(createEvent({
-          type: EVENT_TYPES.THREAD_UPDATED,
-          threadId: thread.id,
-          workspaceName,
-          payload: {},
-          source: "worker_testing_config_submitted",
-        }));
-      }
-
-      return c.json({ ok: true, services, ...(autoStartError ? { error: autoStartError } : {}) });
-    },
-  );
-
-  app.get("/tasks/:taskId/testing-config", async (c) => {
-    const taskId = c.req.param("taskId");
-    const db = c.get("db");
-
-    const result = await db.query<{ id: string; testing_config_json: string | null }>(
-      `SELECT id, testing_config_json FROM tasks WHERE id = $1 LIMIT 1`,
-      [taskId],
-    );
-    const row = result.rows[0];
-    if (!row) {
-      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-    }
-
-    let config: unknown = null;
-    if (row.testing_config_json) {
-      try {
-        config = migrateTestingConfig(JSON.parse(row.testing_config_json));
-      } catch {
-        config = null;
-      }
-    }
-
-    return c.json({ config });
-  });
-
-  app.put(
-    "/tasks/:taskId/testing-config",
-    validateJson(updateTestingConfigSchema),
-    async (c) => {
-      const taskId = c.req.param("taskId");
-      const body = c.req.valid("json");
-      const db = c.get("db");
-
-      const taskResult = await db.query<{ id: string; status: TaskStatus }>(
-        `SELECT id, status FROM tasks WHERE id = $1 LIMIT 1`,
-        [taskId],
-      );
-      const task = taskResult.rows[0];
-      if (!task) {
-        throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-      }
-
-      await db.query(
-        `UPDATE tasks SET testing_config_json = $2 WHERE id = $1`,
-        [taskId, JSON.stringify(body.config)],
-      );
-
-      return c.json({ ok: true, config: body.config });
-    },
-  );
+  // ── Testing app endpoints ────────────────────────────────────
 
   app.post("/tasks/:taskId/testing/start", async (c) => {
     const workspaceName = c.get("workspace");
     const taskId = c.req.param("taskId");
-    const db = c.get("db");
 
-    const result = await db.query<{ id: string; testing_config_json: string | null }>(
-      `SELECT id, testing_config_json FROM tasks WHERE id = $1 LIMIT 1`,
-      [taskId],
-    );
-    const row = result.rows[0];
-    if (!row) {
-      throw new PragmaError("TASK_NOT_FOUND", 404, `Task not found: ${taskId}`);
-    }
-    if (!row.testing_config_json) {
-      throw new PragmaError("NO_TESTING_CONFIG", 400, "No testing config found for this task.");
+    const workspacePaths = getWorkspacePaths(workspaceName);
+    const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
+    const testingDir = join(runRoot, "testing");
+
+    if (!(await isDirectory(testingDir))) {
+      throw new PragmaError("TESTING_DIR_NOT_FOUND", 404, "No testing/ directory found in the task workspace.");
     }
 
-    let config: any;
-    try {
-      config = migrateTestingConfig(JSON.parse(row.testing_config_json));
-    } catch {
-      throw new PragmaError("INVALID_TESTING_CONFIG", 400, "Testing config JSON is invalid.");
+    // Check if already running
+    const store = getWorkspaceServiceStore(workspaceName);
+    for (const service of store.values()) {
+      if (service.task_id === taskId && service.label === "__testing_app__" && service.status === "running") {
+        return c.json({ ok: true, port: service.port, already_running: true });
+      }
     }
 
-    const services = await startTestingServices(workspaceName, taskId, config, db);
-    return c.json({ ok: true, services });
+    const port = await getRandomFreePort();
+    const command = `npx vite --host 127.0.0.1 --port ${port}`;
+    const absoluteCwd = testingDir;
+
+    const service = startRuntimeService({
+      workspaceName,
+      taskId,
+      label: "__testing_app__",
+      command,
+      requestedCwd: "testing",
+      absoluteCwd,
+      env: {
+        ...process.env,
+        PORT: String(port),
+        PRAGMA_WORKSPACE_NAME: workspaceName,
+        PRAGMA_TASK_ID: taskId,
+      },
+      port,
+    });
+
+    return c.json({ ok: true, port: service.port });
   });
 
-  app.post("/tasks/:taskId/testing/stop", async (c) => {
+  app.get("/tasks/:taskId/testing/status", async (c) => {
     const workspaceName = c.get("workspace");
     const taskId = c.req.param("taskId");
-    const db = c.get("db");
 
     const store = getWorkspaceServiceStore(workspaceName);
     for (const service of store.values()) {
-      if (service.task_id === taskId) {
-        stopRuntimeService(service);
+      if (service.task_id === taskId && service.label === "__testing_app__") {
+        return c.json({ running: service.status === "running" || service.status === "ready", port: service.port });
       }
     }
 
-    // Update task processes in DB
-    void db.query(
-      `UPDATE processes SET status = 'stopped', stopped_at = CURRENT_TIMESTAMP WHERE task_id = $1 AND status = 'running'`,
-      [taskId],
-    );
-
-    return c.json({ ok: true });
+    return c.json({ running: false, port: null });
   });
-
-  app.get("/tasks/:taskId/testing/services", async (c) => {
-    const workspaceName = c.get("workspace");
-    const taskId = c.req.param("taskId");
-    const store = getWorkspaceServiceStore(workspaceName);
-    const services: Record<string, RuntimeServiceSummary> = {};
-    for (const service of store.values()) {
-      if (service.task_id === taskId) {
-        services[service.label] = toRuntimeServiceSummary(service);
-      }
-    }
-    return c.json({ services });
-  });
-
-  app.post(
-    "/tasks/:taskId/testing/proxy",
-    validateJson(testingProxyRequestSchema),
-    async (c) => {
-      const workspaceName = c.get("workspace");
-      const taskId = c.req.param("taskId");
-      const body = c.req.valid("json");
-
-      let servicePort: number | null = null;
-      const store = getWorkspaceServiceStore(workspaceName);
-      for (const service of store.values()) {
-        if (service.task_id === taskId && service.label === body.process_name && service.port) {
-          servicePort = service.port;
-          break;
-        }
-      }
-
-      if (!servicePort) {
-        throw new PragmaError(
-          "PROCESS_NOT_FOUND",
-          404,
-          `Process "${body.process_name}" not found or has no port assigned.`,
-        );
-      }
-
-      const targetUrl = `http://127.0.0.1:${servicePort}${body.path}`;
-      const startTime = Date.now();
-      try {
-        const fetchResponse = await fetch(targetUrl, {
-          method: body.method,
-          headers: body.headers as Record<string, string> | undefined,
-          body: body.method !== "GET" && body.method !== "HEAD" ? body.body : undefined,
-        });
-        const elapsed = Date.now() - startTime;
-        const responseBody = await fetchResponse.text();
-        const responseHeaders: Record<string, string[]> = {};
-        fetchResponse.headers.forEach((value, key) => {
-          responseHeaders[key] = [value];
-        });
-
-        return c.json({
-          status: fetchResponse.status,
-          headers: responseHeaders,
-          body: responseBody,
-          elapsed_ms: elapsed,
-        });
-      } catch (error) {
-        throw new PragmaError(
-          "PROXY_REQUEST_FAILED",
-          502,
-          `Proxy request to ${targetUrl} failed: ${errorMessage(error)}`,
-        );
-      }
-    },
-  );
 
   app.post(
     "/services/:serviceId/stdin",

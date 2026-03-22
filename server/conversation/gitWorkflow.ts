@@ -182,6 +182,16 @@ export async function prepareTaskWorkspace(input: {
   });
   await mkdir(outputDir, { recursive: true });
 
+  // Install testing app dependencies if present in the worktree
+  const taskTestingDir = join(taskWorkspaceDir, "testing");
+  try {
+    const pkgJsonPath = join(taskTestingDir, "package.json");
+    await stat(pkgJsonPath);
+    await runCommand({ command: "npm", args: ["install", "--prefer-offline"], cwd: taskTestingDir });
+  } catch {
+    // testing dir or package.json doesn't exist — skip
+  }
+
   return {
     taskRootDir,
     taskWorkspaceDir,
@@ -378,7 +388,7 @@ function getManagedIgnoredEntryExcludes(relativeRepoPath: string): Set<string> {
   if (relativeRepoPath !== ".") {
     return new Set();
   }
-  return new Set(["code", "outputs"]);
+  return new Set(["code", "outputs", "testing/node_modules"]);
 }
 
 async function createFreshTaskWorktrees(input: {
@@ -713,7 +723,7 @@ async function ensureGitRepo(repoPath: string): Promise<void> {
 async function ensureRootGitIgnore(workspaceDir: string): Promise<void> {
   const gitIgnorePath = join(workspaceDir, ".gitignore");
   const existing = await readFile(gitIgnorePath, "utf8").catch(() => "");
-  const required = ["code/", "outputs/"];
+  const required = ["code/", "outputs/", "testing/node_modules/"];
   const lines = existing
     .split(/\r?\n/)
     .map((line) => line.trim())

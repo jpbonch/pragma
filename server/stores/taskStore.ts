@@ -202,24 +202,6 @@ export async function updateTaskStatus(
   await db.query(`UPDATE tasks SET ${sets.join(", ")} WHERE id = $1`, params);
 }
 
-export async function getTaskTestingConfig(
-  db: PGlite,
-  taskId: string,
-): Promise<{ id: string; testing_config_json: string | null } | null> {
-  const result = await db.query<{ id: string; testing_config_json: string | null }>(
-    `SELECT id, testing_config_json FROM tasks WHERE id = $1 LIMIT 1`,
-    [taskId],
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function updateTaskTestingConfig(
-  db: PGlite,
-  taskId: string,
-  json: string,
-): Promise<void> {
-  await db.query(`UPDATE tasks SET testing_config_json = $2 WHERE id = $1`, [taskId, json]);
-}
 
 export async function updateTaskAssignment(
   db: PGlite,

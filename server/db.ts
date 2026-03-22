@@ -71,29 +71,18 @@ Your task is to:
 - Run builds/tests and fix failures before handoff.
 - Report what changed and any follow-up work.
 
-## Submitting test commands
+## Testing
 
-If you changed code, submit at least one runnable validation command for the task window.
+The workspace has a testing app at \`testing/\` — a Vite+React shell that the reviewer uses to interact with your work.
 
-For richer testing UIs with multiple processes and panels, use \`submit-testing-config\`:
+**Your job is to keep the app runnable, not to write tests.**
 
-\`\`\`
-pragma-so task submit-testing-config --config '<JSON>'
-\`\`\`
+- When you set up or change how services start (new server, different port, different start command), update \`testing/config.json\` to reflect the current services.
+- Each service in config.json has a \`type\`: use \`"ui"\` for web apps (shown in an iframe), \`"api"\` for API servers (shown in a built-in API explorer), \`"background"\` for supporting services like databases.
+- Make sure \`command\`, \`cwd\`, and \`url\` are correct so the reviewer can start services and interact with them from the Testing pane.
+- If the testing app's dev server is not running, start it: \`cd testing && npm run dev\`
 
-The config JSON has: \`processes\` (array of {name, command, cwd?, ready_pattern?}) and \`panels\` (array of panel objects). Panel types: \`web-preview\` ({type, title, process, path?, devices?}), \`api-tester\` ({type, title, process, endpoints: [{method, path, description?, body?, headers?}]}), \`terminal\` ({type, title, command, cwd?}), \`log-viewer\` ({type, title, process}). Optional: \`setup\` (array of setup commands), \`layout\` ("tabs"|"grid").
-
-Example: \`--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'\`
-
-Fallback: for simple single-command cases, use:
-
-\`\`\`
-pragma-so task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]
-\`\`\`
-
-Include the exact run directory for each command (for example: \`--cwd "code/default/my-app"\`).
-
-Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). Do not submit lint/typecheck/build/test commands to the task window. For app tasks, the first submitted command must run the app/service (for example dev/start script with explicit host/port). Provide only commands the human can run safely in this workspace.
+**Do NOT** submit testing config JSON. Do NOT write test component files for every feature. Just keep \`testing/config.json\` accurate and the app running. The reviewer will test by using the actual app.
 `;
 
 const SCRIBE_AGENT_FILE = `# Scribe
@@ -179,29 +168,18 @@ You are **UI Designer**, an expert user interface designer who creates beautiful
 - **Think systematically**: Create component variations that scale across all breakpoints
 - **Ensure accessibility**: Design with keyboard navigation and screen reader support (WCAG AA: 4.5:1 contrast for normal text, 3:1 for large text)
 
-## Submitting test commands
+## Testing
 
-If you changed code, submit at least one runnable validation command for the task window.
+The workspace has a testing app at \`testing/\` — a Vite+React shell that the reviewer uses to interact with your work.
 
-For richer testing UIs with multiple processes and panels, use \`submit-testing-config\`:
+**Your job is to keep the app runnable, not to write tests.**
 
-\`\`\`
-pragma-so task submit-testing-config --config '<JSON>'
-\`\`\`
+- When you set up or change how services start (new server, different port, different start command), update \`testing/config.json\` to reflect the current services.
+- Each service in config.json has a \`type\`: use \`"ui"\` for web apps (shown in an iframe), \`"api"\` for API servers (shown in a built-in API explorer), \`"background"\` for supporting services like databases.
+- Make sure \`command\`, \`cwd\`, and \`url\` are correct so the reviewer can start services and interact with them from the Testing pane.
+- If the testing app's dev server is not running, start it: \`cd testing && npm run dev\`
 
-The config JSON has: \`processes\` (array of {name, command, cwd?, ready_pattern?}) and \`panels\` (array of panel objects). Panel types: \`web-preview\` ({type, title, process, path?, devices?}), \`api-tester\` ({type, title, process, endpoints: [{method, path, description?, body?, headers?}]}), \`terminal\` ({type, title, command, cwd?}), \`log-viewer\` ({type, title, process}). Optional: \`setup\` (array of setup commands), \`layout\` ("tabs"|"grid").
-
-Example: \`--config '{"processes":[{"name":"server","command":"npm run dev","cwd":"code/my-app","ready_pattern":"ready on"}],"panels":[{"type":"web-preview","title":"App","process":"server"}]}'\`
-
-Fallback: for simple single-command cases, use:
-
-\`\`\`
-pragma-so task submit-test-commands --command "<test command>" --cwd "<run directory>" [--name "<button label>"]
-\`\`\`
-
-Include the exact run directory for each command (for example: \`--cwd "code/default/my-app"\`).
-
-Submit only commands the agent cannot fully validate by itself (for example interactive app/service run commands for human verification). Do not submit lint/typecheck/build/test commands to the task window. For app tasks, the first submitted command must run the app/service (for example dev/start script with explicit host/port). Provide only commands the human can run safely in this workspace.
+**Do NOT** submit testing config JSON. Do NOT write test component files for every feature. Just keep \`testing/config.json\` accurate and the app running. The reviewer will test by using the actual app.
 `;
 
 type DefaultAgentSeed = {
@@ -357,6 +335,7 @@ export function getWorkspacePaths(name: string): {
   dbDir: string;
   workspaceDir: string;
   contextDir: string;
+  testingDir: string;
   codeDir: string;
   outputsDir: string;
   uploadsDir: string;
@@ -366,6 +345,7 @@ export function getWorkspacePaths(name: string): {
   const rootDir = join(PRAGMA_DIR, name);
   const workspaceDir = join(rootDir, "workspace");
   const contextDir = join(workspaceDir, "context");
+  const testingDir = join(workspaceDir, "testing");
 
   return {
     name,
@@ -373,6 +353,7 @@ export function getWorkspacePaths(name: string): {
     dbDir: join(rootDir, "db"),
     workspaceDir,
     contextDir,
+    testingDir,
     codeDir: join(workspaceDir, "code"),
     outputsDir: join(workspaceDir, "outputs"),
     uploadsDir: join(workspaceDir, "uploads"),
@@ -474,7 +455,9 @@ export async function createWorkspace(input: {
   await mkdir(paths.outputsDir, { recursive: true });
   await mkdir(paths.uploadsDir, { recursive: true });
   await mkdir(paths.worktreesDir, { recursive: true });
+  await mkdir(paths.testingDir, { recursive: true });
 
+  await scaffoldTestingApp(paths.testingDir);
   await initializeDatabase(name, orchestratorHarness);
   await initializeWorkspaceGit(paths);
 
@@ -912,6 +895,305 @@ class RemotePGliteClient {
   }
 }
 
+async function scaffoldTestingApp(testingDir: string): Promise<void> {
+  const srcDir = join(testingDir, "src");
+  const componentsDir = join(srcDir, "components");
+  await mkdir(componentsDir, { recursive: true });
+
+  const pkgJson = {
+    name: "pragma-testing",
+    private: true,
+    type: "module",
+    scripts: {
+      dev: "vite --host 127.0.0.1",
+      build: "vite build",
+    },
+    dependencies: {
+      react: "^19.0.0",
+      "react-dom": "^19.0.0",
+    },
+    devDependencies: {
+      "@types/react": "^19.0.0",
+      "@types/react-dom": "^19.0.0",
+      "@vitejs/plugin-react": "^4.3.0",
+      typescript: "^5.6.0",
+      vite: "^6.0.0",
+    },
+  };
+
+  const viteConfig = `import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+
+export default defineConfig({
+  plugins: [react()],
+  server: { port: 5199 },
+})
+`;
+
+  const tsConfig = `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src"]
+}
+`;
+
+  const indexHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pragma Testing</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #1a1a2e; color: #e0e0e0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
+`;
+
+  const mainTsx = `import { createRoot } from "react-dom/client"
+import App from "./App"
+
+createRoot(document.getElementById("root")!).render(<App />)
+`;
+
+  const appTsx = `import { useState } from "react"
+import config from "./config.json"
+import ServiceBar from "./components/ServiceBar"
+import AppFrame from "./components/AppFrame"
+import ApiExplorer from "./components/ApiExplorer"
+
+export default function App() {
+  const interactiveServices = config.services.filter((s: any) => s.type !== "background")
+  const [activeTab, setActiveTab] = useState(interactiveServices[0]?.name ?? "")
+
+  const active = interactiveServices.find((s: any) => s.name === activeTab)
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      <ServiceBar services={config.services} />
+
+      {interactiveServices.length > 1 && (
+        <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #333", background: "#1e1e2e" }}>
+          {interactiveServices.map((s: any) => (
+            <button
+              key={s.name}
+              onClick={() => setActiveTab(s.name)}
+              style={{
+                padding: "8px 16px",
+                background: s.name === activeTab ? "#2a2a3e" : "transparent",
+                color: s.name === activeTab ? "#fff" : "#888",
+                border: "none",
+                borderBottom: s.name === activeTab ? "2px solid #646cff" : "2px solid transparent",
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        {active?.type === "ui" && <AppFrame url={active.url} />}
+        {active?.type === "api" && <ApiExplorer baseUrl={active.url} />}
+        {!active && <div style={{ padding: 24, color: "#666" }}>No interactive services configured.</div>}
+      </div>
+    </div>
+  )
+}
+`;
+
+  const configJson = JSON.stringify({ services: [] }, null, 2);
+
+  const serviceBarTsx = `export default function ServiceBar({ services }: { services: any[] }) {
+  return (
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      padding: "6px 12px",
+      background: "#16162a",
+      borderBottom: "1px solid #333",
+      fontSize: 12,
+    }}>
+      <span style={{ fontWeight: 600, color: "#888" }}>Services</span>
+      {services.map((s: any) => (
+        <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: s.type === "background" ? "#666" : "#4caf50",
+          }} />
+          <span style={{ color: "#ccc" }}>{s.name}</span>
+          <span style={{ color: "#666" }}>({s.type})</span>
+        </div>
+      ))}
+      {services.length === 0 && <span style={{ color: "#555" }}>No services — update config.json</span>}
+    </div>
+  )
+}
+`;
+
+  const appFrameTsx = `import { useRef } from "react"
+
+export default function AppFrame({ url }: { url: string }) {
+  const ref = useRef<HTMLIFrameElement>(null)
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div style={{ padding: "4px 8px", display: "flex", gap: 8, alignItems: "center", borderBottom: "1px solid #333", background: "#1e1e2e" }}>
+        <button
+          onClick={() => { if (ref.current) ref.current.src = ref.current.src }}
+          style={{ padding: "2px 8px", background: "#333", color: "#ccc", border: "1px solid #444", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+        >
+          Refresh
+        </button>
+        <span style={{ opacity: 0.5, fontSize: 12 }}>{url}</span>
+      </div>
+      <iframe ref={ref} src={url} style={{ flex: 1, border: "none", width: "100%" }} />
+    </div>
+  )
+}
+`;
+
+  const apiExplorerTsx = `import { useState } from "react"
+
+type HistoryEntry = {
+  method: string
+  url: string
+  status: number
+  elapsed: number
+  timestamp: number
+}
+
+export default function ApiExplorer({ baseUrl }: { baseUrl: string }) {
+  const [method, setMethod] = useState("GET")
+  const [path, setPath] = useState("/")
+  const [headers, setHeaders] = useState("")
+  const [body, setBody] = useState("")
+  const [response, setResponse] = useState<{ status: number; headers: string; body: string; elapsed: number } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [history, setHistory] = useState<HistoryEntry[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("pragma-api-explorer-history") || "[]")
+    } catch {
+      return []
+    }
+  })
+
+  async function send() {
+    setLoading(true)
+    setError("")
+    setResponse(null)
+    const url = baseUrl.replace(/\\/$/, "") + path
+    const start = Date.now()
+    try {
+      const opts: RequestInit = { method }
+      if (headers.trim()) {
+        try { opts.headers = JSON.parse(headers) } catch { setError("Invalid headers JSON"); setLoading(false); return }
+      }
+      if (method !== "GET" && method !== "HEAD" && body.trim()) {
+        opts.body = body
+        if (!opts.headers) opts.headers = {}
+        if (!(opts.headers as Record<string, string>)["content-type"]) {
+          (opts.headers as Record<string, string>)["content-type"] = "application/json"
+        }
+      }
+      const res = await fetch(url, opts)
+      const elapsed = Date.now() - start
+      const resBody = await res.text()
+      const resHeaders = Array.from(res.headers.entries()).map(([k, v]) => k + ": " + v).join("\\n")
+      setResponse({ status: res.status, headers: resHeaders, body: resBody, elapsed })
+      const entry: HistoryEntry = { method, url, status: res.status, elapsed, timestamp: Date.now() }
+      const updated = [entry, ...history].slice(0, 50)
+      setHistory(updated)
+      try { localStorage.setItem("pragma-api-explorer-history", JSON.stringify(updated)) } catch {}
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  let prettyBody = response?.body ?? ""
+  try { prettyBody = JSON.stringify(JSON.parse(prettyBody), null, 2) } catch {}
+
+  const inputStyle: React.CSSProperties = { padding: "6px 8px", background: "#1e1e2e", color: "#e0e0e0", border: "1px solid #333", borderRadius: 4, fontSize: 13, fontFamily: "monospace" }
+  const labelStyle: React.CSSProperties = { fontSize: 11, color: "#888", marginBottom: 2 }
+
+  return (
+    <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, padding: 12, overflow: "auto" }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <select value={method} onChange={e => setMethod(e.target.value)} style={{ ...inputStyle, width: 100 }}>
+            {["GET", "POST", "PUT", "PATCH", "DELETE"].map(m => <option key={m}>{m}</option>)}
+          </select>
+          <input value={path} onChange={e => setPath(e.target.value)} placeholder="/path" style={{ ...inputStyle, flex: 1 }} />
+          <button onClick={send} disabled={loading} style={{ padding: "6px 16px", background: "#646cff", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>
+            {loading ? "..." : "Send"}
+          </button>
+        </div>
+        <div><div style={labelStyle}>Headers (JSON)</div><textarea value={headers} onChange={e => setHeaders(e.target.value)} rows={2} style={{ ...inputStyle, width: "100%", resize: "vertical" }} placeholder='{"Authorization": "Bearer ..."}' /></div>
+        {method !== "GET" && method !== "HEAD" && (
+          <div><div style={labelStyle}>Body</div><textarea value={body} onChange={e => setBody(e.target.value)} rows={4} style={{ ...inputStyle, width: "100%", resize: "vertical" }} placeholder='{"key": "value"}' /></div>
+        )}
+        {error && <div style={{ color: "#f44", fontSize: 13 }}>{error}</div>}
+        {response && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
+            <div style={{ display: "flex", gap: 12, fontSize: 13 }}>
+              <span style={{ color: response.status < 400 ? "#4caf50" : "#f44" }}>Status: {response.status}</span>
+              <span style={{ color: "#888" }}>{response.elapsed}ms</span>
+            </div>
+            <div style={labelStyle}>Response Headers</div>
+            <pre style={{ ...inputStyle, whiteSpace: "pre-wrap", fontSize: 11, maxHeight: 80, overflow: "auto" }}>{response.headers}</pre>
+            <div style={labelStyle}>Response Body</div>
+            <pre style={{ ...inputStyle, whiteSpace: "pre-wrap", flex: 1, overflow: "auto" }}>{prettyBody}</pre>
+          </div>
+        )}
+      </div>
+      <div style={{ width: 200, borderLeft: "1px solid #333", overflow: "auto", padding: 8, fontSize: 11 }}>
+        <div style={{ fontWeight: 600, color: "#888", marginBottom: 4 }}>History</div>
+        {history.map((h, i) => (
+          <div key={i} onClick={() => { setMethod(h.method); setPath(new URL(h.url).pathname) }}
+            style={{ padding: "4px 6px", cursor: "pointer", borderBottom: "1px solid #222", color: "#aaa" }}>
+            <span style={{ color: h.status < 400 ? "#4caf50" : "#f44" }}>{h.status}</span> {h.method} {new URL(h.url).pathname}
+          </div>
+        ))}
+        {history.length === 0 && <div style={{ color: "#555" }}>No history</div>}
+      </div>
+    </div>
+  )
+}
+`;
+
+  await writeFile(join(testingDir, "package.json"), JSON.stringify(pkgJson, null, 2) + "\n");
+  await writeFile(join(testingDir, "vite.config.ts"), viteConfig);
+  await writeFile(join(testingDir, "tsconfig.json"), tsConfig);
+  await writeFile(join(testingDir, "index.html"), indexHtml);
+  await writeFile(join(srcDir, "main.tsx"), mainTsx);
+  await writeFile(join(srcDir, "App.tsx"), appTsx);
+  await writeFile(join(srcDir, "config.json"), configJson);
+  await writeFile(join(componentsDir, "ServiceBar.tsx"), serviceBarTsx);
+  await writeFile(join(componentsDir, "AppFrame.tsx"), appFrameTsx);
+  await writeFile(join(componentsDir, "ApiExplorer.tsx"), apiExplorerTsx);
+}
+
 async function ensureRequiredSchema(db: PGlite): Promise<void> {
   await ensureTaskStatusEnumType(db);
 
@@ -1033,7 +1315,7 @@ ADD COLUMN IF NOT EXISTS changes_diff TEXT
 
   await db.exec(`
 ALTER TABLE tasks
-ADD COLUMN IF NOT EXISTS testing_config_json TEXT
+DROP COLUMN IF EXISTS testing_config_json
 `);
 
   await db.exec(`

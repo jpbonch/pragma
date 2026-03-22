@@ -190,9 +190,6 @@ export function OutputPanel({
   runtimeServiceLogs = [],
   runtimeServiceError = '',
   onStopRuntimeService,
-  testingConfig = null,
-  initialTestingServices = null,
-  onTestingConfigUpdated,
 }) {
   const [tab, setTab] = useState('outputs')
   const runtimeLogRef = useRef(null)
@@ -212,10 +209,9 @@ export function OutputPanel({
 
   useEffect(() => {
     if (!taskId) return
-    setTab(testingConfig ? 'testing' : 'outputs')
     void loadChanges(taskId)
     void loadFiles(taskId)
-  }, [taskId, testingConfig])
+  }, [taskId])
 
   useEffect(() => {
     if (!files.length) {
@@ -356,14 +352,12 @@ export function OutputPanel({
         >
           Plan
         </button>
-        {testingConfig && (
-          <button
-            className={`output-tab-btn ${tab === 'testing' ? 'active' : ''}`}
-            onClick={() => setTab('testing')}
-          >
-            Testing
-          </button>
-        )}
+        <button
+          className={`output-tab-btn ${tab === 'testing' ? 'active' : ''}`}
+          onClick={() => setTab('testing')}
+        >
+          Testing
+        </button>
       </div>
 
       {tab === 'changes' && (
@@ -507,9 +501,9 @@ export function OutputPanel({
         </div>
       )}
 
-      {tab === 'testing' && testingConfig && (
+      {tab === 'testing' && (
         <div className="output-tab-body output-testing-body">
-          <TestingPane taskId={taskId} config={testingConfig} onConfigUpdated={onTestingConfigUpdated} initialServices={initialTestingServices} />
+          <TestingPane taskId={taskId} />
         </div>
       )}
     </div>

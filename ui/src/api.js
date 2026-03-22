@@ -903,40 +903,14 @@ export async function unassignAgentConnector(agentId, connectorId) {
 
 // ── Testing ─────────────────────────────────────────────────────
 
-export async function fetchTaskTestingConfig(taskId) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing-config`)
-}
-
-export async function fetchTaskTestingServices(taskId) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/services`)
-}
-
-export async function updateTaskTestingConfig(taskId, config) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing-config`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ config }),
-  })
-}
-
-export async function startTaskTesting(taskId) {
+export async function startTestingApp(taskId) {
   return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/start`, {
     method: 'POST',
   }, 120000)
 }
 
-export async function stopTaskTesting(taskId) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/stop`, {
-    method: 'POST',
-  })
-}
-
-export async function proxyTestingRequest(taskId, { process_name, method, path, headers, body }) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/proxy`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ process_name, method, path, headers, body }),
-  }, 60000)
+export async function fetchTestingAppStatus(taskId) {
+  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/status`)
 }
 
 export async function sendServiceStdin(serviceId, text) {

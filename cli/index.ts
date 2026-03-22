@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
 import { access, readFile, stat } from "node:fs/promises";
 import net from "node:net";
 import { dirname, join, normalize, resolve, sep } from "node:path";
@@ -349,67 +348,6 @@ taskCommand
       );
 
       console.log(`Help request submitted for task ${taskId}.`);
-    },
-  );
-
-taskCommand
-  .command("submit-testing-config")
-  .description("Submit a testing config for the current task")
-  .option("--config <json>", "The full testing config as a JSON string")
-  .option("--config-file <path>", "Path to a JSON file containing the testing config")
-  .option("--task-id <id>", "Task id")
-  .option("--turn-id <id>", "Turn id")
-  .option("--api-url <url>", "Pragma API base URL")
-  .action(
-    async (options: {
-      config?: string;
-      configFile?: string;
-      taskId?: string;
-      turnId?: string;
-      apiUrl?: string;
-    }) => {
-      const { apiUrl, taskId, turnId } = resolveTaskCommandContext(options);
-
-      if (options.config && options.configFile) {
-        throw new Error("Provide either --config or --config-file, not both.");
-      }
-      if (!options.config && !options.configFile) {
-        throw new Error("Provide either --config or --config-file.");
-      }
-
-      let configJson: string;
-      if (options.configFile) {
-        try {
-          configJson = readFileSync(options.configFile, "utf-8");
-        } catch (err) {
-          throw new Error(`Failed to read config file: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      } else {
-        configJson = options.config!;
-      }
-
-      let config: unknown;
-      try {
-        config = JSON.parse(configJson);
-      } catch {
-        throw new Error("Config must be valid JSON.");
-      }
-
-      await apiRequest(
-        apiUrl,
-        `/tasks/${encodeURIComponent(taskId)}/agent/testing-config`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            config,
-            turn_id: turnId,
-            agent_id: normalizeOptionalString(process.env.PRAGMA_AGENT_ID),
-          }),
-        },
-      );
-
-      console.log(`Submitted testing config for task ${taskId}.`);
     },
   );
 
