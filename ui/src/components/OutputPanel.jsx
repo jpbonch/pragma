@@ -9,7 +9,7 @@ import {
   taskOutputContentUrl,
   taskOutputDownloadUrl,
 } from '../api'
-import { TestingPane } from './TestingPane'
+
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
 
@@ -352,12 +352,6 @@ export function OutputPanel({
         >
           Plan
         </button>
-        <button
-          className={`output-tab-btn ${tab === 'testing' ? 'active' : ''}`}
-          onClick={() => setTab('testing')}
-        >
-          Testing
-        </button>
       </div>
 
       {tab === 'changes' && (
@@ -501,11 +495,6 @@ export function OutputPanel({
         </div>
       )}
 
-      {tab === 'testing' && (
-        <div className="output-tab-body output-testing-body">
-          <TestingPane taskId={taskId} />
-        </div>
-      )}
     </div>
   )
 }

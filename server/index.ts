@@ -917,7 +917,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   app.use("/automations", workspaceMiddleware);
   app.use("/events/*", workspaceMiddleware);
   app.use("/events", workspaceMiddleware);
-  app.use("/testing/*", workspaceMiddleware);
+
 
   const turnRunner = new TurnRunner({
     apiUrl,
@@ -2364,122 +2364,6 @@ WHERE id = $1
     return c.json({ ok: true, assigned_to: selectedAgentId });
   });
 
-  // ── Testing app endpoints ────────────────────────────────────
-
-  app.post("/tasks/:taskId/testing/start", async (c) => {
-    const workspaceName = c.get("workspace");
-    const taskId = c.req.param("taskId");
-
-    const workspacePaths = getWorkspacePaths(workspaceName);
-    const runRoot = await resolveTaskExecutionRoot(workspacePaths, taskId);
-    const testingDir = join(runRoot, "testing");
-
-    if (!(await isDirectory(testingDir))) {
-      throw new PragmaError("TESTING_DIR_NOT_FOUND", 404, "No testing/ directory found in the task workspace.");
-    }
-
-    // Check if already running
-    const store = getWorkspaceServiceStore(workspaceName);
-    for (const service of store.values()) {
-      if (service.task_id === taskId && service.label === "__testing_app__" && (service.status === "running" || service.status === "ready")) {
-        return c.json({ ok: true, port: service.port, already_running: true });
-      }
-    }
-
-    const port = await getRandomFreePort();
-    const command = `npm install && npx vite --host 127.0.0.1 --port ${port}`;
-    const absoluteCwd = testingDir;
-
-    const service = startRuntimeService({
-      workspaceName,
-      taskId,
-      label: "__testing_app__",
-      command,
-      requestedCwd: "testing",
-      absoluteCwd,
-      env: {
-        ...process.env,
-        PORT: String(port),
-        PRAGMA_WORKSPACE_NAME: workspaceName,
-        PRAGMA_TASK_ID: taskId,
-      },
-      port,
-    });
-
-    await waitForServiceReady(service);
-
-    return c.json({ ok: true, port: service.port });
-  });
-
-  app.get("/tasks/:taskId/testing/status", async (c) => {
-    const workspaceName = c.get("workspace");
-    const taskId = c.req.param("taskId");
-
-    const store = getWorkspaceServiceStore(workspaceName);
-    for (const service of store.values()) {
-      if (service.task_id === taskId && service.label === "__testing_app__") {
-        return c.json({ running: service.status === "running" || service.status === "ready", port: service.port });
-      }
-    }
-
-    return c.json({ running: false, port: null });
-  });
-
-  // ── Workspace-level testing app endpoints ──────────────────────
-
-  app.post("/testing/start", async (c) => {
-    const workspaceName = c.get("workspace");
-    const workspacePaths = getWorkspacePaths(workspaceName);
-    const testingDir = join(workspacePaths.workspaceDir, "testing");
-
-    if (!(await isDirectory(testingDir))) {
-      throw new PragmaError("TESTING_DIR_NOT_FOUND", 404, "No testing/ directory found in the workspace.");
-    }
-
-    // Check if already running
-    const store = getWorkspaceServiceStore(workspaceName);
-    for (const service of store.values()) {
-      if (service.task_id === "__workspace__" && service.label === "__testing_app__" && (service.status === "running" || service.status === "ready")) {
-        return c.json({ ok: true, port: service.port, already_running: true });
-      }
-    }
-
-    const port = await getRandomFreePort();
-    const command = `npm install && npx vite --host 127.0.0.1 --port ${port}`;
-    const absoluteCwd = testingDir;
-
-    const service = startRuntimeService({
-      workspaceName,
-      taskId: "__workspace__",
-      label: "__testing_app__",
-      command,
-      requestedCwd: "testing",
-      absoluteCwd,
-      env: {
-        ...process.env,
-        PORT: String(port),
-        PRAGMA_WORKSPACE_NAME: workspaceName,
-      },
-      port,
-    });
-
-    await waitForServiceReady(service);
-
-    return c.json({ ok: true, port: service.port });
-  });
-
-  app.get("/testing/status", async (c) => {
-    const workspaceName = c.get("workspace");
-
-    const store = getWorkspaceServiceStore(workspaceName);
-    for (const service of store.values()) {
-      if (service.task_id === "__workspace__" && service.label === "__testing_app__") {
-        return c.json({ running: service.status === "running" || service.status === "ready", port: service.port });
-      }
-    }
-
-    return c.json({ running: false, port: null });
-  });
 
   app.post(
     "/services/:serviceId/stdin",

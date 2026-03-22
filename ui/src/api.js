@@ -901,25 +901,6 @@ export async function unassignAgentConnector(agentId, connectorId) {
   )
 }
 
-// ── Testing ─────────────────────────────────────────────────────
-
-export async function startTestingApp(taskId) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/start`, {
-    method: 'POST',
-  }, 120000)
-}
-
-export async function fetchTestingAppStatus(taskId) {
-  return fetchJson(`/tasks/${encodeURIComponent(taskId)}/testing/status`)
-}
-
-export async function startWorkspaceTestingApp() {
-  return fetchJson('/testing/start', { method: 'POST' }, 120000)
-}
-
-export async function fetchWorkspaceTestingAppStatus() {
-  return fetchJson('/testing/status')
-}
 
 export async function sendServiceStdin(serviceId, text) {
   return fetchJson(`/services/${encodeURIComponent(serviceId)}/stdin`, {
