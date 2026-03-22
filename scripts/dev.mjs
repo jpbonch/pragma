@@ -82,7 +82,14 @@ process.once("SIGTERM", () => {
 });
 
 spawnChild(process.execPath, [tscBin, "-w", "--preserveWatchOutput", "--pretty", "false"]);
-spawnChild(process.execPath, ["--watch", "dist/cli/index.js", "server", "--port", apiPort]);
+spawnChild(process.execPath, [
+  "--watch",
+  "dist/cli/index.js",
+  "server",
+  "--port",
+  apiPort,
+  "--skip-orphan-recovery",
+]);
 spawnChild(
   npmCommand,
   ["run", "ui:dev", "--", "--host", host, "--port", uiPort],

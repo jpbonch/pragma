@@ -543,10 +543,14 @@ program
   .command("server")
   .description("Start the Pragma API server")
   .option("-p, --port <port>", "Port to listen on", "3000")
-  .action(async (options: { port: string }) => {
+  .option("--skip-orphan-recovery", "Skip orphaned turn/task recovery on startup")
+  .action(async (options: { port: string; skipOrphanRecovery?: boolean }) => {
     const port = parsePort(options.port);
     const { startServer } = await import("../server");
-    await startServer({ port });
+    await startServer({
+      port,
+      skipOrphanRecovery: options.skipOrphanRecovery === true,
+    });
   });
 
 program
@@ -601,7 +605,7 @@ async function runAll(): Promise<void> {
   const apiUrl = `http://127.0.0.1:${serverPort}`;
   const uiUrl = `http://127.0.0.1:${uiPort}`;
 
-  const serverProcess = spawnSelfCommand(["server", "--port", String(serverPort)], {
+  const serverProcess = spawnSelfCommand(["server", "--port", String(serverPort), "--skip-orphan-recovery"], {
     PRAGMA_SUPPRESS_STARTUP_LOGS: "1",
   });
   const serverExit = waitForExit(serverProcess, "server");

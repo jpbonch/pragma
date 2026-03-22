@@ -375,6 +375,7 @@ function escapeHtml(str: string): string {
 
 type StartServerOptions = {
   port: number;
+  skipOrphanRecovery?: boolean;
 };
 
 type RuntimeServiceStatus = "running" | "ready" | "exited" | "stopped";
@@ -821,7 +822,9 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     }
   }
 
-  await recoverOrphanedTasks();
+  if (!options.skipOrphanRecovery) {
+    await recoverOrphanedTasks();
+  }
   const apiUrl = process.env.PRAGMA_API_URL?.trim() || `http://127.0.0.1:${options.port}`;
   automationRegistry.setApiUrl(apiUrl);
   const pragmaCliCommand = resolvePragmaCliCommand(__dirname);
