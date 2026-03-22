@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatDistanceToNow } from 'date-fns'
 import { AnimatePresence, motion } from 'framer-motion'
 
 function normalizeTaskTitle(title) {
@@ -20,7 +19,29 @@ function getTimeAgo(dateStr) {
     throw new Error(`Invalid date: ${dateStr}`)
   }
 
-  return formatDistanceToNow(date, { addSuffix: true })
+  return formatRelativeTime(date)
+}
+
+const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+
+function formatRelativeTime(date) {
+  const deltaSeconds = Math.round((date.getTime() - Date.now()) / 1000)
+  const units = [
+    ['year', 60 * 60 * 24 * 365],
+    ['month', 60 * 60 * 24 * 30],
+    ['week', 60 * 60 * 24 * 7],
+    ['day', 60 * 60 * 24],
+    ['hour', 60 * 60],
+    ['minute', 60],
+  ]
+
+  for (const [unit, secondsPerUnit] of units) {
+    if (Math.abs(deltaSeconds) >= secondsPerUnit) {
+      return RELATIVE_TIME_FORMATTER.format(Math.round(deltaSeconds / secondsPerUnit), unit)
+    }
+  }
+
+  return RELATIVE_TIME_FORMATTER.format(deltaSeconds, 'second')
 }
 
 function getElapsedShort(dateStr) {
