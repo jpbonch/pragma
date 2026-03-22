@@ -211,7 +211,7 @@ export function OutputPanel({
     if (!taskId) return
     void loadChanges(taskId)
     void loadFiles(taskId)
-  }, [taskId])
+  }, [taskId, taskStatus])
 
   useEffect(() => {
     if (!files.length) {
