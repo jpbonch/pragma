@@ -555,6 +555,8 @@ export function FeedView({
       const status = String(task.status).toLowerCase()
       if (isPlanTaskStatus(status)) {
         continue
+      } else if (task.background) {
+        continue
       } else if (isNeedsYou(status)) {
         needsYou.push(task)
       } else if (isDone(status)) {
