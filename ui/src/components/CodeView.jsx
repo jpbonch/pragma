@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { GitBranch, GitCommit, ArrowUpCircle, FolderGit2, Globe, Copy, FolderOpen, Upload, AlertCircle, Check } from 'lucide-react'
+import { WorkspaceTestingPane } from './WorkspaceTestingPane'
 
 function timeAgo(value) {
   if (typeof value !== 'string' || !value.trim()) return ''
@@ -32,6 +33,7 @@ export function CodeView({
   const [pushingFolder, setPushingFolder] = useState(null)
   const [pushError, setPushError] = useState('')
   const [pushSuccess, setPushSuccess] = useState('')
+  const [activeTab, setActiveTab] = useState('repositories')
 
   const folderItems = useMemo(() => {
     if (!Array.isArray(folders)) return []
@@ -127,10 +129,28 @@ export function CodeView({
       <div className="cv-header">
         <div className="cv-header-inner">
           <h1 className="cv-title">Code</h1>
-          <span className="cv-subtitle">{folderItems.length} {folderItems.length === 1 ? 'repository' : 'repositories'}</span>
+          <div className="cv-tab-bar">
+            <button
+              className={`cv-tab${activeTab === 'repositories' ? ' cv-tab-active' : ''}`}
+              onClick={() => setActiveTab('repositories')}
+            >
+              Repositories
+            </button>
+            <button
+              className={`cv-tab${activeTab === 'testing' ? ' cv-tab-active' : ''}`}
+              onClick={() => setActiveTab('testing')}
+            >
+              Testing
+            </button>
+          </div>
         </div>
       </div>
 
+      {activeTab === 'testing' ? (
+        <div className="cv-content" style={{ flex: 1 }}>
+          <WorkspaceTestingPane />
+        </div>
+      ) : (
       <div className="cv-content">
         {loading && (
           <div className="cv-loading">
@@ -315,6 +335,7 @@ export function CodeView({
           </>
         )}
       </div>
+      )}
     </section>
   )
 }
