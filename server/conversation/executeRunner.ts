@@ -700,6 +700,12 @@ WHERE id = $1
       selectionStatus,
     });
 
+    // Save worker session to the thread so future turns can resume
+    await updateThreadSession(db, {
+      threadId: input.threadId,
+      sessionId: workerResult.sessionId,
+    });
+
     await insertThreadMessage({
       id: assistantMessageId,
       threadId: input.threadId,
@@ -741,7 +747,8 @@ WHERE id = $1
       commitMessage: `pragma: task ${input.taskId} checkpoint`,
     });
 
-    await closeThread(db, input.threadId);
+    // Don't close — keep the thread open so it can be resumed.
+    // Only close on terminal states (failed/error path below).
 
     const statusResult = await db.query<{ status: TaskStatus }>(
       `

@@ -282,6 +282,7 @@ async function handleMergeConflictRetry(input: {
       prompt: string;
       requestedRecipientAgentId?: string;
       reasoningEffort: ReasoningEffort;
+      resumeWorkerSessionId?: string | null;
     }): void;
   };
   statusSource: string;
@@ -346,6 +347,7 @@ async function handleMergeConflictRetry(input: {
       latestExecuteTurn.reasoning_effort,
       `latest execute turn for conflict retry task ${taskId}`,
     ),
+    resumeWorkerSessionId: latestExecuteTurn.worker_session_id ?? null,
   });
 
   return {
