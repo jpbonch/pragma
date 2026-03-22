@@ -10,6 +10,12 @@ import {
   X,
   Timer,
   Zap,
+  Play,
+  Settings2,
+  Calendar,
+  ArrowRight,
+  MoreHorizontal,
+  RefreshCw,
 } from 'lucide-react'
 import {
   fetchAutomations,
@@ -300,8 +306,8 @@ function RunHistory({ automationId }) {
     return () => { cancelled = true }
   }, [automationId])
 
-  if (loading) return <div className="aut-runs-loading">Loading runs...</div>
-  if (error) return <div className="aut-runs-error">{error}</div>
+  if (loading) return <div className="aut-runs-loading"><RefreshCw size={12} className="aut-spin" /> Loading runs...</div>
+  if (error) return <div className="aut-runs-error"><AlertCircle size={12} /> {error}</div>
   if (runs.length === 0) return <div className="aut-runs-empty">No runs yet</div>
 
   return (
@@ -310,9 +316,9 @@ function RunHistory({ automationId }) {
         <div key={run.id || index} className="aut-run-row">
           <span className={`aut-run-status ${run.status === 'success' ? 'success' : 'error'}`}>
             {run.status === 'success' ? (
-              <CheckCircle2 size={12} />
+              <CheckCircle2 size={11} />
             ) : (
-              <AlertCircle size={12} />
+              <AlertCircle size={11} />
             )}
             {run.status}
           </span>
@@ -352,26 +358,40 @@ function EventLog() {
   return (
     <div className="aut-event-log">
       <div className="aut-event-log-header">
-        <h3 className="aut-section-heading">Event Log</h3>
         <input
           className="aut-input aut-event-filter"
           placeholder="Filter by event type..."
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
         />
+        <button
+          className="aut-event-refresh"
+          onClick={() => setTypeFilter(typeFilter)}
+          title="Refresh"
+        >
+          <RefreshCw size={13} />
+        </button>
       </div>
-      {loading && <div className="aut-runs-loading">Loading events...</div>}
-      {error && <div className="aut-runs-error">{error}</div>}
+      {loading && <div className="aut-runs-loading"><RefreshCw size={13} className="aut-spin" /> Loading events...</div>}
+      {error && <div className="aut-runs-error"><AlertCircle size={13} /> {error}</div>}
       {!loading && !error && events.length === 0 && (
-        <div className="aut-runs-empty">No events found</div>
+        <div className="aut-event-empty">
+          <Activity size={20} />
+          <p>No events found</p>
+        </div>
       )}
       {!loading && !error && events.length > 0 && (
         <div className="aut-event-list">
+          <div className="aut-event-list-header">
+            <span>Event</span>
+            <span>Task</span>
+            <span>Time</span>
+          </div>
           {events.map((event, index) => (
             <div key={event.id || index} className="aut-event-row">
               <span className="aut-event-type">{event.type || event.event_type}</span>
-              {event.task_id && <span className="aut-event-task">task: {event.task_id.slice(0, 8)}</span>}
-              <span className="aut-run-time">{timeAgo(event.created_at || event.timestamp)}</span>
+              <span className="aut-event-task">{event.task_id ? event.task_id.slice(0, 8) : '\u2014'}</span>
+              <span className="aut-event-time">{timeAgo(event.created_at || event.timestamp)}</span>
             </div>
           ))}
         </div>
@@ -526,7 +546,7 @@ export function AutomationsView() {
             </h2>
           </div>
 
-          {saveError && <div className="aut-error">{saveError}</div>}
+          {saveError && <div className="aut-error"><AlertCircle size={14} /> {saveError}</div>}
 
           <div className="aut-form">
             <label className="aut-field-label">Name</label>
@@ -534,82 +554,109 @@ export function AutomationsView() {
               ref={nameInputRef}
               className="aut-input"
               value={form.name}
-              placeholder="My automation"
+              placeholder="e.g. Notify on task failure"
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
 
-            <label className="aut-field-label">Trigger type</label>
-            <div className="aut-trigger-type-row">
-              <button
-                type="button"
-                className={`aut-trigger-type-btn ${form.trigger_type === 'event' ? 'active' : ''}`}
-                onClick={() => setForm({ ...form, trigger_type: 'event' })}
-              >
+            <div className="aut-form-section">
+              <div className="aut-form-section-header">
                 <Zap size={14} />
-                Event
-              </button>
-              <button
-                type="button"
-                className={`aut-trigger-type-btn ${form.trigger_type === 'schedule' ? 'active' : ''}`}
-                onClick={() => setForm({ ...form, trigger_type: 'schedule' })}
-              >
-                <Timer size={14} />
-                Schedule
-              </button>
+                <span>Trigger</span>
+              </div>
+              <div className="aut-form-section-body">
+                <label className="aut-field-label">Type</label>
+                <div className="aut-trigger-type-row">
+                  <button
+                    type="button"
+                    className={`aut-trigger-type-btn ${form.trigger_type === 'event' ? 'active' : ''}`}
+                    onClick={() => setForm({ ...form, trigger_type: 'event' })}
+                  >
+                    <Zap size={14} />
+                    Event
+                  </button>
+                  <button
+                    type="button"
+                    className={`aut-trigger-type-btn ${form.trigger_type === 'schedule' ? 'active' : ''}`}
+                    onClick={() => setForm({ ...form, trigger_type: 'schedule' })}
+                  >
+                    <Timer size={14} />
+                    Schedule
+                  </button>
+                </div>
+
+                {form.trigger_type === 'event' && (
+                  <>
+                    <label className="aut-field-label">Event</label>
+                    <select
+                      className="aut-select"
+                      value={form.trigger_event}
+                      onChange={(e) => setForm({ ...form, trigger_event: e.target.value })}
+                    >
+                      <option value="">Select event...</option>
+                      {TRIGGER_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {form.trigger_type === 'schedule' && (
+                  <ScheduleConfigForm
+                    cron={form.schedule_cron}
+                    timezone={form.schedule_timezone}
+                    onCronChange={(cron) => setForm({ ...form, schedule_cron: cron })}
+                    onTimezoneChange={(tz) => setForm({ ...form, schedule_timezone: tz })}
+                  />
+                )}
+              </div>
             </div>
 
-            {form.trigger_type === 'event' && (
-              <>
-                <label className="aut-field-label">Trigger event</label>
+            <div className="aut-form-section">
+              <div className="aut-form-section-header">
+                <Play size={14} />
+                <span>Action</span>
+              </div>
+              <div className="aut-form-section-body">
+                <label className="aut-field-label">Type</label>
                 <select
                   className="aut-select"
-                  value={form.trigger_event}
-                  onChange={(e) => setForm({ ...form, trigger_event: e.target.value })}
+                  value={form.action_type}
+                  onChange={(e) => setForm({ ...form, action_type: e.target.value, action_config: {} })}
                 >
-                  <option value="">Select event...</option>
-                  {TRIGGER_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
+                  {ACTION_TYPES.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
-              </>
-            )}
 
-            {form.trigger_type === 'schedule' && (
-              <ScheduleConfigForm
-                cron={form.schedule_cron}
-                timezone={form.schedule_timezone}
-                onCronChange={(cron) => setForm({ ...form, schedule_cron: cron })}
-                onTimezoneChange={(tz) => setForm({ ...form, schedule_timezone: tz })}
-              />
-            )}
+                <ActionConfigForm
+                  actionType={form.action_type}
+                  config={form.action_config}
+                  onChange={(config) => setForm({ ...form, action_config: config })}
+                  agents={agents}
+                />
+              </div>
+            </div>
 
-            <label className="aut-field-label">Action type</label>
-            <select
-              className="aut-select"
-              value={form.action_type}
-              onChange={(e) => setForm({ ...form, action_type: e.target.value, action_config: {} })}
-            >
-              {ACTION_TYPES.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-
-            <ActionConfigForm
-              actionType={form.action_type}
-              config={form.action_config}
-              onChange={(config) => setForm({ ...form, action_config: config })}
-              agents={agents}
-            />
-
-            <div className="aut-toggle-row">
-              <label className="aut-field-label" style={{ marginBottom: 0 }}>Enabled</label>
-              <button
-                className={`aut-toggle ${form.enabled ? 'on' : ''}`}
-                onClick={() => setForm({ ...form, enabled: !form.enabled })}
-                type="button"
-              >
-                <span className="aut-toggle-knob" />
-              </button>
+            <div className="aut-form-section">
+              <div className="aut-form-section-header">
+                <Settings2 size={14} />
+                <span>Settings</span>
+              </div>
+              <div className="aut-form-section-body">
+                <div className="aut-toggle-row">
+                  <div className="aut-toggle-label-group">
+                    <span className="aut-toggle-label">Enabled</span>
+                    <span className="aut-toggle-desc">Automation will run when trigger fires</span>
+                  </div>
+                  <button
+                    className={`aut-toggle ${form.enabled ? 'on' : ''}`}
+                    onClick={() => setForm({ ...form, enabled: !form.enabled })}
+                    type="button"
+                  >
+                    <span className="aut-toggle-knob" />
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="aut-form-actions">
@@ -617,7 +664,7 @@ export function AutomationsView() {
                 Cancel
               </button>
               <button className="aut-save-btn" onClick={handleSave} disabled={saveLoading}>
-                {saveLoading ? 'Saving...' : 'Save'}
+                {saveLoading ? 'Saving...' : (editing === 'new' ? 'Create Automation' : 'Save Changes')}
               </button>
             </div>
           </div>
@@ -627,11 +674,22 @@ export function AutomationsView() {
   }
 
   // List view
+  const actionLabel = (type) => ACTION_TYPES.find((a) => a.value === type)?.label || type
+
   return (
     <section className="aut-view">
       <div className="aut-main">
-        <div className="main-topbar">
-          <h1>Automations</h1>
+        <div className="aut-page-header">
+          <div className="aut-page-header-left">
+            <h1 className="aut-page-title">Automations</h1>
+            <p className="aut-page-desc">Trigger actions when events occur or on a schedule.</p>
+          </div>
+          {subTab === 'automations' && (
+            <button className="aut-new-btn" onClick={handleNew}>
+              <Plus size={14} />
+              New Automation
+            </button>
+          )}
         </div>
 
         <div className="aut-subtabs">
@@ -639,12 +697,14 @@ export function AutomationsView() {
             className={`aut-subtab ${subTab === 'automations' ? 'active' : ''}`}
             onClick={() => setSubTab('automations')}
           >
+            <Zap size={13} />
             Automations
           </button>
           <button
             className={`aut-subtab ${subTab === 'events' ? 'active' : ''}`}
             onClick={() => setSubTab('events')}
           >
+            <Activity size={13} />
             Event Log
           </button>
         </div>
@@ -653,23 +713,22 @@ export function AutomationsView() {
 
         {subTab === 'automations' && (
           <>
-            <div className="aut-toolbar">
-              <button className="aut-new-btn" onClick={handleNew}>
-                <Plus size={14} />
-                New Automation
-              </button>
-            </div>
-
-            {loading && <div className="aut-loading">Loading automations...</div>}
-            {error && <div className="aut-error">{error}</div>}
+            {loading && <div className="aut-loading"><RefreshCw size={14} className="aut-spin" /> Loading automations...</div>}
+            {error && <div className="aut-error"><AlertCircle size={14} /> {error}</div>}
 
             {!loading && !error && automations.length === 0 && (
               <div className="aut-empty">
-                <p>No automations yet.</p>
+                <div className="aut-empty-icon">
+                  <Zap size={28} />
+                </div>
+                <h3 className="aut-empty-title">No automations yet</h3>
                 <p className="aut-empty-hint">
-                  Automations let you trigger actions (webhooks, task creation, logging)
-                  when events occur or on a timed schedule.
+                  Automate workflows by triggering webhooks, creating tasks, or running agents when events happen or on a schedule.
                 </p>
+                <button className="aut-empty-cta" onClick={handleNew}>
+                  <Plus size={14} />
+                  Create your first automation
+                </button>
               </div>
             )}
 
@@ -677,9 +736,13 @@ export function AutomationsView() {
               <div className="aut-list">
                 {automations.map((automation) => {
                   const isSchedule = automation.triggerType === 'schedule'
+                  const disabled = automation.enabled === false
                   return (
-                    <div key={automation.id} className="aut-card">
+                    <div key={automation.id} className={`aut-card ${disabled ? 'aut-card--disabled' : ''}`}>
                       <div className="aut-card-main" onClick={() => handleEdit(automation)}>
+                        <div className={`aut-card-icon ${isSchedule ? 'aut-card-icon--schedule' : 'aut-card-icon--event'}`}>
+                          {isSchedule ? <Calendar size={16} /> : <Zap size={16} />}
+                        </div>
                         <div className="aut-card-left">
                           <div className="aut-card-name">{automation.name}</div>
                           <div className="aut-card-meta">
@@ -693,9 +756,9 @@ export function AutomationsView() {
                                 {automation.trigger?.eventType || automation.trigger_event}
                               </span>
                             )}
-                            <span className="aut-card-arrow">&rarr;</span>
-                            <span className="aut-card-action">
-                              {automation.action?.type || automation.action_type}
+                            <ArrowRight size={10} className="aut-card-arrow-icon" />
+                            <span className="aut-card-action-badge">
+                              {actionLabel(automation.action?.type || automation.action_type)}
                             </span>
                           </div>
                         </div>
@@ -707,10 +770,14 @@ export function AutomationsView() {
                               ) : (
                                 <AlertCircle size={12} />
                               )}
+                              {automation.last_run_status}
                             </span>
                           )}
                           {typeof automation.run_count === 'number' && (
-                            <span className="aut-card-count">{automation.run_count} runs</span>
+                            <span className="aut-card-count">
+                              <Activity size={10} />
+                              {automation.run_count}
+                            </span>
                           )}
                           <button
                             className={`aut-toggle ${automation.enabled ? 'on' : ''}`}
@@ -747,13 +814,13 @@ export function AutomationsView() {
                         </div>
                       </div>
 
-                      <div className="aut-card-expand">
+                      <div className="aut-card-footer">
                         <button
                           className="aut-runs-toggle"
                           onClick={() => setExpandedRunsId(expandedRunsId === automation.id ? '' : automation.id)}
                         >
-                          <Activity size={12} />
-                          {expandedRunsId === automation.id ? 'Hide runs' : 'Show runs'}
+                          <Activity size={11} />
+                          {expandedRunsId === automation.id ? 'Hide run history' : 'Run history'}
                         </button>
                       </div>
 
