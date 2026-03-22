@@ -307,8 +307,9 @@ export function OutputPanel({
     try {
       const data = await fetchTaskOutputFiles(targetTaskId)
       const nextFiles = Array.isArray(data.files) ? data.files : []
-      setFiles(nextFiles)
-      onFilesLoaded?.(nextFiles.length > 0)
+      const visibleFiles = nextFiles.filter((f) => f.path !== 'preview.html')
+      setFiles(visibleFiles)
+      onFilesLoaded?.(visibleFiles.length > 0)
       // Check for preview.html
       const foundPreview = nextFiles.some((f) => f.path === 'preview.html')
       setHasPreviewHtml(foundPreview)

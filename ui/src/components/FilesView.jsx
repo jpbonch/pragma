@@ -75,7 +75,7 @@ export function FilesView() {
     try {
       const data = await fetchWorkspaceOutputFiles()
       const nextFiles = Array.isArray(data.files) ? data.files : []
-      setFiles(nextFiles)
+      setFiles(nextFiles.filter((f) => !f.path.endsWith('/preview.html') && f.path !== 'preview.html'))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setFiles([])
