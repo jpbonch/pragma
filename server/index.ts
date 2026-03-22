@@ -238,7 +238,7 @@ async function completeChainTasks(
     );
     emitTaskStatus(workspaceName, chainId, "completed", source, undefined, { assigned_to: taskRow.rows[0]?.assigned_to ?? null });
     executeRunner.abort(chainId);
-    killTaskServices(workspaceName, chainId);
+    await killTaskServices(workspaceName, chainId);
     await deleteTaskWorktree({ workspacePaths, taskId: chainId });
   }
 }
@@ -750,13 +750,19 @@ function stopRuntimeService(service: RuntimeServiceRecord): void {
   }, 5000);
 }
 
-function killTaskServices(workspaceName: string, taskId: string): void {
+async function killTaskServices(workspaceName: string, taskId: string): Promise<void> {
   const store = getWorkspaceServiceStore(workspaceName);
   for (const service of store.values()) {
     if (service.task_id === taskId) {
       stopRuntimeService(service);
     }
   }
+
+  const db = await openDatabase(workspaceName);
+  await db.query(
+    `UPDATE task_services SET status = 'stopped' WHERE task_id = $1 AND status = 'running'`,
+    [taskId],
+  );
 }
 
 async function recoverOrphanedTasks(): Promise<void> {
@@ -1761,7 +1767,7 @@ WHERE id = $1
       );
       emitTaskStatus(workspaceName, taskId, nextStatus, "review_mark_completed", undefined, { assigned_to: task.assigned_to ?? null });
       executeRunner.abort(taskId);
-      killTaskServices(workspaceName, taskId);
+      await killTaskServices(workspaceName, taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
 
       return c.json({
@@ -1839,7 +1845,7 @@ WHERE id = $1
 
         for (const chainId of chainTaskIds) {
           executeRunner.abort(chainId);
-          killTaskServices(workspaceName, chainId);
+          await killTaskServices(workspaceName, chainId);
           await deleteTaskWorktree({ workspacePaths, taskId: chainId });
         }
 
@@ -1897,7 +1903,7 @@ WHERE id = $1
       );
       emitTaskStatus(workspaceName, taskId, nextStatus, "review_action", undefined, { assigned_to: task.assigned_to ?? null });
       executeRunner.abort(taskId);
-      killTaskServices(workspaceName, taskId);
+      await killTaskServices(workspaceName, taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
       return c.json({ ok: true, status: nextStatus, merge_state: "no_changes", conflicts: [] });
     }
@@ -1926,7 +1932,7 @@ WHERE id = $1
       emitTaskStatus(workspaceName, taskId, nextStatus, "review_action", undefined, { assigned_to: task.assigned_to ?? null });
       await saveDiffSnapshot({ db, workspacePaths, taskId, gitState });
       executeRunner.abort(taskId);
-      killTaskServices(workspaceName, taskId);
+      await killTaskServices(workspaceName, taskId);
       await deleteTaskWorktree({ workspacePaths, taskId });
 
       if (pushAfterMerge) {
@@ -2014,7 +2020,7 @@ WHERE id = $1
     emitTaskStatus(workspaceName, taskId, "cancelled", "task_deleted");
 
     executeRunner.abort(taskId);
-    killTaskServices(workspaceName, taskId);
+    await killTaskServices(workspaceName, taskId);
     await deleteTaskWorktree({ workspacePaths, taskId });
     await rm(getTaskMainOutputDir(workspacePaths, taskId), { recursive: true, force: true });
 
@@ -2617,6 +2623,7 @@ WHERE id = $1
     }
 
     executeRunner.abort(taskId);
+    await killTaskServices(workspaceName, taskId);
 
     const thread = await getThreadByTaskId(db, taskId);
 
@@ -3384,7 +3391,7 @@ WHERE id = $1
         emitTaskStatus(workspaceName, thread.task_id, "cancelled", "plan_deleted");
 
         executeRunner.abort(thread.task_id);
-        killTaskServices(workspaceName, thread.task_id);
+        await killTaskServices(workspaceName, thread.task_id);
         const workspacePaths = getWorkspacePaths(workspaceName);
         await deleteTaskWorktree({ workspacePaths, taskId: thread.task_id });
       }
