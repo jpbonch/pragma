@@ -207,6 +207,9 @@ export function OutputPanel({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
 
+  const [hasPreviewHtml, setHasPreviewHtml] = useState(false)
+  const previewHtmlUrl = taskId ? taskOutputContentUrl(taskId, 'preview.html') : ''
+
   useEffect(() => {
     if (!taskId) return
     void loadChanges(taskId)
@@ -306,6 +309,13 @@ export function OutputPanel({
       const nextFiles = Array.isArray(data.files) ? data.files : []
       setFiles(nextFiles)
       onFilesLoaded?.(nextFiles.length > 0)
+      // Check for preview.html
+      const foundPreview = nextFiles.some((f) => f.path === 'preview.html')
+      setHasPreviewHtml(foundPreview)
+      // Auto-switch to Preview tab when preview.html appears
+      if (foundPreview) {
+        setTab('preview')
+      }
     } catch (error) {
       setFilesError(error instanceof Error ? error.message : String(error))
       setFiles([])
@@ -352,6 +362,14 @@ export function OutputPanel({
         >
           Plan
         </button>
+        {hasPreviewHtml && (
+          <button
+            className={`output-tab-btn ${tab === 'preview' ? 'active' : ''}`}
+            onClick={() => setTab('preview')}
+          >
+            Preview
+          </button>
+        )}
       </div>
 
       {tab === 'changes' && (
@@ -492,6 +510,17 @@ export function OutputPanel({
           {!planLoading && !planError && !planData && (
             <div className="muted">No plan yet.</div>
           )}
+        </div>
+      )}
+
+      {tab === 'preview' && (
+        <div className="output-tab-body output-preview-body">
+          <iframe
+            className="output-preview-iframe"
+            src={previewHtmlUrl}
+            title="Task Preview"
+            style={{ width: '100%', height: '100%', border: 'none' }}
+          />
         </div>
       )}
 

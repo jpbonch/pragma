@@ -48,6 +48,7 @@ type EnqueueExecuteInput = {
   resumeWorkerSessionId?: string | null;
   followUpMessage?: string | null;
   isStartServiceRetry?: boolean;
+  isPreviewRetry?: boolean;
 };
 
 async function killTaskServicePids(
@@ -802,7 +803,7 @@ LIMIT 1
       } else {
         // Post-completion gate: if agent made code changes but didn't start any services,
         // re-run once to prompt it to start services for the reviewer.
-        if (!input.isStartServiceRetry) {
+        if (!input.isStartServiceRetry && !input.isPreviewRetry) {
           const repoDiffs = await buildRepoDiffEntries({
             workspacePaths: paths,
             taskId: input.taskId,
@@ -811,6 +812,7 @@ LIMIT 1
           const hasCodeChanges = repoDiffs.some((entry) => entry.diff.trim().length > 0);
 
           if (hasCodeChanges) {
+            // --- start-service check ---
             const servicesResult = await db.query<{ id: string }>(
               `SELECT id FROM task_services WHERE task_id = $1 LIMIT 1`,
               [input.taskId],
@@ -830,7 +832,6 @@ pragma-so task start-service --name "frontend" --command "npm run dev -- --port 
 
 Start all services needed to interact with your changes, then finish.`;
 
-              // Re-open thread and re-run the worker with the follow-up message
               await reopenThread(db, input.threadId);
 
               runExecuteTask(
@@ -851,7 +852,48 @@ Start all services needed to interact with your changes, then finish.`;
                 console.error(`Start-service retry failed: ${msg}`);
               });
 
-              // Return early — the retry will handle setting pending_review
+              return;
+            }
+
+            // --- preview.html check ---
+            const previewPath = join(outputDir, "preview.html");
+            let hasPreview = false;
+            try {
+              await import("fs/promises").then((fs) => fs.access(previewPath));
+              hasPreview = true;
+            } catch {
+              hasPreview = false;
+            }
+
+            if (!hasPreview) {
+              const previewMessage = `You made code changes but did not create a preview.html file. Create outputs/$PRAGMA_TASK_ID/preview.html so the reviewer can interact with your work in the review UI.
+
+- If you started a web app service: create an HTML page with a full-viewport <iframe> pointing at the service URL. Use style="width:100%;height:100vh;border:none;".
+- If you built an API: create an HTML page with forms/buttons to test each endpoint, with a response display area.
+- If you generated static output: bundle it as self-contained HTML.
+
+This file is required. Create it now and then finish.`;
+
+              await reopenThread(db, input.threadId);
+
+              runExecuteTask(
+                {
+                  workspaceName: input.workspaceName,
+                  taskId: input.taskId,
+                  threadId: input.threadId,
+                  prompt: task,
+                  requestedRecipientAgentId: selectedWorker.id,
+                  reasoningEffort: input.reasoningEffort,
+                  resumeWorkerSessionId: workerResult.sessionId,
+                  followUpMessage: previewMessage,
+                  isPreviewRetry: true,
+                },
+                options,
+              ).catch((err: unknown) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                console.error(`Preview retry failed: ${msg}`);
+              });
+
               return;
             }
           }
