@@ -596,7 +596,6 @@ export function ConnectionsView() {
                         <div className="cn-agent-card-skills">
                           {(assignedSkills.length > 0 || assignedConns.length > 0) && (
                             <div className="cn-agent-skills-section">
-                              <span className="cn-agent-skills-section-label">Pragma</span>
                               {assignedSkills.map((skill) => (
                                 <span key={skill.id} className="cn-agent-skill-item">
                                   <span className="cn-agent-skill-dot" />
@@ -611,8 +610,8 @@ export function ConnectionsView() {
                                 </span>
                               ))}
                               {assignedConns.map((conn) => (
-                                <span key={conn.id} className="cn-agent-skill-item cn-agent-skill-item--connector">
-                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--connector" />
+                                <span key={conn.id} className="cn-agent-skill-item">
+                                  <span className="cn-agent-skill-dot" />
                                   <span className="cn-agent-skill-name">{conn.name}</span>
                                   <button
                                     className="cn-agent-skill-remove"
@@ -676,14 +675,14 @@ export function ConnectionsView() {
                             <div className="cn-agent-skills-section">
                               <span className="cn-agent-skills-section-label">{harnessLabel ? `${harnessLabel} Skills` : 'Runtime Skills'}</span>
                               {agentGlobalSkills.map((skill) => (
-                                <span key={`global-${skill.name}`} className="cn-agent-skill-item cn-agent-skill-item--global">
-                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--global" />
+                                <span key={`global-${skill.name}`} className="cn-agent-skill-item">
+                                  <span className="cn-agent-skill-dot" />
                                   <span className="cn-agent-skill-name">{skill.name}</span>
                                 </span>
                               ))}
                               {agentMcpServers.map((server) => (
-                                <span key={`mcp-${server.name}`} className="cn-agent-skill-item cn-agent-skill-item--mcp">
-                                  <span className="cn-agent-skill-dot cn-agent-skill-dot--mcp" />
+                                <span key={`mcp-${server.name}`} className="cn-agent-skill-item">
+                                  <span className="cn-agent-skill-dot" />
                                   <span className="cn-agent-skill-name">{server.name}</span>
                                 </span>
                               ))}
